@@ -4,12 +4,23 @@ thermal infrared radiative transfer (TiRT) model
 
 # 典型植被热红外辐射传输建模
 
->**适用场景**：均质植被、垄行作物和离散森林
+>**适用场景**：均质植被、垄行作物和离散森林，植被+城市，植被+地形
 
->**建模层次**：物理模型、半物理模型和半经验模型
+>**建模层次**：物理模型、半物理模型
 
->**建模策略**：体素模型、解析模型和核驱动模型
+>**建模策略**：体素模型、解析模型
 
+# 改动如下：
+1. 去除了核驱动建模部分，完全正向辐射传输模型；
+2. 城市代码整合：完成；
+   考虑城市建筑异质性模型：tirt_urban;
+   考虑城市建筑异质性与街道植被模型：tirt_urbanveg;
+3. 山地代码整合：完成；
+   考虑单一坡地形与植被模型：tirt_slope;
+   考虑复合坡地形与植被模型：tirt_terrain;
+
+地形和城市模型请参考专著：
+《复杂地表热红外遥感模型：理论与方法》，作者：卞尊健,肖青,柳钦火
 
 使用说明:
 
@@ -57,6 +68,9 @@ plt.show()
 -Email contact: bianzj@aircas.ac.cn
 
 These codes are corresponding to papars as follows and other paper can be found in the reference in these papers:
+
+
+
 
 **Physical**
 
