@@ -79,10 +79,14 @@ thermal,street_sunlit_c,45,sunlit street temperature C
 thermal,street_shaded_c,30,shaded street temperature C
 ,,,
 [geometry],,,
-geometry,geometry_source,direct,direct=lists; file=read geometry_file
+geometry,geometry_mode,0,0=given vza/vaa lists; 1=solar principal and perpendicular planes; 2=read geometry_file TXT
+geometry,geometry_source,direct,legacy alias when geometry_mode is omitted: direct or file
 geometry,geometry_file,data/directions/observation_directions.txt,vza vaa or vza vaa sza saa per line
 geometry,vza,0;10;20;30;40;50;60,view zenith degrees
 geometry,vaa,0,view azimuth degrees
 geometry,sza,30,solar zenith degrees
 geometry,saa,0,solar azimuth degrees
 geometry,geometry_pair_mode,cross,cross=cartesian product; zip=pair lists by row
+geometry,principal_vza,0;10;20;30;40;50;60;70;80,mode 1 view zenith degrees
+geometry,principal_vza_step,10,mode 1 generated view zenith interval degrees when principal_vza is empty
+geometry,principal_vza_max,80,mode 1 generated maximum view zenith degrees

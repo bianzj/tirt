@@ -60,11 +60,42 @@ def _geometry(config, input_path):
     sza_values = numbers(value(config, "sza", "solar_zenith"), (30.0,))
     saa_values = numbers(value(config, "saa", "solar_azimuth"), (0.0,))
     sza_default, saa_default = sza_values[0], saa_values[0]
-    source = str(value(config, "geometry_source", "direction_source", default="direct")).strip().lower()
-    if source in {"file", "txt", "read"}:
+    raw_mode = value(config, "geometry_mode", "observation_mode", "direction_mode")
+    if raw_mode not in (None, ""):
+        try:
+            mode = int(float(raw_mode))
+        except ValueError as exc:
+            raise ValueError("geometry_mode 必须是 0、1 或 2") from exc
+        if mode not in {0, 1, 2}:
+            raise ValueError("geometry_mode 必须是 0、1 或 2")
+    else:
+        source = str(value(config, "geometry_source", "direction_source", default="direct")).strip().lower()
+        mode = 2 if source in {"file", "txt", "read"} else 0
+
+    if mode == 2:
         path = resolve_path(input_path, value(config, "geometry_file", "directions_file", default="geometry.txt"))
         vza, vaa, sza, saa = read_geometry(path, sza_default, saa_default)
         return list(zip(vza, vaa, sza, saa))
+
+    if mode == 1:
+        raw_vza = value(config, "principal_vza", "principal_plane_vza")
+        if raw_vza not in (None, ""):
+            principal_vza = numbers(raw_vza)
+        else:
+            step = _float(config, "principal_vza_step", default=10.0)
+            maximum = _float(config, "principal_vza_max", default=80.0)
+            if step <= 0.0 or maximum < 0.0:
+                raise ValueError("principal_vza_step 必须大于 0，principal_vza_max 不能小于 0")
+            principal_vza = tuple(np.arange(0.0, maximum + 0.5 * step, step))
+        if not principal_vza or any(angle < 0.0 or angle > 90.0 for angle in principal_vza):
+            raise ValueError("principal_vza 必须位于 0 到 90 度之间")
+        return [
+            (view_zenith, (solar_azimuth + relative_azimuth) % 360.0, solar_zenith, solar_azimuth)
+            for solar_zenith in sza_values
+            for solar_azimuth in saa_values
+            for relative_azimuth in (0.0, 90.0, 180.0, 270.0)
+            for view_zenith in principal_vza
+        ]
 
     vza = numbers(value(config, "vza", "observation_vza"), (0.0, 30.0, 60.0))
     vaa = numbers(value(config, "vaa", "observation_vaa"), (0.0, 90.0, 180.0))

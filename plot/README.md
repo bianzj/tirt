@@ -16,3 +16,5 @@ python -m plot.run_plot --input cases/file_geometry_spectrum/output.csv --mode a
 ```
 
 Images are written to `cases/<case>/plots/` by default. The default plotted quantity is `brightness_temperature_C`; use `--quantity brightness_temperature_K`, `--quantity radiance`, or any numeric output column.
+
+The observation geometry is selected in `[geometry]` with `geometry_mode`: `0` uses the given angle lists, `1` generates the solar principal and perpendicular planes, and `2` reads a TXT direction file. The project includes `data/directions/hemisphere_directions.txt` with 30-degree azimuth and 10-degree zenith spacing.

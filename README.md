@@ -36,11 +36,18 @@ python run.py --input input.csv --output cases/row_demo/output.csv --model row
 - `[terrain]`、`[urban]`：配置地形层和建筑形状，可用分号提供多个高度、半径、密度或建筑参数。
 - `[spectral]`、`[urban_spectrum]`：配置热红外高光谱波段，以及叶片、土壤、屋顶、墙壁和街道发射率；每组常数发射率的数量必须与 `wavelengths` 数量一致。
 - `[thermal]`：配置土壤、叶片、地形、屋顶、墙壁和街道的日照/阴影温度。
-- `[geometry]`：可直接填写角度列表，也可使用 `geometry_source=file` 读取文件。
+- `[geometry]`：通过 `geometry_mode` 选择观测角度来源：`0` 为 `vza/vaa` 给定角度，`1` 自动生成太阳主平面和垂直太阳主平面，`2` 从 TXT 文件读取；未设置 `geometry_mode` 时兼容旧的 `geometry_source`。
 
 这里的光谱是热红外高光谱，不是可见光/近红外反射率。光谱文件支持：叶片文件为 `wavelength leaf_emissivity`，土壤文件为 `wavelength soil_emissivity`，建筑文件为 `wavelength roof_emissivity wall_emissivity street_emissivity`；也兼容 `tirteb` 的 7 列建筑文件，读取其中最后三列发射率。文件中的波段会插值到 `wavelengths`。
 
-几何文件每行支持 `vza vaa`，也支持 `vza vaa sza saa`；角度单位为度，注释行以 `#` 开头。
+几何文件每行支持 `vza vaa`，也支持 `vza vaa sza saa`；角度单位为度，注释行以 `#` 开头。模式 1 使用相对太阳方位角 `0/90/180/270`，可通过 `principal_vza` 或 `principal_vza_step`、`principal_vza_max` 设置天顶角。
+
+项目提供了半球观测方向文件 `data/directions/hemisphere_directions.txt`：方位角间隔 30°、天顶角间隔 10°，覆盖 0° 到 90° 天顶角。使用该文件时设置：
+
+```text
+geometry,geometry_mode,2,read TXT directions
+geometry,geometry_file,data/directions/hemisphere_directions.txt,hemisphere directions
+```
 
 ## 适用场景
 
