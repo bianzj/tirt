@@ -1,94 +1,193 @@
-# TiRT 
-thermal infrared radiative transfer (TiRT) model
+# TiRT
 
+Thermal infrared radiative transfer model for vegetation, terrain, urban surfaces, and coupled scenes.
 
-# 典型植被热红外辐射传输建模
+TiRT 用于典型复杂地表热红外方向性辐射传输建模，可计算不同观测角度下的方向亮温、辐射亮度和有效发射率。
 
->**适用场景**：均质植被、垄行作物和离散森林，植被+城市，植被+地形
+## 适用场景
 
->**建模层次**：物理模型、半物理模型
+- 均质植被
+- 垄行作物
+- 离散树冠
+- 坡面植被
+- 复杂地形
+- 城市建筑
+- 城市建筑与街道植被耦合场景
 
->**建模策略**：体素模型、解析模型
+## 目录结构
 
-# 改动如下：
-1. 去除了核驱动建模部分，完全正向辐射传输模型；
-2. 城市代码整合：完成；
-   考虑城市建筑异质性模型：tirt_urban;
-   考虑城市建筑异质性与街道植被模型：tirt_urbanveg;
-3. 山地代码整合：完成；
-   考虑单一坡地形与植被模型：tirt_slope;
-   考虑复合坡地形与植被模型：tirt_terrain;
-
-地形和城市模型请参考专著：
-《复杂地表热红外遥感模型：理论与方法》，作者：卞尊健,肖青,柳钦火
-
-使用说明:
-
-physical,semi-physical 和semi-empirical 目录下分别有均质植被、垄行作物和离散森林的使用案例
-
-
-0. 调用方法
-```
-from physical.hom_voxel import *
-from semiphysical.hom import *
-from hotspot import *
-from matplotlib import pyplot as plt
+```text
+tirt/
+├── rt/                  # 核心辐射传输模型
+├── base/                # 绘图、数据和通用工具
+├── tirt_veg/            # 植被解析模型示例
+├── tirt_vegvoxel/       # 植被体素模型示例
+├── tirt_slopeveg/       # 坡面植被模型示例
+├── tirt_terrain/        # 地形模型示例
+├── tirt_terrainveg/     # 地形-植被耦合模型示例
+├── tirt_urban/          # 城市模型示例
+├── tirt_urbanveg/       # 城市-植被耦合模型示例
+└── old/                 # 历史代码
 ```
 
-1. 设置输入
+## 环境安装
+
+建议使用 Python 3.10+。
+
+```powershell
+cd C:\work\tirt
+py -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
 ```
+
+如果 `GDAL` 安装失败，可先安装核心依赖运行主要模型：
+
+```powershell
+pip install numpy scipy matplotlib pandas scikit-learn seaborn xlrd opencv-python netCDF4 pysolar
+```
+
+## VS Code 使用
+
+用 VS Code 打开项目根目录：
+
+```powershell
+code C:\work\tirt
+```
+
+选择 Python 解释器：
+
+```text
+Ctrl+Shift+P
+Python: Select Interpreter
+```
+
+选择已安装依赖的 Python 或 conda 环境。
+
+项目已提供 `.vscode/settings.json` 和 `.vscode/launch.json`，会自动把项目根目录和上一级目录加入 `PYTHONPATH`。这样从子目录运行脚本时也能找到：
+
+```python
+from rt.xxx import *
+from base.xxx import *
+```
+
+如果仍出现 `ModuleNotFoundError: No module named 'rt'`，请重启 VS Code 终端，或在终端手动设置：
+
+```powershell
+$env:PYTHONPATH="C:\work\tirt;C:\work"
+```
+
+## 运行示例
+
+```powershell
+python .\tirt_veg\run_tirt_veg.py
+python .\tirt_vegvoxel\run_tirt_vegvoxel.py
+python .\tirt_slopeveg\run_tirt_slopeveg.py
+python .\tirt_terrain\run_tirt_terrain.py
+python .\tirt_terrainveg\run_tirt_terrain_veg.py
+python .\tirt_urban\run_tirt_urban_bt.py
+python .\tirt_urbanveg\run_tirt_urbanveg_bt_polar.py
+```
+
+## 基本用法
+
+```python
+import numpy as np
+from rt.hom import Hom
+
 lai = 0.5
 hspot = 0.15
 wavelength = 10.5
 emissivity_leaf = 0.985
 emissivity_soil = 0.955
+
 temperature_leaf_sunlit = 303
 temperature_leaf_shaded = 300
 temperature_soil_sunlit = 320
 temperature_soil_shaded = 305
+
 sza = 25
-vza = np.hstack([np.linspace(50,1,50),np.linspace(0,50,51)])
+vza = np.hstack([np.linspace(50, 1, 50), np.linspace(0, 50, 51)])
+raa = np.zeros_like(vza)
+
+hom = Hom()
+hom.set_structure(lai, hspot)
+hom.set_optical(wavelength, emissivity_soil, emissivity_leaf)
+hom.set_thermal(
+    temperature_soil_sunlit,
+    temperature_soil_shaded,
+    temperature_leaf_sunlit,
+    temperature_leaf_shaded,
+)
+hom.set_angle(vza, sza, raa)
+
+brightness_temperature = hom.run()
 ```
-2. 调用类/函数
+
+## 核心模型
+
+- `Hom`: 均质植被解析模型
+- `Row`: 垄行作物解析模型
+- `Crown`: 离散树冠解析模型
+- `Hom_Voxel`: 均质植被体素模型
+- `Row_Voxel`: 垄行作物体素模型
+- `Crown_Voxel`: 离散树冠体素模型
+- `Slope_Veg`: 坡面植被模型
+- `Terrain`: 地形模型
+- `Terrain_Veg`: 地形-植被耦合模型
+- `Urban`: 城市建筑模型
+- `Urban_Veg`: 城市-植被耦合模型
+
+## 常见问题
+
+### No module named 'rt'
+
+原因是 Python 搜索路径没有包含项目根目录。请从 `C:\work\tirt` 运行，或设置：
+
+```powershell
+$env:PYTHONPATH="C:\work\tirt;C:\work"
 ```
-hom_voxel = Hom_Voxel()
-hom_voxel.set_structure(lai, hspot,100)
-hom_voxel.set_optical(wavelength, emissivity_soil, emissivity_leaf)
-hom_voxel.set_thermal(temperature_soil_sunlit, temperature_soil_shaded, temperature_leaf_sunlit, temperature_leaf_shaded)
-hom_voxel.set_angle(vza, sza, raa)
-BT_voxel = hom_voxel.run()
-```
-3. 显示结果
-```
-plt.plot(BT_voxel)
-plt.show()
+
+### No module named 'scipy'
+
+当前环境没有安装依赖：
+
+```powershell
+pip install -r requirements.txt
 ```
 
+### planck() missing argument
 
--Email contact: bianzj@aircas.ac.cn
+新版 `planck` 已兼容两种写法：
 
-These codes are corresponding to papars as follows and other paper can be found in the reference in these papers:
+```python
+planck(temperature)
+planck(wavelength, temperature)
+```
 
+建议新代码优先显式传入波长：
 
+```python
+planck(10.5, temperature)
+```
 
+## 参考文献
 
-**Physical**
+### Physical
 
-1. Zunjian Bian, Shengbiao Wu, Jean-Louis Roujean, Biao Cao1, Hua Li, Gaofei Yin, Yongming Du, Qing Xiao, Qinhuo Liu,
-A TIR forest reflectance and transmittance (FRT) model for directional temperatures with structural and thermal stratification, Remote Sensing of Environment, 202* 
-2. Zunjian Bian, Biao Cao, Hua Li, Yongming Du, Wenjie Fan, Qing Xiao, Qinhuo Liu,
-The Effects of Tree Trunks on the Directional Emissivity and Brightness Temperatures of a Leaf-Off Forest Using a Geometric Optical Model, IEEE Transactions on Geoscience and Remote Sensing, 2020a: 1-17
+1. Zunjian Bian, Shengbiao Wu, Jean-Louis Roujean, Biao Cao, Hua Li, Gaofei Yin, Yongming Du, Qing Xiao, Qinhuo Liu. A TIR forest reflectance and transmittance (FRT) model for directional temperatures with structural and thermal stratification. Remote Sensing of Environment.
+2. Zunjian Bian, Biao Cao, Hua Li, Yongming Du, Wenjie Fan, Qing Xiao, Qinhuo Liu. The Effects of Tree Trunks on the Directional Emissivity and Brightness Temperatures of a Leaf-Off Forest Using a Geometric Optical Model. IEEE Transactions on Geoscience and Remote Sensing, 2020.
 
-**Semi-physical**
+### Semi-Physical
 
-3. Zunjian Bian, Biao Cao, Hua Li, Yongming Du, Jean-Pierre Lagouarde, Qing Xiao,Qinhuo Liu, 
-An Analytical Four-component Directional Brightness Temperature Model for Crop and Forest Canopies, Remote Sensing of Environment, 2018, 209(731-746)
-4. Zunjian Bian, Qing Xiao, Biao Cao, Yongming Du, Hua Li, Heshun Wang, Qiang Liu,Qinhuo Liu,
-Retrieval of Leaf, Sunlit Soil, and Shaded Soil Component Temperatures Using Airborne Thermal Infrared Multiangle Observations, IEEE Transactions on Geoscience and Remote Sensing, 2016, 54(8): 4660-4671
+3. Zunjian Bian, Biao Cao, Hua Li, Yongming Du, Jean-Pierre Lagouarde, Qing Xiao, Qinhuo Liu. An Analytical Four-component Directional Brightness Temperature Model for Crop and Forest Canopies. Remote Sensing of Environment, 2018.
+4. Zunjian Bian, Qing Xiao, Biao Cao, Yongming Du, Hua Li, Heshun Wang, Qiang Liu, Qinhuo Liu. Retrieval of Leaf, Sunlit Soil, and Shaded Soil Component Temperatures Using Airborne Thermal Infrared Multiangle Observations. IEEE Transactions on Geoscience and Remote Sensing, 2016.
 
-**Semi-empirical**
+### Semi-Empirical
 
-5. Zunjian Bian, J. L. Roujean, J. P. Lagouarde, Biao Cao, Hua Li, Yongming Du, Qiang Liu, Qing Xiao,Qinhuo Liu, 
-A semi-empirical approach for modeling the vegetation thermal infrared directional anisotropy of canopies based on using vegetation indices, ISPRS Journal of Photogrammetry and Remote Sensing, 2020, 160(136-148)
-6. Zunjian Bian, Jean-Louis Roujean, Biao Cao, Yongming Du, Hua Li, Philippe Gamet, Junyong Fang, Qing Xiao,Qinhuo Liu,
-Modeling the directional anisotropy of fine-scale TIR emissions over tree and crop canopies based on UAV measurements, Remote Sensing of Environment, 2021, 252(112150)
+5. Zunjian Bian, J. L. Roujean, J. P. Lagouarde, Biao Cao, Hua Li, Yongming Du, Qiang Liu, Qing Xiao, Qinhuo Liu. A semi-empirical approach for modeling the vegetation thermal infrared directional anisotropy of canopies based on using vegetation indices. ISPRS Journal of Photogrammetry and Remote Sensing, 2020.
+6. Zunjian Bian, Jean-Louis Roujean, Biao Cao, Yongming Du, Hua Li, Philippe Gamet, Junyong Fang, Qing Xiao, Qinhuo Liu. Modeling the directional anisotropy of fine-scale TIR emissions over tree and crop canopies based on UAV measurements. Remote Sensing of Environment, 2021.
+
+## 联系方式
+
+Email: bianzj@aircas.ac.cn
