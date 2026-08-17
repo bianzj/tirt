@@ -908,6 +908,10 @@ class Urban_Veg:
     def set_strcutural_input(self,shapes):
         self.shapes = shapes
         self.n_shape, self.n_dim = np.shape(shapes)
+
+    def set_structural_input(self, shapes):
+        return self.set_strcutural_input(shapes)
+
     def set_thermal_input(self,Trs,Trh,Tws,Twh,Tss,Tsh):
         self.Troof_sunlit = Trs
         self.Troof_shaded = Trh

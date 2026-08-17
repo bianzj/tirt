@@ -5,6 +5,7 @@
 #####################################################
 
 import numpy as np
+import numpy
 from rt.hotspot import *
 from rt.gap import *
 from rt.scatter import *

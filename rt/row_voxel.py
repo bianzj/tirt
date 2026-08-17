@@ -1,4 +1,5 @@
 import numpy as np
+import numpy
 from rt.hotspot import *
 from rt.gap import *
 from rt.scatter import *
@@ -123,7 +124,7 @@ class Row_Voxel():
 
         Ecom = np.asarray([es,es,el,el])
         Tcom = np.asarray([Tss,Tsh,Tls,Tlh])
-        Rcom = planck(Tcom)
+        Rcom = planck(self.wavelength,Tcom)
 
         Pcom = proportion_bidirectional_row_voxel_one(
             lai,hspot,row_width,row_blank,row_height,vza,vaa,sza,saa,raa,nvw,nvh,nvb)
@@ -143,7 +144,7 @@ class Row_Voxel():
         if ifradiance == 1:
             return self.radiance
         else:
-            return inv_planck(self.radiance, self.wavelength)
+            return inv_planck(self.wavelength, self.radiance)
 
     def runInv(self, ifradiance = 0):
 
@@ -178,7 +179,7 @@ class Row_Voxel():
 
         Ecom = np.asarray([es,es,el,el])
         Tcom = np.asarray([Tss,Tsh,Tls,Tlh])
-        Rcom = planck(Tcom)
+        Rcom = planck(self.wavelength,Tcom)
 
         Pcom = proportion_bidirectional_row_voxel_one(
             lai,hspot,row_width,row_blank,row_height,vza,vaa,sza,saa,raa,nvw,nvh,nvb)

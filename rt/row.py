@@ -3,6 +3,7 @@
  垄行结构场景的热辐射方向性模型
 '''
 import numpy as np
+import numpy
 from rt.hotspot import *
 from rt.gap import *
 from rt.scatter import *
@@ -115,7 +116,7 @@ class Row():
 
         Ecom = np.asarray([es,es,el,el])
         Tcom = np.asarray([Tss,Tsh,Tls,Tlh])
-        Rcom = planck(Tcom)
+        Rcom = planck(self.wavelength,Tcom)
 
         Pcom = proportion_bidirectional_row_one(lai,hspot,row_width,row_blank,row_height,vza,vaa,sza,saa,raa)
         Ecom_direct,Ecom_direct_sum = emissivity_direct(Pcom,Ecom)
@@ -130,7 +131,7 @@ class Row():
         if ifradiance == 1:
             return self.radiance
         else:
-            return inv_planck(self.radiance, self.wavelength)
+            return inv_planck(self.wavelength, self.radiance)
 
 
 

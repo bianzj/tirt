@@ -45,7 +45,7 @@ def sample_crown():
     plt.plot(vza, rad_voxel, 'o-')
     plt.ylim([303, 312])
     plt.legend('voxel-based')
-    plt.xlabel('VZA ($\circ$)')
+    plt.xlabel('VZA ($\\circ$)')
     plt.ylabel('Brightness Temperature (K)')
     plt.show()
 
@@ -82,7 +82,7 @@ def sample_hom():
     vza[raa > 90] = vza[raa > 90] * -1
     plt.plot(vza, BT_voxel, 'o-')
     plt.ylim([301.5, 303.75])
-    plt.xlabel('VZA ($\circ$)')
+    plt.xlabel('VZA ($\\circ$)')
     plt.ylabel('Brightness Temperature (K)')
     plt.legend('voxel-based')
     plt.show()
@@ -129,7 +129,7 @@ def sample_row():
     plt.plot(BT_voxel, 'o-')
     plt.ylim([298, 315])
     plt.legend('voxel-based')
-    plt.xlabel('VZA ($\circ$)')
+    plt.xlabel('VZA ($\\circ$)')
     plt.ylabel('Brightness Temperature (K)')
     plt.show()
 

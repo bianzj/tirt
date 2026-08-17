@@ -4,6 +4,7 @@
 #####################################################
 
 import numpy as np
+import numpy
 from rt.hotspot import *
 from rt.gap import *
 from rt.scatter import *
@@ -100,7 +101,7 @@ class Hom_Voxel():
 
         Ecom = np.asarray([es,es,el,el])
         Tcom = np.asarray([Tss,Tsh,Tls,Tlh])
-        Rcom = planck(Tcom)
+        Rcom = planck(self.wavelength,Tcom)
 
         Pcom = proportion_bidirectional_hom_voxel_one(lai,hspot,vza,sza,vsa)
         Ecom_direct,Ecom_direct_sum = emissivity_direct(Pcom,Ecom)
@@ -116,7 +117,7 @@ class Hom_Voxel():
         if ifradiance == 1:
             return self.radiance
         else:
-            return inv_planck(self.radiance, self.wavelength)
+            return inv_planck(self.wavelength, self.radiance)
 
     def runInv(self,ifradiance = 0):
 

@@ -461,7 +461,7 @@ def proportion_directional_hom_voxel_layer(lai0, xza0, number_layer=5, CI=1.0, G
     number_voxel = np.size(Pleaf_voxel)
     number_angle = np.size(xza0)
     vz = np.linspace(0.5, number_voxel - 0.5, number_voxel)
-    dlh = np.int(number_voxel / number_layer)
+    dlh = int(number_voxel / number_layer)
     index_layer = vz // dlh
     Pleaf_layer = np.zeros([number_layer, number_angle])
     for klayer in range(number_layer):
@@ -493,7 +493,7 @@ def proportion_directional_row_voxel_layer(lai, row_width, row_blank, row_height
     number_angle = np.size(xza0)
     Pleaf_layer = np.zeros([number_layer, number_angle])
     vz = np.linspace(0.5, number_voxel - 0.5, number_voxel)
-    dlh = np.int(number_voxel / number_layer)
+    dlh = int(number_voxel / number_layer)
     index_layer = vz // dlh
     for klayer in range(number_layer):
         ind = klayer == index_layer
@@ -926,7 +926,7 @@ def proportion_bidirectional_hom_voxel_layer(lai0, hspot, vza0, sza0, vsa0, numb
     [number_voxel, number_angle] = np.shape(Pleaf_sunlit_voxel)
     # number_angle = np.size(vza0)
     vz = np.linspace(0.5, number_voxel - 0.5, number_voxel)
-    dlh = np.int(number_voxel / number_layer)
+    dlh = int(number_voxel / number_layer)
     index_layer = vz // dlh
     Pleaf_shaded_layer = np.zeros([number_layer, number_angle])
     Pleaf_sunlit_layer = np.zeros([number_layer, number_angle])
@@ -973,7 +973,7 @@ def proportion_bidirectional_row_voxel_layer(lai, hspot, row_width, row_blank, r
     Pleaf_sunlit_layer = np.zeros([number_layer, number_angle])
     ### 分层划分，取整
     vz = np.linspace(0.5, number_voxel - 0.5, number_voxel)
-    dlh = np.int(number_voxel / number_layer)
+    dlh = int(number_voxel / number_layer)
     index_layer = vz // dlh
     for klayer in range(number_layer):
         ind = klayer == index_layer

@@ -34,7 +34,7 @@ def sample_hom():
 
     vza[raa == 180] = vza[raa == 180] * -1
     plt.plot(vza, BT)
-    plt.xlabel('VZA ($\circ$)')
+    plt.xlabel('VZA ($\\circ$)')
     plt.ylabel('Brightness Temperature (K)')
     plt.title('hom')
     plt.show()
@@ -73,7 +73,7 @@ def sample_row():
 
     vza[vaa == 180] = vza[vaa == 180] * -1
     plt.plot(vza, BT)
-    plt.xlabel('VZA ($\circ$)')
+    plt.xlabel('VZA ($\\circ$)')
     plt.ylabel('Brightness Temperature (K)')
     plt.title('row')
     plt.show()
@@ -113,7 +113,7 @@ def sample_crown():
 
     vza[raa == 180] = vza[raa == 180] * -1
     plt.plot(vza, BT)
-    plt.xlabel('VZA ($\circ$)')
+    plt.xlabel('VZA ($\\circ$)')
     plt.ylabel('Brightness Temperature (K)')
     plt.title('crown')
     plt.show()

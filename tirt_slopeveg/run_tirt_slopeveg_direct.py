@@ -177,7 +177,7 @@ def sample_crown():
     vza[raa == 180] = vza[raa == 180] * -1
     plt.plot(vza, BT1)
     plt.plot(vza, BT2)
-    plt.xlabel('VZA ($\circ$)')
+    plt.xlabel('VZA ($\\circ$)')
     plt.ylabel('Brightness Temperature (K)')
     plt.title('crown')
     plt.legend(['Veg','Slope'])

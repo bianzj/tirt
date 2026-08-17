@@ -523,6 +523,9 @@ class Terrain_Vegkd:
         self.shapes = shapes
         self.n_shape, self.n_dim = np.shape(shapes)
 
+    def set_structural_input(self, shapes):
+        return self.set_strcutural_input(shapes)
+
     def set_thermal_input(self,Tss,Tsh,Tms,Tmh):
         self.Ts_sunlit = Tss
         self.Ts_shaded = Tsh

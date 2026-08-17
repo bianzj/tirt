@@ -74,7 +74,7 @@ if __name__ == '__main__':
 
 
     urban.set_angular_input(np.abs(vza_),vaa_,sza,saa)
-    urban.set_strcutural_input(shapes)
+    urban.set_structural_input(shapes)
     urban.set_spectral_input(Estreat,Ewall,Eroof)
 
 
@@ -90,7 +90,7 @@ if __name__ == '__main__':
     # height = 20*0.6+40*0.3+60*0.1
     # shapes = np.asarray([[20,10,30,0.003,0,0+90]])
     urban_veg.set_angular_input(np.abs(vza_),vaa_,sza,saa)
-    urban_veg.set_strcutural_input(shapes)
+    urban_veg.set_structural_input(shapes)
     urban_veg.set_spectral_input(Estreat,Ewall,Eroof,Eveg)
     urban_veg.forestshape = forestshape
 

@@ -47,7 +47,7 @@ if __name__ == '__main__':
     # shapes = np.asarray([[10,10,30,0.003]])
 
     urban.set_angular_input(vza_,vaa_,sza,saa)
-    urban.set_strcutural_input(shapes)
+    urban.set_structural_input(shapes)
     urban.set_spectral_input(Estreat,Ewall,Eroof)
     emissivity_1 = urban.calculate_effective_emissivity()
 
@@ -56,7 +56,7 @@ if __name__ == '__main__':
 
     shapes = np.asarray([[10,10,30,0.003,0,90]])
     urban.set_angular_input(vza_,vaa_,sza,saa)
-    urban.set_strcutural_input(shapes)
+    urban.set_structural_input(shapes)
     urban.set_spectral_input(Estreat,Ewall,Eroof)
     emissivity_2 = urban.calculate_effective_emissivity()
 

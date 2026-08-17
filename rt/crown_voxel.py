@@ -5,6 +5,7 @@
 #####################################################
 
 import numpy as np
+import numpy
 from rt.hotspot import *
 from rt.gap import *
 from rt.scatter import *
@@ -111,7 +112,7 @@ class Crown_Voxel():
 
         Ecom = np.asarray([es, es, el, el])
         Tcom = np.asarray([Tss, Tsh, Tls, Tlh])
-        Rcom = planck(Tcom)
+        Rcom = planck(self.wavelength,Tcom)
 
         hc = hcr * 2 + offz
         Pcom = proportion_bidirectional_crown_voxel_one(lai, std, hspot,hc, hcr, rcr, vza, sza, vaa,saa)
@@ -130,7 +131,7 @@ class Crown_Voxel():
         if ifradiance == 1:
             return self.radiance
         else:
-            return inv_planck(self.radiance, self.wavelength)
+            return inv_planck(self.wavelength, self.radiance)
 
     def runInv(self,ifradiance = 0):
 

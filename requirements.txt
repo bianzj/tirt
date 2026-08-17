@@ -1,0 +1,11 @@
+numpy
+scipy
+matplotlib
+pandas
+scikit-learn
+seaborn
+xlrd
+opencv-python
+netCDF4
+pysolar
+GDAL

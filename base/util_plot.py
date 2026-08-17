@@ -40,8 +40,8 @@ def plt_scatter(data1,data2,title='',dif=10,min1 = 225,min2 = 225,max1 = 335,max
     plt.title([rmse,r2])
     plt.xlim([min1,max1])
     plt.ylim([min2,max2])
-    plt.text(min1+(max1-min1)*3/5, min2+(max2-min2)*1/5, "$RMSE$ = %2.2f$\degree$C" % rmse + "\n$Bias$ = %2.2f$\degree$C" % bias +
-             "\n$r^2$ = %2.2f" % r2 + "\n$\sigma$ = %2.2f$\degree$C" % std, fontsize=14)
+    plt.text(min1+(max1-min1)*3/5, min2+(max2-min2)*1/5, "$RMSE$ = %2.2f$\\degree$C" % rmse + "\n$Bias$ = %2.2f$\\degree$C" % bias +
+             "\n$r^2$ = %2.2f" % r2 + "\n$\\sigma$ = %2.2f$\\degree$C" % std, fontsize=14)
     plt.title(title)
     plt.show()
     return 0
@@ -58,7 +58,7 @@ def plt_hist(data,bins = 30, alpha = 0.5):
     plt.rcParams['figure.figsize'] = (4.0, 3.2)
     kwargs = dict(histtype='stepfilled', alpha=alpha, bins=bins)
     fig, axs = plt.subplots(ncols=1, figsize=(5, 4))
-    plt.hist(data, **kwargs, label='$\Delta$', color='orange')
+    plt.hist(data, **kwargs, label='$\\Delta$', color='orange')
     plt.legend()
     plt.xlabel('Difference or Value', fontsize=12)
     plt.ylabel('Frequency', fontsize=12)
@@ -78,7 +78,7 @@ def plt_hist_2col(data1,data2,bins = 30, alpha = 0.5):
     data = np.transpose(np.stack([data1,data2]))
     kwargs = dict(histtype='stepfilled', alpha=alpha, bins=bins)
     fig, axs = plt.subplots(ncols=1, figsize=(5, 4))
-    plt.hist(data, **kwargs, label='$\Delta$', color='orange')
+    plt.hist(data, **kwargs, label='$\\Delta$', color='orange')
     plt.legend()
     plt.xlabel('Difference or Value', fontsize=12)
     plt.ylabel('Frequency', fontsize=12)
@@ -196,8 +196,8 @@ def sns_reg(data1,data2,min1 = 250,min2 = 350,max1 = 350, max2 = 350):
     plt.legend()
     plt.xlim([min1,max1])
     plt.ylim([min2,max2])
-    plt.text(min1+(max1-min1)*3/5, min2+(max2-min2)*1/5, "$RMSE$ = %2.2f$\degree$C" % rmse + "\n$Bias$ = %2.2f$\degree$C" % bias +
-             "\n$r^2$ = %2.2f" % r2 + "\n$\sigma$ = %2.2f$\degree$C" % std, fontsize=14)
+    plt.text(min1+(max1-min1)*3/5, min2+(max2-min2)*1/5, "$RMSE$ = %2.2f$\\degree$C" % rmse + "\n$Bias$ = %2.2f$\\degree$C" % bias +
+             "\n$r^2$ = %2.2f" % r2 + "\n$\\sigma$ = %2.2f$\\degree$C" % std, fontsize=14)
     plt.show()
 
 def sns_scatter(data1,data2,lai,smc):

@@ -1,24 +1,39 @@
 
 import numpy as np
 
-def planck(wavelength,Ts):
+DEFAULT_WAVELENGTH = 10.5
+
+
+def planck(wavelength, Ts=None):
     c1 = 11910.439340652
     c2 = 14388.291040407
-    if isinstance(Ts * 1.0, float):
+    if Ts is None:
+        Ts = wavelength
+        wavelength = DEFAULT_WAVELENGTH
+
+    Ts = np.asarray(Ts, dtype=np.float64)
+    wavelength = np.asarray(wavelength, dtype=np.float64)
+
+    if Ts.ndim == 0:
+        Ts = Ts.item()
         if (Ts < 100): Ts = Ts + 273.15
-        wavelength = np.float_(wavelength)
-        Ts = np.float_(Ts)
         rad = c1 / (np.power(wavelength, 5) * (np.exp(c2 / Ts / wavelength) - 1)) * 10000
     else:
+        Ts = Ts.copy()
         Ts[Ts < 100] = Ts[Ts < 100] + 273.15
-        wavelength = np.float_(wavelength)
         rad = c1 / (np.power(wavelength, 5) * (np.exp(c2 / Ts / wavelength) - 1)) * 10000
     return rad
 
 
 
 
-def inv_planck(wavelength,rad):
+def inv_planck(wavelength, rad=None):
+    if rad is None:
+        rad = wavelength
+        wavelength = DEFAULT_WAVELENGTH
+    elif (np.size(wavelength) > 1 and np.size(rad) == 1) or (np.size(wavelength) == 1 and np.size(rad) == 1 and wavelength > 100 and rad <= 100):
+        wavelength, rad = rad, wavelength
+
     c1 = 11910.439340652 * 10000
     c2 = 14388.291040407
     temp = c1 / (rad * np.power((wavelength), 5)) + 1
