@@ -4,6 +4,44 @@ Thermal infrared radiative transfer model for vegetation, terrain, urban surface
 
 TiRT 用于典型复杂地表热红外方向性辐射传输建模，可计算不同观测角度下的方向亮温、辐射亮度和有效发射率。
 
+## 统一运行入口
+
+项目根目录提供了与 `tirteb` 类似的单点运行方式。默认读取根目录的 `input.csv`，结果写入 `cases/<case_name>/output.csv`：
+
+```bash
+python run.py
+```
+
+也可以在 Python 中调用外层函数，或通过命令行切换模型：
+
+```python
+from run import run
+
+output_path = run("input.csv")
+print(output_path)
+```
+
+```bash
+python run.py --input input.csv --output cases/row_demo/output.csv --model row
+```
+
+统一入口支持植被与地表的组合模型：`plane`、`terrain`、`urban` 地表可分别组合 `bare`、`hom`、`row`、`crown` 植被。参数集中在 `input.csv`，输出按“观测方向 × 波段”记录亮温、辐亮度和各组分发射率。
+
+## input.csv 结构
+
+输入分组与 `tirteb` 保持一致：
+
+- `[surface]`：`surface_model` 选择平面、地形或建筑地表，`vegetation_model` 选择裸地、均质植被、垄行或森林。
+- `[vegetation_structure]`、`[row_structure]`、`[crown_structure]`：分别配置 LAI、热点、垄行和树冠结构。
+- `[terrain]`、`[urban]`：配置地形层和建筑形状，可用分号提供多个高度、半径、密度或建筑参数。
+- `[spectral]`、`[urban_spectrum]`：配置热红外高光谱波段，以及叶片、土壤、屋顶、墙壁和街道发射率；每组常数发射率的数量必须与 `wavelengths` 数量一致。
+- `[thermal]`：配置土壤、叶片、地形、屋顶、墙壁和街道的日照/阴影温度。
+- `[geometry]`：可直接填写角度列表，也可使用 `geometry_source=file` 读取文件。
+
+这里的光谱是热红外高光谱，不是可见光/近红外反射率。光谱文件支持：叶片文件为 `wavelength leaf_emissivity`，土壤文件为 `wavelength soil_emissivity`，建筑文件为 `wavelength roof_emissivity wall_emissivity street_emissivity`；也兼容 `tirteb` 的 7 列建筑文件，读取其中最后三列发射率。文件中的波段会插值到 `wavelengths`。
+
+几何文件每行支持 `vza vaa`，也支持 `vza vaa sza saa`；角度单位为度，注释行以 `#` 开头。
+
 ## 适用场景
 
 - 均质植被
@@ -14,19 +52,50 @@ TiRT 用于典型复杂地表热红外方向性辐射传输建模，可计算不
 - 城市建筑
 - 城市建筑与街道植被耦合场景
 
+## 方向性绘图
+
+`plot/` 用于读取统一入口生成的 `output.csv`，绘制热红外方向性结果。默认绘制摄氏度亮温，也可以选择开尔文亮温、辐亮度或其他数值列：
+
+```bash
+python -m plot.run_plot \
+    --input cases/file_geometry_spectrum/output.csv \
+    --mode all \
+    --wavelength 10.5
+```
+
+可选模式为：
+
+- `polar`：极坐标方向图，角度为观测方位角 `vaa`，半径为观测天顶角 `vza`。
+- `parallel`：太阳主平面图，使用相对太阳方位角 `raa=0/180` 的方向。
+- `perpendicular`：垂直太阳主平面图，使用相对太阳方位角 `raa=90/270` 的方向。
+- `all`：一次输出以上三类图；如果输入几何没有对应方向，则跳过该类图。
+
+默认图像写入 `cases/<case_name>/plots/`，也可以指定目录和绘制量：
+
+```bash
+python -m plot.run_plot \
+    --input cases/file_geometry_spectrum/output.csv \
+    --mode polar \
+    --wavelength 10.5 \
+    --quantity brightness_temperature_K \
+    --output-dir cases/file_geometry_spectrum/plots_K
+```
+
+绘图依赖 `matplotlib`，安装项目依赖后即可使用。
+
 ## 目录结构
 
 ```text
 tirt/
-├── rt/                  # 核心辐射传输模型
-├── base/                # 绘图、数据和通用工具
-├── tirt_veg/            # 植被解析模型示例
-├── tirt_vegvoxel/       # 植被体素模型示例
-├── tirt_slopeveg/       # 坡面植被模型示例
-├── tirt_terrain/        # 地形模型示例
-├── tirt_terrainveg/     # 地形-植被耦合模型示例
-├── tirt_urban/          # 城市模型示例
-├── tirt_urbanveg/       # 城市-植被耦合模型示例
+├── base/                # 全部现行模型、工具和示例入口
+│   ├── hom.py           # 均质植被模型
+│   ├── row.py           # 垄行作物模型
+│   ├── crown.py         # 离散树冠模型
+│   ├── *_voxel.py       # 体素模型
+│   ├── terrain*.py      # 地形模型
+│   ├── urban*.py        # 城市模型
+│   └── run_*.py         # 示例入口
+├── plot/                # 极坐标图和太阳主平面图
 └── old/                 # 历史代码
 ```
 
@@ -67,11 +136,10 @@ Python: Select Interpreter
 项目已提供 `.vscode/settings.json` 和 `.vscode/launch.json`，会自动把项目根目录和上一级目录加入 `PYTHONPATH`。这样从子目录运行脚本时也能找到：
 
 ```python
-from rt.xxx import *
 from base.xxx import *
 ```
 
-如果仍出现 `ModuleNotFoundError: No module named 'rt'`，请重启 VS Code 终端，或在终端手动设置：
+如果仍出现 `ModuleNotFoundError: No module named 'base'`，请重启 VS Code 终端，或在终端手动设置：
 
 ```powershell
 $env:PYTHONPATH="C:\work\tirt;C:\work"
@@ -80,20 +148,20 @@ $env:PYTHONPATH="C:\work\tirt;C:\work"
 ## 运行示例
 
 ```powershell
-python .\tirt_veg\run_tirt_veg.py
-python .\tirt_vegvoxel\run_tirt_vegvoxel.py
-python .\tirt_slopeveg\run_tirt_slopeveg.py
-python .\tirt_terrain\run_tirt_terrain.py
-python .\tirt_terrainveg\run_tirt_terrain_veg.py
-python .\tirt_urban\run_tirt_urban_bt.py
-python .\tirt_urbanveg\run_tirt_urbanveg_bt_polar.py
+python -m base.run_tirt_veg
+python -m base.run_tirt_vegvoxel
+python -m base.run_tirt_slopeveg
+python -m base.run_tirt_terrain
+python -m base.run_tirt_terrain_veg
+python -m base.run_tirt_urban_bt
+python -m base.run_tirt_urbanveg_bt_polar
 ```
 
 ## 基本用法
 
 ```python
 import numpy as np
-from rt.hom import Hom
+from base.hom import Hom
 
 lai = 0.5
 hspot = 0.15
@@ -140,7 +208,7 @@ brightness_temperature = hom.run()
 
 ## 常见问题
 
-### No module named 'rt'
+### No module named 'base'
 
 原因是 Python 搜索路径没有包含项目根目录。请从 `C:\work\tirt` 运行，或设置：
 

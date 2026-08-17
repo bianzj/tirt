@@ -17,3 +17,5 @@ env/
 dist/
 build/
 *.egg-info/
+
+cases/

@@ -1,0 +1,88 @@
+# TIRT single-point input,,,
+# 与 tirteb 一致：section,key,value,description
+,,,
+[case],,,
+case,case_name,hom_plane,case name
+case,cases_dir,cases,result root directory
+case,result_dir,cases/hom_plane,result directory
+,,,
+[surface],,,
+surface,surface_model,plane,plane=flat ground; terrain=sloped ground; urban=buildings and streets
+surface,vegetation_model,hom,bare=bare surface; hom=homogeneous; row=ridge; crown=forest
+,,,
+[terrain],,,
+terrain,terrain_type,2,1=single slope; 2=compound terrain
+terrain,terrain_slope,30,single-slope inclination degrees
+terrain,terrain_aspect,0,single-slope aspect degrees
+terrain,terrain_radius,10,equivalent terrain radius m; semicolon-separated for multiple layers
+terrain,terrain_height,20,equivalent terrain height m; semicolon-separated for multiple layers
+terrain,terrain_density,0.001,terrain spatial density; semicolon-separated for multiple layers
+,,,
+[urban],,,
+urban,building_density,0.0015,building plan density; semicolon-separated for multiple shapes
+urban,building_length,10,building length m
+urban,building_width,10,building width m
+urban,building_height,20,building height m
+urban,building_azimuth,0,building direction degrees
+,,,
+[vegetation_structure],,,
+vegetation_structure,lai,1.5,leaf area index
+vegetation_structure,height,3,vegetation height m
+vegetation_structure,G,0.5,leaf projection parameter
+vegetation_structure,lidfa,-0.35,leaf angle distribution parameter a
+vegetation_structure,lidb,-0.15,leaf angle distribution parameter b
+vegetation_structure,hspot,0.15,hotspot parameter m
+vegetation_structure,leaf_width,0.2,leaf width m
+,,,
+[row_structure],,,
+row_structure,row_width,1.0,row width m
+row_structure,row_blank,0.1,row blank m
+row_structure,row_height,1.0,row height m
+row_structure,row_azimuth,0,row direction degrees
+,,,
+[crown_structure],,,
+crown_structure,crown_radius,3.0,crown radius m
+crown_structure,crown_height,3.0,crown height m
+crown_structure,crown_width,3.0,crown width m
+crown_structure,crown_density,0.02,crown density
+,,,
+[spectral],,,
+spectral,spectral_source,direct,direct=use wavelengths; file=read spectrals_file
+spectral,wavelengths,8.0;10.5;12.0,observation wavelengths um
+spectral,spectrals_file,data/spectrals/observation_spectrals.txt,wavelength file when spectral_source=file
+spectral,vegetation_spectrum_source,direct,direct=constant arrays; file=read vegetation_spectrum_file
+spectral,vegetation_spectrum_file,data/spectrals/vegetation_spectrum.txt,wavelength leaf_emissivity
+spectral,soil_spectrum_source,direct,direct=constant arrays; file=read soil_spectrum_file
+spectral,soil_spectrum_file,data/spectrals/soil_spectrum.txt,wavelength soil_emissivity
+spectral,emissivity_leaf,0.985;0.985;0.985,one value per wavelength
+spectral,emissivity_soil,0.955;0.955;0.955,one value per wavelength
+,,,
+[urban_spectrum],,,
+urban_spectrum,urban_spectrum_source,direct,direct=constant arrays; file=read urban_spectrum_file
+urban_spectrum,urban_spectrum_file,data/spectrals/urban_spectrum.txt,wavelength roof_emissivity wall_emissivity street_emissivity
+urban_spectrum,emissivity_roof,0.95;0.95;0.95,one value per wavelength
+urban_spectrum,emissivity_wall,0.92;0.92;0.92,one value per wavelength
+urban_spectrum,emissivity_street,0.955;0.955;0.955,one value per wavelength
+,,,
+[thermal],,,
+thermal,soil_sunlit_c,45,sunlit soil temperature C
+thermal,soil_shaded_c,30,shaded soil temperature C
+thermal,leaf_sunlit_c,33,sunlit leaf temperature C
+thermal,leaf_shaded_c,30,shaded leaf temperature C
+thermal,terrain_sunlit_c,33,sunlit terrain/vegetation temperature C
+thermal,terrain_shaded_c,30,shaded terrain/vegetation temperature C
+thermal,roof_sunlit_c,45,sunlit roof temperature C
+thermal,roof_shaded_c,30,shaded roof temperature C
+thermal,wall_sunlit_c,45,sunlit wall temperature C
+thermal,wall_shaded_c,30,shaded wall temperature C
+thermal,street_sunlit_c,45,sunlit street temperature C
+thermal,street_shaded_c,30,shaded street temperature C
+,,,
+[geometry],,,
+geometry,geometry_source,direct,direct=lists; file=read geometry_file
+geometry,geometry_file,data/directions/observation_directions.txt,vza vaa or vza vaa sza saa per line
+geometry,vza,0;10;20;30;40;50;60,view zenith degrees
+geometry,vaa,0,view azimuth degrees
+geometry,sza,30,solar zenith degrees
+geometry,saa,0,solar azimuth degrees
+geometry,geometry_pair_mode,cross,cross=cartesian product; zip=pair lists by row

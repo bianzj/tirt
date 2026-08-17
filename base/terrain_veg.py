@@ -1,60 +1,40 @@
 import numpy as np
-from base.physicsF import inv_planck, planck
 
-
-
-
+from base.crown import *
 ###----------------------------------
-### 这里考虑了山地+子像元的BRDF的影响 有些类似于等效坡
+### 这里考虑了山地本身的遮挡和子像元内植被的复合效应
+### 1. determine the mountainous surface
+### 2. determine the forest strcture
 ###----------------------------------
 
 
 
-def kernel_Thapke(vza,w=0.05,K=1.0):
-    '''
-    LSF核的原始计算方法
-    :param vza: 观测天顶角
-    :return: LSF核
-    '''
-    ### 这个方案是Su. 提出的，对hapke的简化，考虑了上层和下层间的差异
-    cthetv = np.cos(np.deg2rad(vza))
-    fa = 2*cthetv/K
-    ra = np.sqrt(1-w)
-    kLSF = ra*(1+fa)/(1+fa*ra)
-    return kLSF
-
-
-
-class Terrain_Plus:
+class Terrain_Veg:
 
     ### h, r, density
-    shapes = np.asarray([[10,10,0.001],[10,10,0.001]])
+    shapes = np.asarray([[10,10,0.003],[10,5,0.001],[10,15,0.001]])
+    ### lai, hspot, stand, radi_horizontal, radi_vertical
+    forestshape = np.asarray([1.0,0.001,3,3,0.2])
+
+    crown = Crown()
+
     n_shape,n_dim = np.shape(shapes)
-
-
-
 
     Es = 0.955
     Em = 0.975
 
-
-    vzaplus = np.arange(0,90)
-    r = kernel_Thapke(vzaplus,1-Es)
-    Es_eff = np.average(r)
-    r = kernel_Thapke(vzaplus,1-Em)
-    Em_eff = np.average(r)
-
-
-
     Tss = 320
-    Tsh = 300
+    Tsh = 305
+    Tvs = 303
+    Tvh = 300
+
 
 
     vza_ = np.asarray([0,55])
     vaa_ = np.asarray([90,90])
-    sza = 30
-    saa = 270
-    n_part = 500
+    sza = 20
+    saa = 250
+    n_part = 10
     n_angle = np.size(vza_)
     canopy_effective_emissivity = []
     component_effective_emissivity = []
@@ -74,7 +54,7 @@ class Terrain_Plus:
         vaa = self.vaa_[kangle]
         sza = self.sza
         saa = self.saa
-        raa = vaa - saa
+        raa = np.abs(vaa - saa)
 
         if raa > 180: raa = 360- raa
 
@@ -91,6 +71,7 @@ class Terrain_Plus:
 
         ####----------------------------------------------
         ### PLANE surface
+        ### 确定 山地的结构的情况
         ###-----------------------------------------------
         height1r = 0
         projv = 0
@@ -112,7 +93,6 @@ class Terrain_Plus:
             if (dh > 0) + (L2_v > radius2):
                 projv_mount = density2 * (1.0/np.tan(gamma2_v) + gamma2_v - np.pi/2.0)*radius2*radius2
                 projv = projv + projv_mount
-
             L2_s = dh * tants
             if L2_s < radius2: L2_s = radius2*1.0
             theta2_s = np.arctan(L2_s*np.tan(alpha2)/radius2)
@@ -125,19 +105,49 @@ class Terrain_Plus:
         projs = projs/(1-poccupied)
         Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
         projvs = projv + projs * Overlapping
+
+        # partmax = np.max([projv, projs])
+        # partmin = np.min([projv, projs])
+        # # if (raa == 0) | (raa==180):
+        # #     Overlapping = 0
+        # projvs = partmax + partmin * Overlapping
+
+        ### 地形导致的平坦下垫面的光照和阴影情况
         pPlaneV = np.exp(-projv)*(1-poccupied)
         pPlaneS = np.exp(-projs)*(1-poccupied)
         pPlaneV_sunlit = np.exp(-projvs)*(1-poccupied)
         pPlaneV_shaded = pPlaneV - pPlaneV_sunlit
 
-
+        ### 森林的属性
+        forestshape = self.forestshape
+        lai = forestshape[0]
+        std = forestshape[1]
+        hspot = forestshape[4]
+        hcr = forestshape[3]
+        rcr = forestshape[2]
+        Pcomtemp = proportion_bidirectional_crown_one(lai, std, hspot, hcr, rcr, np.asarray([vza]),
+                                                      np.asarray([sza]), np.asarray([raa]))
+        ### 只有光照山坡的光照植被和光照土壤才是光照
+        ### 在阴影山坡的所有植被和土壤全是阴影
+        pPlaneV_veg_sunlit = pPlaneV_sunlit*Pcomtemp[2][0]
+        pPlaneV_veg_shaded = pPlaneV_sunlit*Pcomtemp[3][0] + pPlaneV_shaded*Pcomtemp[2][0] + pPlaneV_shaded*Pcomtemp[3][0]
+        pPlaneV_soil_sunlit = pPlaneV_sunlit*Pcomtemp[0][0]
+        pPlaneV_soil_shaded = pPlaneV_sunlit*Pcomtemp[1][0] + pPlaneV_shaded*Pcomtemp[0][0] + pPlaneV_shaded*Pcomtemp[1][0]
+        ### 测试集合
+        alla1 = pPlaneV_veg_sunlit+pPlaneV_veg_shaded+pPlaneV_soil_sunlit+pPlaneV_soil_shaded
         ####----------------------------------------------
         ### Mountain surface
         ###-----------------------------------------------
 
         pMountV = 0
         pMountV_sunlit = 0
-        pMountV_all = 0
+        pMComV = 0
+
+        Pcom = 0
+        pMount_veg = 0
+        pMount_soil = 0
+        pMount_veg_sunlit = 0
+        pMount_soil_sunlit = 0
         for kshape1 in range(n_shape):
             shape1 = shapes[kshape1]
 
@@ -149,19 +159,29 @@ class Terrain_Plus:
             projv = 0
             projs = 0
 
+            ### 及圆锥的角度情况
             alpha1 = np.arctan(radius1 / height1)
+            ### 最高点在观测方向倾斜投影的距离
             L1_v = height1 * tantv
             if L1_v < radius1: L1_v = radius1 * 1.0
             theta1_v = np.arctan(L1_v * np.tan(alpha1) / radius1)
             gamma1_v = np.arcsin(radius1 / L1_v)
+            ### 最高点在太阳方向倾斜投影的距离，及圆锥的角度情况
+            L1_s = height1 * tants
+            if L1_s < radius1: L1_s = radius1 * 1.0
+            theta1_s = np.arctan(L1_s * np.tan(alpha1) / radius1)
+            gamma1_s = np.arcsin(radius1 / L1_s)
 
             weight = 0
+            ### 这里计算的投影只是圆球方向出来的部分
+            ### 首先不管哪个角度都会有最少的等效圆的投影面积；
+            ### 在大于圆锥角度后，会有侵占平坦地表的圆锥面积，该面积才是导致圆锥被挡住的原因，因此只计算该部分
             for kh in range(n_part):
                 height_temp = dheight * (kh + 0.5)
                 dh = shapes[:, 0] - height_temp
                 alpha2 = np.arctan(shapes[:,1] / shapes[:,0])
                 r1 = height_temp / height1 * radius1
-                w = (r1*np.pi*dheight+r1*2+dheight)
+                w = (r1*np.pi*dheight+r1*2+dheight)  ### 高度并不是等效的，这里是不同高度的权重
 
                 L2_v = dh * tantv
                 ind =  L2_v < shapes[:,1]
@@ -181,11 +201,11 @@ class Terrain_Plus:
                 projs_mount = ( shapes[:,2] * (1.0/np.tan(gamma2_s) + gamma2_s - np.pi / 2.0) * shapes[:,1] * shapes[:,1])
                 ind = (dh < 0) + (L2_s <= (shapes[:,1]))
                 projs_mount[ind] = 0
-
                 projs = projs + np.sum(projs_mount)*w
+
                 weight = weight + (w)
 
-            projv = projv / n_part/weight/(1-poccupied)
+            projv = projv / n_part/weight/(1-poccupied)  ### 因为没有考虑本身圆形情况，延伸出来的部分
             projs = projs / n_part/weight/(1-poccupied)
             Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
             projvs = projv + projs * Overlapping
@@ -196,34 +216,124 @@ class Terrain_Plus:
             # #     Overlapping = 0
             # projvs = partmax + partmin * Overlapping
 
-            slope = gamma1_v * 180 /np.pi
-            vzanew = np.abs(vza - slope)
-            rr = kernel_Thapke(vzanew,1-Em)
-
+            ### 计算山地的平均光照和可视比例
             gapv_mount = np.exp(-projv)
             gapvs_mount = np.exp(-projvs)
-            pMountV = pMountV + \
-                      density1 * gapv_mount * ((1.0/np.tan(gamma1_v) + gamma1_v + np.pi / 2.0) * radius1*radius1) * (rr)
-            pMountV_all = pMountV_all + density1 * gapv_mount * ((1.0/np.tan(gamma1_v) + gamma1_v + np.pi / 2.0) * radius1*radius1)
 
-            cosphi = uv*ui + sv*si*up
-            pMountV_sunlit = pMountV_sunlit + density1 * gapvs_mount * \
-                            ((1.0/np.tan(gamma1_v) + gamma1_v + np.pi / 2.0) *radius1*radius1) * (1+cosphi)*0.5 * rr
+            slope = alpha1 * 180 / np.pi
+            pMountV_temp = 0
+            pMountV_sunlit_temp = 0
 
+            if L1_v <= radius1:
+                ### 如果没有投影出来，那可视就都是本圆
+                pMountV_temp =  density1 * gapv_mount * (( np.pi) * radius1 * radius1)
+                if sza > slope:
+                    ### 如果此时光照角度大于圆锥倾斜，则光照部分类似于椭球的方式计算
+                    cosphi = uv * ui + sv * si * up
+                    pMountV_sunlit_temp = density1 * gapvs_mount *(( np.pi) * radius1 * radius1) * (1 + cosphi) * 0.5
+                else:
+                    ### 如果此时光照角度小于圆锥倾斜，则所有可视，所有光照
+                    gapvs_mount = 1.0
+                    pMountV_sunlit_temp = density1 * gapv_mount * ((np.pi) * radius1 * radius1)
+            else:
+                ### 投影出本圆，那可视就都是本圆+投影出来的部分，是Li圆锥的计算方法
+                pMountV_temp = density1 * gapv_mount * ((1.0/np.tan(gamma1_v) + gamma1_v + np.pi / 2.0) * radius1*radius1)
+                if sza > slope:
+                    ### 如果此时光照角度大于圆锥倾斜，则光照是类椭球计算方式
+                    cosphi = uv * ui + sv * si * up
+                    pMountV_sunlit_temp = density1 * gapvs_mount * ((1.0/np.tan(gamma1_v) + gamma1_v + np.pi / 2.0) * radius1*radius1) * (1 + cosphi) * 0.5
+                else:
+                    ### 如果此时光照角度大于圆锥倾斜，则光照是完全的光照
+                    pMountV_sunlit_temp = density1 * gapv_mount * ((1.0/np.tan(gamma1_v) + gamma1_v + np.pi / 2.0) * radius1*radius1)
+            pMountV = pMountV + pMountV_temp
+            pMountV_sunlit = pMountV_sunlit + pMountV_sunlit_temp
+
+            ### 这里不进行方位角的积分，选择了采用方位角的中心进行计算
+            forestshape = self.forestshape
+            lai = forestshape[0]
+            std = forestshape[1]
+            hspot = forestshape[4]
+            hcr = forestshape[3]
+            rcr = forestshape[2]
+
+
+            ### 计算每个离散360方向上的角度贡献
+            n = 360
+            lza = np.zeros(n) + slope
+            laa = np.arange(0, n, 1)
+            vzatemp = np.zeros(n) + vza
+            vaatemp = np.zeros(n) + vaa
+            vlatemp = np.abs(vaa - laa)
+            vsatemp = np.abs(vaatemp - saa)
+            szatemp = np.zeros(n) + sza
+            stdtemp = np.zeros(n) + std
+            hspotemp = np.zeros(n) + hspot
+            hcrtemp = np.zeros(n) + hcr
+
+            uii = np.cos(lza * rd)
+            uvv = np.cos(vzatemp * rd)
+            sii = np.sin(lza * rd)
+            svv = np.sin(vzatemp * rd)
+            upp = np.cos(vlatemp * rd)
+            # tantv = np.tan(vzatemp * rd)
+            tantl = np.tan(vlatemp * rd)
+            cosang = uvv * uii + svv * sii * upp
+            ang = np.arccos(cosang) / rd
+
+            ### 当大于0的时候，才是能看到的情况，否则是看不到的，也是没有贡献的
+            ind = cosang >= 0
+            weight_all = np.sum(cosang[ind])
+            weight = cosang[ind]/weight_all
+            vzatemp = vzatemp[ind]
+            vsatemp = vsatemp[ind]
+            szatemp = szatemp[ind]
+            hspotemp = hspotemp[ind]
+            # stdtemp = stdtemp[ind]
+            # hcrtemp = hcrtemp[ind]
+
+            stdtemp = stdtemp[ind]*uii[ind]
+            hcrtemp = hcrtemp[ind]*uii[ind]
+
+            ### 在这些有效角度下的贡献，其贡献的权重是其方向上投影有关系的
+
+            Pcomtemp = proportion_bidirectional_crown_one(lai, stdtemp, hspotemp, hcrtemp, rcr, np.asarray(vzatemp), np.asarray(szatemp), np.asarray(vsatemp))
+
+            Pcom = np.sum(Pcomtemp * weight,axis=1)
+            pVeg = Pcom[2]+Pcom[3]
+            pSoil = Pcom[0] + Pcom[1]
+            pVeg_sunlit = Pcom[2]
+            pSoil_sunlit = Pcom[0]
+            pMount_veg = pMount_veg + pMountV_temp * pVeg                                ### 植被的贡献
+            pMount_soil = pMount_soil + pMountV_temp * pSoil                             ### 土壤的贡献
+            pMount_soil_sunlit = pMount_soil_sunlit + pMountV_sunlit_temp * pSoil_sunlit ### 阳坡 * 光照土壤
+            pMount_veg_sunlit = pMount_veg_sunlit + pMountV_sunlit_temp * pVeg_sunlit    ### 阳坡 * 光照植被
+
+
+
+
+        ### 进行了坡地与平坦地表间的归一化操作，temp是坡地的变化比例
         pMountV_sunlit_fraction = pMountV_sunlit/pMountV
-        pMountV_ratio = (1 - pPlaneV)/pMountV_all
-        pMountV = pMountV * pMountV_ratio
-        pMountV_sunlit = pMountV * pMountV_sunlit_fraction
-        pMountV_shaded = pMountV - pMountV_sunlit
+        pMountVnew = 1 - pPlaneV
+        temp = pMountVnew/pMountV
+        pMountV_sunlit = temp * pMountV_sunlit
+        pMountV_shaded = pMountVnew - pMountV_sunlit
 
-        rr = kernel_Thapke(vza,1-Es)
-        pPlaneV_sunlit =  pPlaneV_sunlit * rr
-        pPlaneV_shaded = pPlaneV_shaded * rr
+        pMountV_veg_sunlit = pMount_veg_sunlit * temp
+        pMountV_veg_shaded = pMount_veg * temp - pMountV_veg_sunlit
+        pMountV_soil_sunlit = pMount_soil_sunlit * temp
+        pMountV_soil_shaded = pMount_soil * temp - pMountV_soil_sunlit
 
+        ### 测试集，加成1和加成2
+        alla2 = pMountV_veg_sunlit+pMountV_veg_shaded+pMountV_soil_shaded+pMountV_soil_sunlit
+        alla = pPlaneV_veg_sunlit + pMountV_veg_sunlit+ pPlaneV_veg_shaded + pMountV_veg_shaded+ pPlaneV_soil_sunlit + pMountV_soil_sunlit+ pPlaneV_soil_shaded + pMountV_soil_shaded
+        # print(pPlaneV_sunlit,pPlaneV_shaded,pMountV_sunlit,pMountV_shaded)
+        # print(Pcom,np.sum(Pcom))
         if ifP ==1:
             return pPlaneV, pMountV
         elif ifP == 2:
-            return pPlaneV_sunlit,pPlaneV_shaded,pMountV_sunlit,pMountV_shaded
+            return pPlaneV_soil_sunlit + pMountV_soil_sunlit, pPlaneV_soil_shaded + pMountV_soil_shaded,\
+                   pPlaneV_veg_sunlit + pMountV_veg_sunlit, pPlaneV_veg_shaded + pMountV_veg_shaded
+
         elif ifP ==3:
             return 0, 0
         else:
@@ -270,6 +380,7 @@ class Terrain_Plus:
             poccupied = poccupied + density2 * np.pi * (radius2*radius2)
             dh = height2 - height1r
             alpha2 = np.arctan(radius2/height2)
+
             L2_v = dh * tantv
             if L2_v < radius2: L2_v = radius2*1.0
             theta2_v = np.arctan(L2_v*np.tan(alpha2)/radius2)
@@ -286,6 +397,7 @@ class Terrain_Plus:
             if dh <= 0 or L2_s <= radius2: continue
             projs_mount = density2 * (1.0/np.tan(gamma2_s) + gamma2_s + np.pi/2.0)*radius2*radius2
             projs = projs + projs_mount
+
         Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
         projvs = projv + projs * Overlapping
         pPlaneV = np.exp(-projv)*(1-poccupied)
@@ -558,62 +670,3 @@ class Terrain_Plus:
 
         self.canopy_effective_emissivity = np.asarray(emissivity_ )
         return np.asarray(emissivity_ )
-
-
-# t = Terrain()
-# for k in range(2):
-#     d = t.calculate_component_direct_emissivity(k)
-#     s = t.calculate_component_scatter_emissivity(k)
-#     print(d)
-#     print(s)
-
-def _demo():
-    from base.util_plot import plt_coutourPolar
-
-    terrain = Terrain_Plus()
-    wl = 10.5
-    sza = 30
-    saa = 45
-    vaa_ = np.asarray([])
-    vza_ = np.asarray([])
-    vza_temp = np.arange(0,61,10)
-    n_temp = np.size(vza_temp)
-    for kvaa in range(0,361,10):
-        vaa_temp = np.repeat(kvaa,n_temp)
-        vza_ = np.hstack([vza_,vza_temp])
-        vaa_ = np.hstack([vaa_,vaa_temp])
-
-    Es = 0.94
-    Em = 0.92
-    Ts_sunlit = 45 + 273.15
-    Ts_shaded = 30+ 273.15
-    Tm_sunlit = 45 + 273.15
-    Tm_shaded = 30+ 273.15
-
-    Bs_sunlit = planck(wl,Ts_sunlit)
-    Bs_shaded = planck(wl,Ts_shaded)
-    Bm_sunlit = planck(wl,Tm_sunlit)
-    Bm_shaded = planck(wl,Tm_shaded)
-    B_ = np.asarray([Bs_sunlit,Bs_shaded,Bm_sunlit,
-                     Bm_shaded])
-
-    shapes = np.asarray([[10, 3, 0.01]])
-
-    n_shape,n_dim = np.shape(shapes)
-    area = 0
-    for kshape in range(n_shape):
-        area = area + np.pi*shapes[kshape,1]*shapes[kshape,1]*shapes[kshape,2]
-    print('Occupy:',area)
-
-    terrain.set_angular_input(np.abs(vza_),vaa_,sza,saa)
-    terrain.set_structural_input(shapes)
-    terrain.set_spectral_input(Es,Em)
-    emissivity_1 = terrain.calculate_effective_component_emissivity(2)
-
-    BB = np.sum(emissivity_1 * B_,axis=1)
-    TB1 = inv_planck(wl,BB)
-    plt_coutourPolar(vaa_,vza_,TB1-TB1[0],15)
-
-
-if __name__ == '__main__':
-    _demo()

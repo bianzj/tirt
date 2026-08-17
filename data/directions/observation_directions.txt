@@ -1,0 +1,4 @@
+# observation view directions: vza(deg) vaa(deg)
+0 0
+30 90
+60 180

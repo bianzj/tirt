@@ -1,0 +1,4 @@
+# observation wavelengths in micrometres
+8.0
+10.5
+12.0

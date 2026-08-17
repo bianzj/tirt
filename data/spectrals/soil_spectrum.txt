@@ -1,0 +1,4 @@
+# wavelength_um soil_emissivity
+8.0 0.955
+10.5 0.955
+12.0 0.950
