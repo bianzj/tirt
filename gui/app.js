@@ -335,10 +335,10 @@ function exportOutput() {
   const blob = new Blob([`${lines.join("\n")}\n`], { type: "text/csv;charset=utf-8" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = "output.csv";
+  link.download = "observations.csv";
   link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 0);
-  notify(`Saved output.csv · ${observationRows.length} directions · all cases · ${quantityLabel(quantity)}`);
+  notify(`Saved observations.csv · ${observationRows.length} directions · all cases · ${quantityLabel(quantity)}`);
 }
 
 function canvasContext(canvas) {
@@ -430,7 +430,7 @@ function drawPolar(rows) {
     }
     return valid[valid.length - 1].value;
   };
-  // Render a dense interpolated field, matching tirteb's contourf approach.
+  // Render a dense interpolated polar field.
   const radialSteps = Math.max(1, Math.ceil((vzaMax - radialMin) / 1));
   const azimuthSteps = 180;
   for (let radialIndex = 0; radialIndex < radialSteps; radialIndex += 1) {
@@ -682,7 +682,7 @@ function buildInputCsv() {
   if (o.additional_geometry_source === "manual") rows.push(csvRow("geometry", "observation_vza", o.observation_vza), csvRow("geometry", "observation_vaa", o.observation_vaa));
   return `${rows.join("\n")}\n`;
 }
-function exportInput() { const blob = new Blob([buildInputCsv()], { type: "text/csv;charset=utf-8" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "input_gui.csv"; link.click(); URL.revokeObjectURL(link.href); notify("Exported input_gui.csv"); }
+function exportInput() { const blob = new Blob([buildInputCsv()], { type: "text/csv;charset=utf-8" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "input.csv"; link.click(); URL.revokeObjectURL(link.href); notify("Saved input.csv"); }
 
 function bindEvents() {
   $("run-button").addEventListener("click", runSimulation); $("save-output-button").addEventListener("click", exportOutput); $("export-button").addEventListener("click", exportInput); $("reset-button").addEventListener("click", () => window.location.reload());

@@ -1,4 +1,4 @@
-"""Directional soil emissivity helpers based on tirteb's Hapke/Thapke form."""
+"""Directional soil emissivity helpers based on a Hapke/Thapke form."""
 
 import numpy as np
 
@@ -16,7 +16,7 @@ def hapke_emissivity(view_zenith, K=1.0, albedo=0.05):
 
 
 def hapke_thermal_emissivity(view_zenith, K=1.0, albedo=0.05):
-    """Convenience wrapper matching tirteb's thermal Hapke interface."""
+    """Convenience wrapper for the thermal Hapke interface."""
     return hapke_emissivity(view_zenith, K, albedo)
 
 

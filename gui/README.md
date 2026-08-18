@@ -1,8 +1,6 @@
-# TiRT Three.js GUI
+# TiRT Directional Three.js GUI
 
-This folder contains the browser interface for the unified TiRT runner.
-
-The temporal page is available at `http://127.0.0.1:8765/time.html`. It uses the time-step engine from the sibling `tirteb` project, reads its meteorological driver, preserves the previous time-step state, and plots temperatures, fluxes, and solar geometry over time. Set `TIRTEB_ROOT` when the sibling project is stored elsewhere.
+This folder contains the browser interface for the TiRT directional runner.
 
 ## Start
 
@@ -12,7 +10,7 @@ From the project root:
 python gui/server.py --port 8765
 ```
 
-Open `http://127.0.0.1:8765/` in a browser. The server uses the existing root `run()` function, so the result panel reflects the current TiRT implementation and the selected input values.
+Open `http://127.0.0.1:8765/` in a browser. The server uses the TiRT root `run()` function, so the result panel reflects the current directional implementation and the selected input values.
 
 ## Layout
 

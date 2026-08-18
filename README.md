@@ -6,7 +6,7 @@ TiRT 用于典型复杂地表热红外方向性辐射传输建模，可计算不
 
 ## 统一运行入口
 
-项目根目录提供了与 `tirteb` 类似的单点运行方式。默认读取根目录的 `input.csv`，结果写入 `cases/<case_name>/output.csv`：
+项目根目录提供了单点运行方式。默认读取根目录的 `input.csv`，结果写入 `cases/<case_name>/output.csv`：
 
 ```bash
 python run.py
@@ -29,7 +29,7 @@ python run.py --input input.csv --output cases/row_demo/output.csv --model row
 
 ## input.csv 结构
 
-输入分组与 `tirteb` 保持一致：
+输入分组采用 `section,key,value,description` 格式：
 
 - `[surface]`：`surface_model` 选择平面、单一坡、复合地形或城区地表，`vegetation_model` 选择裸地、均质植被、垄行或森林。
 - `[vegetation_structure]`、`[row_structure]`、`[crown_structure]`：分别配置 LAI、热点、垄行和树冠结构。
@@ -38,7 +38,7 @@ python run.py --input input.csv --output cases/row_demo/output.csv --model row
 - `[thermal]`：配置土壤、叶片、地形、屋顶、墙壁和街道的日照/阴影温度。
 - `[geometry]`：通过 `geometry_mode` 选择观测角度来源：`0` 为 `vza/vaa` 给定角度，`1` 自动生成主平面，`2` 从 TXT 文件读取，`3` 以一个天顶角步长同时生成太阳主平面和垂直太阳主平面，并追加文件或手动的一一对应观测角度；未设置 `geometry_mode` 时兼容旧的 `geometry_source`。
 
-这里的光谱是热红外高光谱，不是可见光/近红外反射率。光谱文件支持：叶片文件为 `wavelength leaf_emissivity`，土壤文件为 `wavelength soil_emissivity`，建筑文件为 `wavelength roof_emissivity wall_emissivity street_emissivity`；也兼容 `tirteb` 的 7 列建筑文件，读取其中最后三列发射率。文件中的波段会插值到 `wavelengths`。
+这里的光谱是热红外高光谱，不是可见光/近红外反射率。光谱文件支持：叶片文件为 `wavelength leaf_emissivity`，土壤文件为 `wavelength soil_emissivity`，建筑文件为 `wavelength roof_emissivity wall_emissivity street_emissivity`；也兼容 7 列建筑文件，读取其中最后三列发射率。文件中的波段会插值到 `wavelengths`。
 
 几何文件每行支持 `vza vaa`，也支持 `vza vaa sza saa`；角度单位为度，注释行以 `#` 开头。模式 1 使用相对太阳方位角 `0/90/180/270`，可通过 `principal_vza` 或 `principal_vza_step`、`principal_vza_max` 设置天顶角；设置 `geometry_view=parallel` 或 `geometry_view=perpendicular` 可只生成对应的两个方向。
 
@@ -98,7 +98,7 @@ python -m plot.run_plot \
 python gui/server.py --port 8765
 ```
 
-打开 `http://127.0.0.1:8765/`。界面中的 Run simulation 会调用根目录现有的 `run()`，结果区域支持极坐标图、太阳主平面图和垂直太阳主平面图；也可以导出当前表单设置的 `input_gui.csv`。
+打开 `http://127.0.0.1:8765/`。界面中的 Run simulation 会调用根目录现有的 `run()`，结果区域支持极坐标图、太阳主平面图和垂直太阳主平面图；也可以保存当前表单设置的 `input.csv`。
 
 ### 本地一键启动
 
@@ -119,26 +119,6 @@ start_tirt.bat
 ```
 
 当前项目提供的是基于 Python/Conda 的本地运行版本，尚未生成独立的 Windows `.exe`。如果需要不安装 Python 和 Conda 的发布包，需要在 Windows 系统中使用 PyInstaller 单独构建。推荐使用 `--onedir` 文件夹模式，生成的发布目录应包含 `TiRT.exe`、`_internal/`、`data/`、`gui/` 和 `input.csv`；`input.csv` 和 `data/` 保留在 exe 外部，便于修改输入。macOS 上不能可靠构建 Windows `.exe`。
-
-### 时间序列 GUI
-
-打开 `http://127.0.0.1:8765/time.html` 进入时间序列界面。该页面调用同级目录中的 `tirteb` 时间驱动后端，读取 `meteo.txt`，按时间步计算太阳角度并保留热状态历史，输出亮温、土壤/叶片温度、`LE/H/G` 和太阳天顶角随时间的变化。默认查找 `tirt` 同级目录下的 `tirteb`；如果位置不同，可设置：
-
-```bash
-export TIRTEB_ROOT=/path/to/tirteb
-python gui/server.py --port 8765
-```
-
-Windows 命令行对应：
-
-```bat
-set TIRTEB_ROOT=C:\work\tirteb
-python gui\server.py --port 8765
-```
-
-界面输入按 `场景结构`、`传感器设置（观测几何和热红外波段）`、`光谱与温度信息` 分组。建筑、地形、垄行和森林结构参数只在选择对应场景后显示。
-
-光谱与温度区按组分逐行设置：光谱/发射率在中间列，光照和阴影温度在最后一列；叶片、土壤、地形、屋顶、墙壁和街道行按场景条件显示。
 
 ## 目录结构
 

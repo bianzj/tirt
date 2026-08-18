@@ -1,5 +1,5 @@
 # TIRT single-point input,,,
-# 与 tirteb 一致：section,key,value,description
+# 输入格式：section,key,value,description
 ,,,
 [case],,,
 case,case_name,hom_plane,case name

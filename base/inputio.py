@@ -8,7 +8,7 @@ import numpy as np
 
 
 def read_input(input_path):
-    """Read tirteb-style grouped input.csv into flat and scoped keys."""
+    """Read grouped input.csv into flat and scoped keys."""
     config = {"_input_path": str(Path(input_path).resolve())}
     sections = {}
     with Path(input_path).open(newline="", encoding="utf-8-sig") as file:

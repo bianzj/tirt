@@ -25,11 +25,10 @@
         </div>
       </div>
       <div class="topbar-actions">
-        <a class="button button-secondary" href="time.html">Temporal view</a>
         <span id="status-pill" class="status-pill idle"><i></i><span>Ready</span></span>
         <button id="run-button" class="button button-primary"><span class="button-icon">&#9654;</span>Run simulation</button>
-        <button id="save-output-button" class="button button-secondary" disabled><span class="button-icon">&#8595;</span>Save output.csv</button>
-        <button id="export-button" class="button button-secondary"><span class="button-icon">&#8595;</span>Export input.csv</button>
+        <button id="save-output-button" class="button button-secondary" disabled><span class="button-icon">&#8595;</span>Save observations.csv</button>
+        <button id="export-button" class="button button-secondary"><span class="button-icon">&#8595;</span>Save input.csv</button>
       </div>
     </header>
 
@@ -45,10 +44,10 @@
 
         <details class="form-section accordion" open>
           <summary class="section-title"><span class="section-number">01</span><span>Scene structure</span><span class="accordion-mark">⌄</span></summary>
-          <label>Surface model<select id="surface-model">
+          <label>Surface mode<select id="surface-model">
             <option value="plane">Plane</option><option value="slope">Slope</option><option value="terrain">Terrain</option><option value="urban">Urban</option>
           </select></label>
-          <label>Vegetation model<select id="vegetation-model">
+          <label>Vegetation type<select id="vegetation-model">
             <option value="bare">Bare soil</option><option value="hom" selected>Turbid veg</option><option value="row">Crop rows</option><option value="crown">Forest crowns</option>
           </select></label>
           <div class="subsection-title">Surface structure</div>
@@ -110,7 +109,7 @@
         </details>
 
         <details class="form-section accordion" open>
-          <summary class="section-title"><span class="section-number">02</span><span>Observation angles</span><span class="accordion-mark">⌄</span></summary>
+          <summary class="section-title"><span class="section-number">02</span><span>Angles</span><span class="accordion-mark">⌄</span></summary>
           <div class="field-grid">
             <label>Solar zenith<input id="sza" type="text" value="30"></label>
             <label>Solar azimuth<input id="saa" type="text" value="0"></label>
