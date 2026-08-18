@@ -37,7 +37,7 @@ h3 { font-size: 13px; font-weight: 650; margin-top: 5px; }
 .status-pill.busy i { background: var(--amber); box-shadow: 0 0 12px rgba(237, 184, 102, .55); }
 .status-pill.error i { background: var(--coral); box-shadow: 0 0 12px rgba(237, 142, 125, .55); }
 
-.button { min-height: 35px; border: 1px solid transparent; padding: 0 13px; color: var(--ink); font-weight: 650; transition: .15s ease; }
+.button { min-height: 35px; border: 1px solid transparent; padding: 0 13px; color: var(--ink); font-weight: 650; transition: .15s ease; text-decoration: none; }
 .button:hover { transform: translateY(-1px); }
 .button-primary { background: var(--cyan); color: #0a1715; border-color: var(--cyan); }
 .button-secondary { background: transparent; border-color: var(--line); color: var(--soft); }

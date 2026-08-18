@@ -120,6 +120,22 @@ start_tirt.bat
 
 当前项目提供的是基于 Python/Conda 的本地运行版本，尚未生成独立的 Windows `.exe`。如果需要不安装 Python 和 Conda 的发布包，需要在 Windows 系统中使用 PyInstaller 单独构建。推荐使用 `--onedir` 文件夹模式，生成的发布目录应包含 `TiRT.exe`、`_internal/`、`data/`、`gui/` 和 `input.csv`；`input.csv` 和 `data/` 保留在 exe 外部，便于修改输入。macOS 上不能可靠构建 Windows `.exe`。
 
+### 时间序列 GUI
+
+打开 `http://127.0.0.1:8765/time.html` 进入时间序列界面。该页面调用同级目录中的 `tirteb` 时间驱动后端，读取 `meteo.txt`，按时间步计算太阳角度并保留热状态历史，输出亮温、土壤/叶片温度、`LE/H/G` 和太阳天顶角随时间的变化。默认查找 `tirt` 同级目录下的 `tirteb`；如果位置不同，可设置：
+
+```bash
+export TIRTEB_ROOT=/path/to/tirteb
+python gui/server.py --port 8765
+```
+
+Windows 命令行对应：
+
+```bat
+set TIRTEB_ROOT=C:\work\tirteb
+python gui\server.py --port 8765
+```
+
 界面输入按 `场景结构`、`传感器设置（观测几何和热红外波段）`、`光谱与温度信息` 分组。建筑、地形、垄行和森林结构参数只在选择对应场景后显示。
 
 光谱与温度区按组分逐行设置：光谱/发射率在中间列，光照和阴影温度在最后一列；叶片、土壤、地形、屋顶、墙壁和街道行按场景条件显示。

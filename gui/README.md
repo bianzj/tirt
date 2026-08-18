@@ -2,6 +2,8 @@
 
 This folder contains the browser interface for the unified TiRT runner.
 
+The temporal page is available at `http://127.0.0.1:8765/time.html`. It uses the time-step engine from the sibling `tirteb` project, reads its meteorological driver, preserves the previous time-step state, and plots temperatures, fluxes, and solar geometry over time. Set `TIRTEB_ROOT` when the sibling project is stored elsewhere.
+
 ## Start
 
 From the project root:
