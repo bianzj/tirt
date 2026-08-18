@@ -12,8 +12,14 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-GUI_ROOT = Path(__file__).resolve().parent
-PROJECT_ROOT = GUI_ROOT.parent
+def _project_root() -> Path:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS).resolve()
+    return Path(__file__).resolve().parent.parent
+
+
+PROJECT_ROOT = _project_root()
+GUI_ROOT = PROJECT_ROOT / "gui"
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from run import run  # noqa: E402
