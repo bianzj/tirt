@@ -106,8 +106,8 @@ def proportion_bidirectional_row_one(lai,hspot,row_width,row_blank,row_height,vz
     vra = np.abs(vaa - raa) % 180
     vsa[vsa > 180] = 360 - vsa[vsa > 180]
 
-    bv = gap_probability_row_analytical(lai, row_width, row_blank, row_height, vza, vra)
-    bi = gap_probability_row_analytical(lai, row_width, row_blank, row_height, sza, sra)
+    bv = np.clip(gap_probability_row_analytical(lai, row_width, row_blank, row_height, vza, vra), 1.0e-12, 1.0)
+    bi = np.clip(gap_probability_row_analytical(lai, row_width, row_blank, row_height, sza, sra), 1.0e-12, 1.0)
     Psoil = bv
     Pleaf = 1 - Psoil
     cthetv = np.cos(np.deg2rad(vza))

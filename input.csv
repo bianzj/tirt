@@ -7,13 +7,14 @@ case,cases_dir,cases,result root directory
 case,result_dir,cases/hom_plane,result directory
 ,,,
 [surface],,,
-surface,surface_model,plane,plane=flat ground; terrain=sloped ground; urban=buildings and streets
+surface,surface_model,plane,plane=flat ground; slope=single slope; terrain=compound terrain; urban=buildings and streets
 surface,vegetation_model,hom,bare=bare surface; hom=homogeneous; row=ridge; crown=forest
 ,,,
+[slope],,,
+slope,slope_angle,30,single-slope inclination degrees
+slope,slope_aspect,0,single-slope aspect degrees
+,,,
 [terrain],,,
-terrain,terrain_type,2,1=single slope; 2=compound terrain
-terrain,terrain_slope,30,single-slope inclination degrees
-terrain,terrain_aspect,0,single-slope aspect degrees
 terrain,terrain_radius,10,equivalent terrain radius m; semicolon-separated for multiple layers
 terrain,terrain_height,20,equivalent terrain height m; semicolon-separated for multiple layers
 terrain,terrain_density,0.001,terrain spatial density; semicolon-separated for multiple layers
@@ -35,15 +36,15 @@ vegetation_structure,hspot,0.15,hotspot parameter m
 vegetation_structure,leaf_width,0.2,leaf width m
 ,,,
 [row_structure],,,
-row_structure,row_width,1.0,row width m
-row_structure,row_blank,0.1,row blank m
+row_structure,row_width,0.5,row width m
+row_structure,row_blank,0.5,row gap m
 row_structure,row_height,1.0,row height m
 row_structure,row_azimuth,0,row direction degrees
 ,,,
 [crown_structure],,,
-crown_structure,crown_radius,3.0,crown radius m
+crown_structure,crown_rad_a,3.0,crown horizontal radius m
+crown_structure,crown_rad_b,3.0,crown vertical radius m
 crown_structure,crown_height,3.0,crown height m
-crown_structure,crown_width,3.0,crown width m
 crown_structure,crown_density,0.02,crown density
 ,,,
 [spectral],,,
@@ -54,15 +55,20 @@ spectral,vegetation_spectrum_source,direct,direct=constant arrays; file=read veg
 spectral,vegetation_spectrum_file,data/spectrals/vegetation_spectrum.txt,wavelength leaf_emissivity
 spectral,soil_spectrum_source,direct,direct=constant arrays; file=read soil_spectrum_file
 spectral,soil_spectrum_file,data/spectrals/soil_spectrum.txt,wavelength soil_emissivity
-spectral,emissivity_leaf,0.985;0.985;0.985,one value per wavelength
-spectral,emissivity_soil,0.955;0.955;0.955,one value per wavelength
+spectral,emissivity_leaf,0.975;0.985;0.980,one value per wavelength (8;10.5;12 um)
+spectral,emissivity_soil,0.920;0.955;0.965,one value per wavelength (8;10.5;12 um)
+spectral,emissivity_terrain,0.920;0.950;0.960,one value per wavelength (8;10.5;12 um)
+,,,
+[soil_anisotropy],,,
+soil_anisotropy,hapke_enable,0,0=use soil emissivity directly; 1=use Hapke directional correction
+soil_anisotropy,hapke_K,1.0,Hapke directional anisotropy coefficient
 ,,,
 [urban_spectrum],,,
 urban_spectrum,urban_spectrum_source,direct,direct=constant arrays; file=read urban_spectrum_file
 urban_spectrum,urban_spectrum_file,data/spectrals/urban_spectrum.txt,wavelength roof_emissivity wall_emissivity street_emissivity
-urban_spectrum,emissivity_roof,0.95;0.95;0.95,one value per wavelength
-urban_spectrum,emissivity_wall,0.92;0.92;0.92,one value per wavelength
-urban_spectrum,emissivity_street,0.955;0.955;0.955,one value per wavelength
+urban_spectrum,emissivity_roof,0.920;0.950;0.940,one value per wavelength (8;10.5;12 um)
+urban_spectrum,emissivity_wall,0.900;0.930;0.920,one value per wavelength (8;10.5;12 um)
+urban_spectrum,emissivity_street,0.940;0.955;0.950,one value per wavelength (8;10.5;12 um)
 ,,,
 [thermal],,,
 thermal,soil_sunlit_c,45,sunlit soil temperature C
@@ -83,10 +89,10 @@ geometry,geometry_mode,0,0=given vza/vaa lists; 1=solar principal and perpendicu
 geometry,geometry_source,direct,legacy alias when geometry_mode is omitted: direct or file
 geometry,geometry_file,data/directions/observation_directions.txt,vza vaa or vza vaa sza saa per line
 geometry,vza,0;10;20;30;40;50;60,view zenith degrees
-geometry,vaa,0,view azimuth degrees
+geometry,vaa,0;90;180;270,view azimuth degrees
 geometry,sza,30,solar zenith degrees
 geometry,saa,0,solar azimuth degrees
 geometry,geometry_pair_mode,cross,cross=cartesian product; zip=pair lists by row
 geometry,principal_vza,0;10;20;30;40;50;60;70;80,mode 1 view zenith degrees
 geometry,principal_vza_step,10,mode 1 generated view zenith interval degrees when principal_vza is empty
-geometry,principal_vza_max,80,mode 1 generated maximum view zenith degrees
+geometry,principal_vza_max,75,mode 1 generated maximum view zenith degrees

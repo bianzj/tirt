@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TiRT Directional Simulator</title>
+  <link rel="stylesheet" href="styles.css?v=polar-contrast-1">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three.module.js",
+        "three/addons/": "./vendor/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <span class="brand-mark">T</span>
+        <div>
+          <div class="eyebrow">THERMAL INFRARED RADIATIVE TRANSFER</div>
+          <h1>TiRT Directional Simulator</h1>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <span id="status-pill" class="status-pill idle"><i></i><span>Ready</span></span>
+        <button id="run-button" class="button button-primary"><span class="button-icon">&#9654;</span>Run simulation</button>
+        <button id="save-output-button" class="button button-secondary" disabled><span class="button-icon">&#8595;</span>Save output.csv</button>
+        <button id="export-button" class="button button-secondary"><span class="button-icon">&#8595;</span>Export input.csv</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="control-panel panel-scroll">
+        <div class="panel-heading">
+          <div>
+            <span class="section-kicker">CONTROL DECK</span>
+            <h2>Input settings</h2>
+          </div>
+          <button id="reset-button" class="icon-button" title="Reset settings" aria-label="Reset settings">&#8635;</button>
+        </div>
+
+        <details class="form-section accordion" open>
+          <summary class="section-title"><span class="section-number">01</span><span>Scene structure</span><span class="accordion-mark">⌄</span></summary>
+          <label>Surface model<select id="surface-model">
+            <option value="plane">Plane</option><option value="slope">Slope</option><option value="terrain">Terrain</option><option value="urban">Urban</option>
+          </select></label>
+          <label>Vegetation model<select id="vegetation-model">
+            <option value="bare">Bare soil</option><option value="hom" selected>Turbid veg</option><option value="row">Crop rows</option><option value="crown">Forest crowns</option>
+          </select></label>
+          <div class="subsection-title">Surface structure</div>
+          <div id="slope-structure-fields" class="conditional-fields is-hidden">
+            <div class="field-grid">
+              <label>Slope angle (°)<input id="slope-angle" type="text" value="30"></label>
+              <label>Slope aspect (°)<input id="slope-aspect" type="text" value="0"></label>
+            </div>
+          </div>
+          <div id="terrain-structure-fields" class="conditional-fields is-hidden">
+            <div class="field-grid">
+              <label>Terrain height (m)<input id="terrain-height" type="number" min="0" step="1" value="20"></label>
+              <label>Terrain radius (m)<input id="terrain-radius" type="number" min="0" step="1" value="10"></label>
+            </div>
+            <div class="field-grid">
+              <label>Terrain density<input id="terrain-density" type="number" min="0" step="0.0001" value="0.001"></label>
+            </div>
+          </div>
+          <div id="urban-structure-fields" class="conditional-fields is-hidden">
+            <div class="field-grid">
+              <label>Building density<input id="building-density" type="number" min="0" step="0.0001" value="0.0015"></label>
+              <label>Building height (m)<input id="building-height" type="number" min="0" step="1" value="20"></label>
+            </div>
+            <div class="field-grid">
+              <label>Building length (m)<input id="building-length" type="number" min="0" step="1" value="10"></label>
+              <label>Building width (m)<input id="building-width" type="number" min="0" step="1" value="10"></label>
+            </div>
+            <label>Building azimuth (°)<input id="building-azimuth" type="number" min="0" max="360" step="1" value="0"></label>
+          </div>
+          <div class="subsection-title">Vegetation structure</div>
+          <div id="vegetation-common-fields" class="conditional-fields">
+            <div class="field-grid">
+              <label>LAI<input id="lai" type="text" value="1.5"></label>
+              <label>Hotspot<input id="hspot" type="text" value="0.15"></label>
+            </div>
+          </div>
+          <div id="row-structure-fields" class="conditional-fields is-hidden">
+            <div class="field-grid">
+              <label>Row width (m)<input id="row-width" type="text" value="0.5"></label>
+              <label>Row gap (m)<input id="row-blank" type="text" value="0.5"></label>
+            </div>
+            <div class="field-grid">
+              <label>Row height (m)<input id="row-height" type="text" value="1"></label>
+              <label>Row azimuth (°)<input id="row-azimuth" type="text" value="0"></label>
+            </div>
+          </div>
+          <div id="crown-structure-fields" class="conditional-fields is-hidden">
+            <div class="field-grid">
+              <label>Crown rad-a (m)<input id="crown-rad-a" type="text" value="3"></label>
+              <label>Crown rad-b (m)<input id="crown-rad-b" type="text" value="3"></label>
+            </div>
+            <div class="field-grid">
+              <label>Crown height (m)<input id="crown-height" type="text" value="3"></label>
+              <label>Crown density<input id="crown-density" type="text" value="0.02"></label>
+            </div>
+          </div>
+          <p id="bare-structure-note" class="field-note is-hidden">Bare soil selected: vegetation structure is not used.</p>
+          <div id="bare-soil-anisotropy-fields" class="conditional-fields is-hidden"><div class="field-grid"><label>Thapke<select id="hapke-enable"><option value="0" selected>Off</option><option value="1">On</option></select></label><label>Anisotropy K<input id="hapke-k" type="number" min="0.001" step="0.01" value="1"></label></div></div>
+        </details>
+
+        <details class="form-section accordion" open>
+          <summary class="section-title"><span class="section-number">02</span><span>Observation angles</span><span class="accordion-mark">⌄</span></summary>
+          <div class="field-grid">
+            <label>Solar zenith<input id="sza" type="text" value="30"></label>
+            <label>Solar azimuth<input id="saa" type="text" value="0"></label>
+          </div>
+          <div class="field-grid">
+            <label>Principal-plane step (°)<input id="principal-vza-step" type="number" min="0.1" step="1" value="10"></label>
+            <label>Maximum VZA (°)<input id="principal-vza-max" type="number" min="0" max="90" step="1" value="75"></label>
+          </div>
+          <div class="required-plane-grid">
+            <label class="check-row required-plane-pair"><span><input id="include-principal" type="checkbox" checked> Principal plane</span><span><input id="include-hemisphere" type="checkbox" checked> Hemisphere</span></label>
+          </div>
+          <div class="subsection-title">Additional observation angles</div>
+          <div class="source-choice-list">
+            <div class="source-row is-active" data-source="file">
+              <label class="source-option"><input type="radio" name="additional-source" value="file" checked><b>File</b></label>
+              <span class="source-file-control"><input id="geometry-upload" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Geometry file"><label class="file-trigger" for="geometry-upload" title="Select geometry file">...</label><span id="geometry-file-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></span>
+            </div>
+            <div class="source-row" data-source="manual">
+              <label class="source-option"><input type="radio" name="additional-source" value="manual"><b>Manual</b></label>
+              <input id="manual-geometry" class="manual-geometry-input" value="0/0; 10/90; 20/180" spellcheck="false" aria-label="Manual VZA/VAA pairs">
+            </div>
+          </div>
+        </details>
+
+        <details class="form-section accordion">
+          <summary class="section-title"><span class="section-number">03</span><span>Spectra</span><span class="accordion-mark">⌄</span></summary>
+          <div class="spectrum-list">
+            <div class="spectrum-row spectrum-head"><span>Component</span><span>Emissivity</span><span>File</span></div>
+            <div class="spectrum-row"><strong>Wavelength bands</strong><input id="wavelengths" value="8;10.5;12" spellcheck="false"><span class="file-picker"><input id="wavelength-file" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Wavelength file"><label class="file-trigger" for="wavelength-file" title="Select wavelength file">...</label><span id="wavelength-file-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></span></div>
+            <div id="leaf-component-row" class="spectrum-row"><strong>Leaf</strong><input id="emissivity-leaf" value="0.975;0.985;0.980" spellcheck="false"><span class="file-picker"><input id="leaf-spectrum-file" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Leaf spectrum file"><label class="file-trigger" for="leaf-spectrum-file" title="Select leaf spectrum file">...</label><span id="leaf-spectrum-file-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></span></div>
+            <div id="soil-component-row" class="spectrum-row"><strong>Soil</strong><input id="emissivity-soil" value="0.920;0.955;0.965" spellcheck="false"><span class="file-picker"><input id="soil-spectrum-file" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Soil spectrum file"><label class="file-trigger" for="soil-spectrum-file" title="Select soil spectrum file">...</label><span id="soil-spectrum-file-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></span></div>
+            <div id="terrain-component-row" class="spectrum-row is-hidden"><strong>Terrain</strong><input id="emissivity-terrain" value="0.920;0.950;0.960" spellcheck="false"><span class="file-picker"><input id="terrain-spectrum-file" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Terrain spectrum file"><label class="file-trigger" for="terrain-spectrum-file" title="Select terrain spectrum file">...</label><span id="terrain-spectrum-file-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></span></div>
+            <div id="roof-component-row" class="spectrum-row is-hidden"><strong>Roof</strong><input id="emissivity-roof" value="0.920;0.950;0.940" spellcheck="false"><span class="file-picker"><input id="roof-spectrum-file" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Roof spectrum file"><label class="file-trigger" for="roof-spectrum-file" title="Select roof spectrum file">...</label><span id="roof-spectrum-file-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></span></div>
+            <div id="wall-component-row" class="spectrum-row is-hidden"><strong>Wall</strong><input id="emissivity-wall" value="0.900;0.930;0.920" spellcheck="false"><span class="file-picker"><input id="wall-spectrum-file" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Wall spectrum file"><label class="file-trigger" for="wall-spectrum-file" title="Select wall spectrum file">...</label><span id="wall-spectrum-file-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></span></div>
+            <div id="street-component-row" class="spectrum-row is-hidden"><strong>Street</strong><input id="emissivity-street" value="0.940;0.955;0.950" spellcheck="false"><span class="file-picker"><input id="street-spectrum-file" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Street spectrum file"><label class="file-trigger" for="street-spectrum-file" title="Select street spectrum file">...</label><span id="street-spectrum-file-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></span></div>
+          </div>
+        </details>
+
+        <details class="form-section accordion">
+          <summary class="section-title"><span class="section-number">04</span><span>Temperatures</span><span class="accordion-mark">⌄</span></summary>
+          <div class="temperature-list">
+            <div class="temperature-row temperature-head"><span>Component</span><span>Sunlit °C</span><span>Shaded °C</span></div>
+            <div id="leaf-temperature-row" class="temperature-row"><strong>Leaf</strong><input id="leaf-sunlit-c" type="number" step="0.1" value="33" aria-label="Leaf sunlit temperature"><input id="leaf-shaded-c" type="number" step="0.1" value="30" aria-label="Leaf shaded temperature"></div>
+            <div id="soil-temperature-row" class="temperature-row"><strong>Soil</strong><input id="soil-sunlit-c" type="number" step="0.1" value="45" aria-label="Soil sunlit temperature"><input id="soil-shaded-c" type="number" step="0.1" value="30" aria-label="Soil shaded temperature"></div>
+            <div id="terrain-temperature-row" class="temperature-row is-hidden"><strong>Terrain</strong><input id="terrain-sunlit-c" type="number" step="0.1" value="33" aria-label="Terrain sunlit temperature"><input id="terrain-shaded-c" type="number" step="0.1" value="30" aria-label="Terrain shaded temperature"></div>
+            <div id="roof-temperature-row" class="temperature-row is-hidden"><strong>Roof</strong><input id="roof-sunlit-c" type="number" step="0.1" value="45" aria-label="Roof sunlit temperature"><input id="roof-shaded-c" type="number" step="0.1" value="30" aria-label="Roof shaded temperature"></div>
+            <div id="wall-temperature-row" class="temperature-row is-hidden"><strong>Wall</strong><input id="wall-sunlit-c" type="number" step="0.1" value="45" aria-label="Wall sunlit temperature"><input id="wall-shaded-c" type="number" step="0.1" value="30" aria-label="Wall shaded temperature"></div>
+            <div id="street-temperature-row" class="temperature-row is-hidden"><strong>Street</strong><input id="street-sunlit-c" type="number" step="0.1" value="45" aria-label="Street sunlit temperature"><input id="street-shaded-c" type="number" step="0.1" value="30" aria-label="Street shaded temperature"></div>
+          </div>
+        </details>
+
+      </aside>
+
+      <section class="main-stage">
+        <section class="scene-panel panel">
+          <div class="panel-toolbar">
+            <div><span class="section-kicker">SCENE PREVIEW</span><h2 id="scene-title">Plane · Turbid veg</h2></div>
+            <div class="scene-legend"><span><i class="legend-dot sun"></i>Sun</span><span><i class="legend-dot view"></i>View rays</span><span><i class="legend-dot canopy"></i>Vegetation</span></div>
+          </div>
+          <div id="scene-container" class="scene-container"><div class="north-marker" aria-label="North is azimuth 0 degrees"><b>N</b><span>0°</span></div><div id="scene-loading" class="scene-loading">Loading Three.js scene</div></div>
+          <div class="scene-readout"><span>Solar <b id="solar-readout">SZA 30° · SAA 0°</b></span><span>Observation <b id="observation-readout">7 zenith × 3 azimuth</b></span><span>Scene <b id="scene-readout">Plane / canopy</b></span><span>Domain <b>100 m × 100 m · North 0°</b></span></div>
+        </section>
+
+        <section class="results-panel panel">
+          <div class="panel-toolbar results-toolbar">
+            <div><span class="section-kicker">MODEL OUTPUT</span><h2>Directional results</h2></div>
+            <div class="result-tools"><div class="result-view-controls"><label class="check-label"><input id="show-polar" type="checkbox" checked><span>Polar</span></label><label class="check-label"><input id="show-parallel" type="checkbox" checked><span>Parallel</span></label><label class="check-label"><input id="show-perpendicular" type="checkbox" checked><span>Vertical</span></label><label>Quantity<select id="quantity"><option value="brightness_temperature_C">Temperature (°C)</option><option value="brightness_temperature_K">Temperature (K)</option><option value="radiance">Radiance</option></select></label></div><label>Scenario<select id="scenario-select"><option value="1">S01</option></select></label><label>Band<select id="band-select"><option>10.5 µm</option></select></label></div>
+          </div>
+          <div id="empty-state" class="empty-state"><div class="empty-icon">&#9670;</div><h3>Run a simulation to inspect the directional field</h3><p>Choose a geometry mode and thermal band, then run the current input through TiRT.</p></div>
+          <div id="results-content" class="results-content is-hidden">
+            <div class="metric-strip">
+              <div class="metric"><span>Mean temperature</span><strong id="mean-bt">--</strong><small>selected band</small></div>
+              <div class="metric"><span>Directional span</span><strong id="range-bt">--</strong><small>max - min</small></div>
+              <div class="metric"><span>Radiance</span><strong id="mean-radiance">--</strong><small>W m⁻² sr⁻¹ µm⁻¹</small></div>
+              <div class="metric"><span>Observations</span><strong id="observation-count">--</strong><small>selected band</small></div>
+            </div>
+            <div id="chart-grid" class="chart-grid">
+              <article id="polar-card" class="chart-card"><div class="chart-heading"><div><span class="chart-kicker">VIEW HEMISPHERE</span><h3>Polar directional map</h3></div><span class="chart-badge cyan">VAA / VZA</span></div><canvas id="polar-chart"></canvas><div class="polar-colorbar" aria-label="Color scale"><span id="polar-colorbar-min">--</span><div class="polar-colorbar-track"></div><span id="polar-colorbar-max">--</span></div></article>
+              <article id="parallel-card" class="chart-card"><div class="chart-heading"><div><span class="chart-kicker">SOLAR PRINCIPAL PLANE</span><h3>Parallel response</h3></div><span class="chart-badge amber">RAA 0 / 180</span></div><canvas id="parallel-chart"></canvas></article>
+              <article id="perpendicular-card" class="chart-card"><div class="chart-heading"><div><span class="chart-kicker">ORTHOGONAL PLANE</span><h3>Perpendicular response</h3></div><span class="chart-badge coral">RAA 90 / 270</span></div><canvas id="perpendicular-chart"></canvas></article>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

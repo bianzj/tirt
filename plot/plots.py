@@ -1,6 +1,7 @@
 """Polar and solar-principal-plane plots for TiRT output.csv."""
 
 import csv
+import math
 from pathlib import Path
 
 import numpy as np
@@ -74,18 +75,75 @@ def _label(quantity):
 
 
 def plot_polar(rows, output_path=None, quantity="brightness_temperature_C", title=None, show=False):
-    """Draw a view-hemisphere polar scatter plot."""
+    """Draw a dense, periodically interpolated view-hemisphere contour map."""
     plt = _matplotlib(show)
-    theta = np.radians([row["vaa"] for row in rows])
-    radius = np.asarray([row["vza"] for row in rows])
-    values = np.asarray([row["value"] for row in rows])
-    fig, ax = plt.subplots(figsize=(7, 6), subplot_kw={"projection": "polar"})
+    zeniths = np.sort(np.unique([float(row["vza"]) for row in rows]))
+    azimuths = np.sort(np.unique([float(row["vaa"]) % 360.0 for row in rows]))
+    azimuths = azimuths[azimuths < 360.0]
+    if zeniths.size < 2 or azimuths.size < 2:
+        raise ValueError("极坐标填充至少需要两个天顶角和两个方位角")
+
+    lookup = {
+        (float(row["vza"]), float(row["vaa"]) % 360.0): float(row["value"])
+        for row in rows
+    }
+    values = np.asarray(
+        [[lookup.get((zenith, azimuth), np.nan) for azimuth in azimuths] for zenith in zeniths],
+        dtype=float,
+    )
+    if not np.any(np.isfinite(values)):
+        raise ValueError("极坐标数据没有有限值")
+
+    # Interpolate around the periodic azimuth axis first, then along VZA.
+    fine_azimuths = np.linspace(0.0, 360.0, 361)
+    fine_zeniths = np.linspace(float(zeniths.min()), float(zeniths.max()), 121)
+    azimuth_grid = np.deg2rad(fine_azimuths)
+    radial_values = np.empty((zeniths.size, fine_azimuths.size), dtype=float)
+    for index, row in enumerate(values):
+        valid = np.isfinite(row)
+        if not np.any(valid):
+            radial_values[index] = np.nan
+            continue
+        x = azimuths[valid]
+        y = row[valid]
+        x_extended = np.r_[x, x[0] + 360.0]
+        y_extended = np.r_[y, y[0]]
+        radial_values[index] = np.interp(fine_azimuths, x_extended, y_extended)
+
+    polar_values = np.empty((fine_zeniths.size, fine_azimuths.size), dtype=float)
+    for index in range(fine_azimuths.size):
+        valid = np.isfinite(radial_values[:, index])
+        if not np.any(valid):
+            polar_values[:, index] = np.nan
+            continue
+        polar_values[:, index] = np.interp(
+            fine_zeniths, zeniths[valid], radial_values[valid, index]
+        )
+    polar_values[0, :] = polar_values[0, 0]
+
+    fig, ax = plt.subplots(figsize=(7.2, 6.4), subplot_kw={"projection": "polar"})
+    finite = polar_values[np.isfinite(polar_values)]
+    value_min, value_max = float(finite.min()), float(finite.max())
+    levels = (
+        np.linspace(value_min - 1e-6, value_max + 1e-6, 20)
+        if math.isclose(value_min, value_max, rel_tol=0.0, abs_tol=1e-12)
+        else np.linspace(value_min, value_max, 60)
+    )
+    contour = ax.contourf(
+        np.tile(azimuth_grid, (fine_zeniths.size, 1)),
+        np.tile(fine_zeniths[:, None], (1, fine_azimuths.size)),
+        polar_values,
+        levels=levels,
+        cmap="turbo",
+        extend="both",
+    )
     ax.set_theta_zero_location("N")
     ax.set_theta_direction(-1)
-    points = ax.scatter(theta, radius, c=values, cmap="turbo", s=34, edgecolors="none")
-    ax.set_ylim(0.0, max(5.0, float(np.max(radius)) * 1.05))
+    ax.set_rmax(max(float(zeniths.max()), 1.0))
+    ax.set_rticks(zeniths.tolist())
+    ax.set_rlabel_position(22.5)
     ax.set_title(title or "TiRT directional response")
-    fig.colorbar(points, ax=ax, pad=0.1, label=_label(quantity))
+    fig.colorbar(contour, ax=ax, pad=0.12, label=_label(quantity))
     fig.tight_layout()
     result = _save(fig, output_path, show)
     plt.close(fig)

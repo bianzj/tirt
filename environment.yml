@@ -1,0 +1,17 @@
+name: tirt
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy
+  - scipy
+  - matplotlib
+  - pandas
+  - scikit-learn
+  - seaborn
+  - xlrd
+  - opencv
+  - netcdf4
+  - pysolar
+  - gdal

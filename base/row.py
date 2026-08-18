@@ -42,7 +42,8 @@ class Row():
 
     def set_structure(self,lai,hspot,row_width,row_blank,row_height):
         self.leaf_area_index = lai
-        self.hspot = hspot
+        # Keep the hotspot limit finite when the UI value is zero.
+        self.hspot = max(float(hspot), 1.0e-6)
         self.row_width = row_width
         self.row_blank = row_blank
         self.row_height = row_height
@@ -132,5 +133,4 @@ class Row():
             return self.radiance
         else:
             return inv_planck(self.wavelength, self.radiance)
-
 
