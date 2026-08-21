@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TiRT Directional Simulator</title>
-  <link rel="stylesheet" href="styles.css?v=polar-contrast-1">
+  <title>STREAM TIRT Directional Simulator</title>
+  <link rel="stylesheet" href="styles.css?v=stream-tirt-light-3">
   <script type="importmap">
     {
       "imports": {
@@ -18,17 +18,22 @@
   <div class="app-shell">
     <header class="topbar">
       <div class="brand-lockup">
-        <span class="brand-mark">T</span>
+        <div class="brand-logo" aria-label="STREAM TIRT">
+          <span class="logo-stream">STREAM</span>
+          <span class="logo-slash" aria-hidden="true"></span>
+          <span class="logo-tirt">TIRT</span>
+        </div>
         <div>
           <div class="eyebrow">THERMAL INFRARED RADIATIVE TRANSFER</div>
-          <h1>TiRT Directional Simulator</h1>
+          <h1>Directional Simulator</h1>
         </div>
       </div>
       <div class="topbar-actions">
         <span id="status-pill" class="status-pill idle"><i></i><span>Ready</span></span>
-        <button id="run-button" class="button button-primary"><span class="button-icon">&#9654;</span>Run simulation</button>
+        <button id="run-button" class="button button-primary" aria-busy="false"><span class="button-icon run-icon" aria-hidden="true">&#9654;</span><span class="button-label">Run simulation</span></button>
         <button id="save-output-button" class="button button-secondary" disabled><span class="button-icon">&#8595;</span>Save observations.csv</button>
         <button id="export-button" class="button button-secondary"><span class="button-icon">&#8595;</span>Save input.csv</button>
+        <button id="exit-button" class="button button-danger" title="Exit TiRT"><span class="button-icon">&#10005;</span>Exit</button>
       </div>
     </header>
 
@@ -42,7 +47,7 @@
           <button id="reset-button" class="icon-button" title="Reset settings" aria-label="Reset settings">&#8635;</button>
         </div>
 
-        <details class="form-section accordion" open>
+        <details class="form-section accordion">
           <summary class="section-title"><span class="section-number">01</span><span>Scene structure</span><span class="accordion-mark">⌄</span></summary>
           <label>Surface mode<select id="surface-model">
             <option value="plane">Plane</option><option value="slope">Slope</option><option value="terrain">Terrain</option><option value="urban">Urban</option>
@@ -53,8 +58,8 @@
           <div class="subsection-title">Surface structure</div>
           <div id="slope-structure-fields" class="conditional-fields is-hidden">
             <div class="field-grid">
-              <label>Slope angle (°)<input id="slope-angle" type="text" value="30"></label>
-              <label>Slope aspect (°)<input id="slope-aspect" type="text" value="0"></label>
+              <label>Slope angle (°)<input id="slope-angle" type="number" min="0" max="90" step="0.1" value="30" required></label>
+              <label>Slope aspect (°)<input id="slope-aspect" type="number" min="0" max="360" step="0.1" value="0" required></label>
             </div>
           </div>
           <div id="terrain-structure-fields" class="conditional-fields is-hidden">
@@ -80,42 +85,42 @@
           <div class="subsection-title">Vegetation structure</div>
           <div id="vegetation-common-fields" class="conditional-fields">
             <div class="field-grid">
-              <label>LAI<input id="lai" type="text" value="1.5"></label>
-              <label>Hotspot<input id="hspot" type="text" value="0.15"></label>
+              <label>LAI<input id="lai" type="number" min="0" step="0.1" value="1.5" required></label>
+              <label>Hotspot<input id="hspot" type="number" min="0" step="0.01" value="0.15" required></label>
             </div>
           </div>
           <div id="row-structure-fields" class="conditional-fields is-hidden">
             <div class="field-grid">
-              <label>Row width (m)<input id="row-width" type="text" value="0.5"></label>
-              <label>Row gap (m)<input id="row-blank" type="text" value="0.5"></label>
+              <label>Row width (m)<input id="row-width" type="number" min="0" step="0.1" value="0.5" required></label>
+              <label>Row gap (m)<input id="row-blank" type="number" min="0" step="0.1" value="0.5" required></label>
             </div>
             <div class="field-grid">
-              <label>Row height (m)<input id="row-height" type="text" value="1"></label>
-              <label>Row azimuth (°)<input id="row-azimuth" type="text" value="0"></label>
+              <label>Row height (m)<input id="row-height" type="number" min="0" step="0.1" value="1" required></label>
+              <label>Row azimuth (°)<input id="row-azimuth" type="number" min="0" max="360" step="0.1" value="0" required></label>
             </div>
           </div>
           <div id="crown-structure-fields" class="conditional-fields is-hidden">
             <div class="field-grid">
-              <label>Crown rad-a (m)<input id="crown-rad-a" type="text" value="3"></label>
-              <label>Crown rad-b (m)<input id="crown-rad-b" type="text" value="3"></label>
+              <label>Crown rad-a (m)<input id="crown-rad-a" type="number" min="0" step="0.1" value="3" required></label>
+              <label>Crown rad-b (m)<input id="crown-rad-b" type="number" min="0" step="0.1" value="3" required></label>
             </div>
             <div class="field-grid">
-              <label>Crown height (m)<input id="crown-height" type="text" value="3"></label>
-              <label>Crown density<input id="crown-density" type="text" value="0.02"></label>
+              <label>Crown height (m)<input id="crown-height" type="number" min="0" step="0.1" value="3" required></label>
+              <label>Crown density<input id="crown-density" type="number" min="0" step="0.001" value="0.02" required></label>
             </div>
           </div>
           <p id="bare-structure-note" class="field-note is-hidden">Bare soil selected: vegetation structure is not used.</p>
-          <div id="bare-soil-anisotropy-fields" class="conditional-fields is-hidden"><div class="field-grid"><label>Thapke<select id="hapke-enable"><option value="0" selected>Off</option><option value="1">On</option></select></label><label>Anisotropy K<input id="hapke-k" type="number" min="0.001" step="0.01" value="1"></label></div></div>
+          <div id="bare-soil-anisotropy-fields" class="conditional-fields is-hidden"><div class="field-grid"><label>Thapke<select id="hapke-enable"><option value="0" selected>Off</option><option value="1">On</option></select></label><label>Anisotropy K<input id="hapke-k" type="number" min="0.001" step="0.001" value="1"></label></div></div>
         </details>
 
-        <details class="form-section accordion" open>
+        <details class="form-section accordion">
           <summary class="section-title"><span class="section-number">02</span><span>Angles</span><span class="accordion-mark">⌄</span></summary>
           <div class="field-grid">
-            <label>Solar zenith<input id="sza" type="text" value="30"></label>
-            <label>Solar azimuth<input id="saa" type="text" value="0"></label>
+            <label>Solar zenith<input id="sza" type="number" min="0" max="90" step="0.1" value="30" required></label>
+            <label>Solar azimuth<input id="saa" type="number" min="0" max="360" step="0.1" value="0" required></label>
           </div>
           <div class="field-grid">
-            <label>Principal-plane step (°)<input id="principal-vza-step" type="number" min="0.1" step="1" value="10"></label>
+            <label>Principal-plane step (°)<input id="principal-vza-step" type="number" min="0.1" step="0.1" value="10"></label>
             <label>Maximum VZA (°)<input id="principal-vza-max" type="number" min="0" max="90" step="1" value="75"></label>
           </div>
           <div class="required-plane-grid">
@@ -197,6 +202,6 @@
     </main>
   </div>
   <div id="toast" class="toast" role="status"></div>
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?v=stream-tirt-light-3"></script>
 </body>
 </html>

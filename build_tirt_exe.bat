@@ -13,6 +13,8 @@ set "MPLBACKEND=Agg"
   --noconfirm ^
   --clean ^
   --onefile ^
+  --windowed ^
+  --icon "tirt.ico" ^
   --name TiRT ^
   --exclude-module matplotlib ^
   --exclude-module PIL ^

@@ -7,6 +7,7 @@ import json
 import shutil
 import sys
 import tempfile
+import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -47,6 +48,10 @@ class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(GUI_ROOT), **kwargs)
 
+    def log_message(self, format, *args):
+        """Windowed EXE builds do not have a usable stderr stream."""
+        return
+
     def _json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
@@ -56,6 +61,11 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def end_headers(self):
+        if not self.path.startswith("/api/"):
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        super().end_headers()
+
     def do_GET(self):  # noqa: N802
         if urlparse(self.path).path == "/api/health":
             self._json(200, {"ok": True, "project": str(PROJECT_ROOT), "engine": "tirt"})
@@ -63,7 +73,12 @@ class Handler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self):  # noqa: N802
-        if urlparse(self.path).path != "/api/run":
+        path = urlparse(self.path).path
+        if path == "/api/shutdown":
+            self._json(200, {"ok": True, "message": "TiRT is shutting down"})
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+            return
+        if path != "/api/run":
             self._json(404, {"error": "Not found"})
             return
         work_dir = None

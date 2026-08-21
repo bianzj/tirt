@@ -17,7 +17,7 @@ if (window.location.protocol === "file:") {
   window.location.replace("http://127.0.0.1:8765/");
 }
 const root = document.documentElement;
-const colors = { cyan: "#57d3c6", amber: "#edb866", coral: "#ed8e7d", muted: "#687774", grid: "#293735", ink: "#e9f0ee" };
+const colors = { cyan: "#1683a3", amber: "#d38a24", coral: "#d53b36", muted: "#5d7383", grid: "#c9dae4", ink: "#173044" };
 const SCENE_SIZE = 100;
 const HALF_SCENE = SCENE_SIZE / 2;
 const NORTH_AZIMUTH = 0;
@@ -185,9 +185,71 @@ function updateSceneReadout() {
   $("observation-readout").textContent = count;
 }
 
+function fieldName(input) {
+  const labelText = input.closest("label")?.firstChild?.textContent?.trim();
+  return input.getAttribute("aria-label") || labelText || input.id;
+}
+
+function validateInputs() {
+  const activeNumberInputs = [...document.querySelectorAll('input[type="number"]')]
+    .filter((input) => !input.closest(".is-hidden"));
+  const invalidNumber = activeNumberInputs.find((input) => {
+    return input.value.trim() === "" || !Number.isFinite(input.valueAsNumber) || !input.checkValidity();
+  });
+  if (invalidNumber) {
+    return { input: invalidNumber, message: `Invalid value for ${fieldName(invalidNumber)}` };
+  }
+
+  const wavelengths = numberList(value("wavelengths"));
+  if (!wavelengths.length || wavelengths.some((item) => item <= 0)) {
+    return { input: $("wavelengths"), message: "Wavelengths must contain positive numbers" };
+  }
+
+  const spectrumIds = [
+    ["emissivity-soil", "Soil emissivity"],
+    ["emissivity-leaf", "Leaf emissivity"],
+    ["emissivity-terrain", "Terrain emissivity"],
+    ["emissivity-roof", "Roof emissivity"],
+    ["emissivity-wall", "Wall emissivity"],
+    ["emissivity-street", "Street emissivity"],
+  ];
+  for (const [id, label] of spectrumIds) {
+    const input = $(id);
+    if (!input || input.closest(".is-hidden")) continue;
+    const numbers = numberList(input.value);
+    if (!numbers.length || numbers.some((item) => item < 0 || item > 1)) {
+      return { input, message: `${label} must be between 0 and 1` };
+    }
+  }
+
+  const source = selectedAdditionalSource();
+  const hasAdditional = source === "manual" ? manualGeometryPairs().length > 0 : Boolean(uploadedGeometryText);
+  if (!$("include-principal").checked && !$("include-hemisphere").checked && !hasAdditional) {
+    const input = source === "manual" ? $("manual-geometry") : $("geometry-upload");
+    return { input, message: "Select an observation plane or provide observation angles" };
+  }
+  return null;
+}
+
+function setRunBusy(busy) {
+  const button = $("run-button");
+  button.disabled = busy;
+  button.setAttribute("aria-busy", String(busy));
+  button.classList.toggle("is-running", busy);
+  button.querySelector(".button-label").textContent = busy ? "Running..." : "Run simulation";
+}
+
 async function runSimulation() {
+  const validation = validateInputs();
+  if (validation) {
+    setStatus("Input error", "error");
+    notify(validation.message, true);
+    validation.input?.focus();
+    return;
+  }
+
   setStatus("Running", "busy");
-  $("run-button").disabled = true;
+  setRunBusy(true);
   try {
     const response = await fetch("/api/run", {
       method: "POST",
@@ -204,12 +266,12 @@ async function runSimulation() {
     updateSceneReadout();
     updateScene();
     setStatus("Complete", "idle");
-    notify(`Simulation complete · ${payload.count} output records`);
+    notify(`Simulation complete - ${payload.count} output records`);
   } catch (error) {
     setStatus("Error", "error");
     notify(error.message, true);
   } finally {
-    $("run-button").disabled = false;
+    setRunBusy(false);
   }
 }
 
@@ -448,7 +510,7 @@ function drawPolar(rows) {
   }
   ctx.font = "10px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
   [vzaMax / 3, vzaMax * 2 / 3, vzaMax].forEach((ring) => { const r = radius * ring / vzaMax; ctx.strokeStyle = colors.grid; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke(); ctx.fillStyle = colors.muted; ctx.fillText(`${fmt(ring, 0)}°`, cx + 9, cy - r + 1); });
-  [0, 90, 180, 270].forEach((angle) => { const rad = angle * Math.PI / 180; ctx.strokeStyle = "#22302e"; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.sin(rad) * radius, cy - Math.cos(rad) * radius); ctx.stroke(); ctx.fillStyle = colors.muted; ctx.fillText(`${angle}°`, cx + Math.sin(rad) * (radius + 16), cy - Math.cos(rad) * (radius + 16)); });
+  [0, 90, 180, 270].forEach((angle) => { const rad = angle * Math.PI / 180; ctx.strokeStyle = "#b8cbd7"; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.sin(rad) * radius, cy - Math.cos(rad) * radius); ctx.stroke(); ctx.fillStyle = colors.muted; ctx.fillText(`${angle}°`, cx + Math.sin(rad) * (radius + 16), cy - Math.cos(rad) * (radius + 16)); });
   $("polar-colorbar-min").textContent = fmt(min);
   $("polar-colorbar-max").textContent = fmt(max);
   ctx.fillStyle = colors.muted; ctx.textAlign = "left"; ctx.fillText(`VZA radius · ${fmt(selectedWavelength, 1)} µm`, 8, height - 10);
@@ -643,7 +705,7 @@ function updateScene() {
 
 function initScene() {
   const container = $("scene-container");
-  scene = new THREE.Scene(); scene.background = new THREE.Color(0x0c1413);
+  scene = new THREE.Scene(); scene.background = new THREE.Color(0xe8f1f5);
   camera = new THREE.PerspectiveCamera(42, container.clientWidth / container.clientHeight, .1, 250); camera.position.set(70, 55, 75);
   renderer = new THREE.WebGLRenderer({ antialias: true }); renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2)); renderer.setSize(container.clientWidth, container.clientHeight); container.appendChild(renderer.domElement);
   controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = true; controls.target.set(0, 2, 0);
@@ -684,8 +746,20 @@ function buildInputCsv() {
 }
 function exportInput() { const blob = new Blob([buildInputCsv()], { type: "text/csv;charset=utf-8" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "input.csv"; link.click(); URL.revokeObjectURL(link.href); notify("Saved input.csv"); }
 
+async function shutdownTiRT() {
+  const button = document.getElementById('exit-button');
+  button.disabled = true;
+  try {
+    await fetch("/api/shutdown", { method: "POST" });
+    document.body.textContent = "TiRT has exited.";
+  } catch (error) {
+    button.disabled = false;
+    notify(error.message || "TiRT could not exit", true);
+  }
+}
+
 function bindEvents() {
-  $("run-button").addEventListener("click", runSimulation); $("save-output-button").addEventListener("click", exportOutput); $("export-button").addEventListener("click", exportInput); $("reset-button").addEventListener("click", () => window.location.reload());
+  $("run-button").addEventListener("click", runSimulation); $("save-output-button").addEventListener("click", exportOutput); $("export-button").addEventListener("click", exportInput); document.getElementById('exit-button').addEventListener('click', shutdownTiRT); $("reset-button").addEventListener("click", () => window.location.reload());
   document.querySelectorAll('input[name="additional-source"]').forEach((input) => input.addEventListener("change", updateGeometryFields)); $("band-select").addEventListener("change", renderResults); $("quantity").addEventListener("change", renderResults); $("scenario-select").addEventListener("change", renderResults);
   ["show-polar", "show-parallel", "show-perpendicular"].forEach((id) => $(id).addEventListener("change", updateChartVisibility));
   ["surface-model", "vegetation-model"].forEach((id) => $(id).addEventListener("change", () => { updateConditionalFields(); updateSceneReadout(); updateScene(); }));

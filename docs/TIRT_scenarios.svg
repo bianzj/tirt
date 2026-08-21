@@ -1,0 +1,154 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1100" viewBox="0 0 1800 1100">
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#173044" flood-opacity=".10"/>
+    </filter>
+    <style>
+      .sans { font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif; }
+      .ink { fill: #173044; }
+      .muted { fill: #5d7383; }
+      .blue { fill: #1683a3; }
+      .red { fill: #d53b36; }
+      .orange { fill: #d38a24; }
+      .green { fill: #348b68; }
+      .card { fill: #ffffff; stroke: #c9dae4; stroke-width: 2; }
+      .line { stroke: #c9dae4; stroke-width: 2; }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1100" fill="#f5fafc"/>
+  <path d="M0 0h1800v20H0z" fill="#1683a3"/>
+  <path d="M620 0h560v20H620z" fill="#d53b36"/>
+
+  <g class="sans">
+    <text x="92" y="95" font-size="23" font-weight="700" letter-spacing="4" class="blue">STREAM</text>
+    <path d="M245 67l42 0-32 46h-42z" fill="#d53b36"/>
+    <text x="302" y="95" font-size="23" font-weight="800" letter-spacing="3" class="ink">TIRT</text>
+    <text x="92" y="152" font-size="52" font-weight="800" class="ink">Runnable scene library</text>
+    <text x="94" y="190" font-size="20" class="muted">Thermal infrared directional radiative transfer · choose one surface and one vegetation type</text>
+    <g transform="translate(1390 86)">
+      <rect width="302" height="76" rx="12" fill="#e6f3f7" stroke="#b5d6e2"/>
+      <text x="22" y="31" font-size="17" font-weight="700" class="blue">16 combinations</text>
+      <text x="22" y="57" font-size="15" class="muted">4 surface × 4 vegetation</text>
+    </g>
+
+    <line x1="92" y1="235" x2="1708" y2="235" class="line"/>
+    <text x="94" y="279" font-size="17" font-weight="800" letter-spacing="3" class="blue">01  SURFACE</text>
+    <text x="1706" y="279" text-anchor="end" font-size="15" class="muted">Surface mode</text>
+
+    <!-- Surface cards -->
+    <g transform="translate(92 305)" filter="url(#shadow)">
+      <rect width="382" height="300" rx="14" class="card"/>
+      <rect width="382" height="8" rx="4" fill="#1683a3"/>
+      <g transform="translate(30 34)">
+        <path d="M12 142L167 85l168 59-155 60z" fill="#d38a24" stroke="#a96618" stroke-width="3"/>
+        <path d="M12 142v34l168 61v-33z" fill="#b96e1b" opacity=".75"/>
+        <path d="M180 203l155-59v33l-155 60z" fill="#e5a13c" opacity=".9"/>
+        <path d="M50 145l43-16M104 163l43-16M158 181l43-16M212 166l43-16M266 147l43-16" stroke="#f7d18b" stroke-width="4" stroke-linecap="round" opacity=".8"/>
+      </g>
+      <text x="30" y="238" font-size="27" font-weight="800" class="ink">Plane</text>
+      <text x="30" y="266" font-size="16" class="muted">平面 · horizontal reference surface</text>
+    </g>
+
+    <g transform="translate(500 305)" filter="url(#shadow)">
+      <rect width="382" height="300" rx="14" class="card"/>
+      <rect width="382" height="8" rx="4" fill="#d38a24"/>
+      <g transform="translate(30 34)">
+        <path d="M20 175L186 91l148 55-161 85z" fill="#d38a24" stroke="#a96618" stroke-width="3"/>
+        <path d="M20 175v28l153 57v-29z" fill="#b96e1b" opacity=".75"/>
+        <path d="M173 231l161-85v28l-161 86z" fill="#e5a13c" opacity=".9"/>
+        <path d="M48 169l158-53M69 187l158-53M90 205l158-53M111 223l158-53" stroke="#f7d18b" stroke-width="4" stroke-linecap="round" opacity=".8"/>
+        <path d="M287 55l37-23M299 75l39-23M311 95l39-23" stroke="#1683a3" stroke-width="5" stroke-linecap="round"/>
+      </g>
+      <text x="30" y="238" font-size="27" font-weight="800" class="ink">Slope</text>
+      <text x="30" y="266" font-size="16" class="muted">坡面 · angle and aspect controlled</text>
+    </g>
+
+    <g transform="translate(908 305)" filter="url(#shadow)">
+      <rect width="382" height="300" rx="14" class="card"/>
+      <rect width="382" height="8" rx="4" fill="#348b68"/>
+      <g transform="translate(30 34)">
+        <path d="M12 161l155-58 168 60-158 63z" fill="#d38a24" stroke="#a96618" stroke-width="3"/>
+        <path d="M42 146l48-42 44 15-47 43zM144 110l48-20 42 15-47 22zM236 135l50-23 39 15-49 25z" fill="#74ae87" opacity=".9"/>
+        <path d="M83 139l0-30M184 119l0-29M279 146l0-28" stroke="#348b68" stroke-width="8" stroke-linecap="round"/>
+        <path d="M48 177l44-17M105 196l44-17M162 214l44-17M220 198l44-17M277 180l44-17" stroke="#f7d18b" stroke-width="4" stroke-linecap="round" opacity=".8"/>
+      </g>
+      <text x="30" y="238" font-size="27" font-weight="800" class="ink">Terrain</text>
+      <text x="30" y="266" font-size="16" class="muted">地形 · radial height field and density</text>
+    </g>
+
+    <g transform="translate(1316 305)" filter="url(#shadow)">
+      <rect width="392" height="300" rx="14" class="card"/>
+      <rect width="392" height="8" rx="4" fill="#d53b36"/>
+      <g transform="translate(30 34)">
+        <path d="M15 196l155-57 170 61-158 61z" fill="#d38a24" stroke="#a96618" stroke-width="3"/>
+        <path d="M63 177V79l53-22v103z" fill="#c7d6dd" stroke="#5d7383" stroke-width="3"/>
+        <path d="M116 160l70-31V33l-70 24z" fill="#e9f0f3" stroke="#5d7383" stroke-width="3"/>
+        <path d="M195 180l77-33V58l-77 32z" fill="#b8ccd4" stroke="#5d7383" stroke-width="3"/>
+        <path d="M78 98h26M78 121h26M132 81h38M132 105h38M211 100h43M211 124h43" stroke="#d53b36" stroke-width="5" stroke-linecap="round"/>
+        <path d="M48 202l44-17M105 221l44-17M162 239l44-17M220 223l44-17M277 205l44-17" stroke="#f7d18b" stroke-width="4" stroke-linecap="round" opacity=".8"/>
+      </g>
+      <text x="30" y="238" font-size="27" font-weight="800" class="ink">Urban</text>
+      <text x="30" y="266" font-size="16" class="muted">城市 · roof, wall and street</text>
+    </g>
+
+    <line x1="92" y1="650" x2="1708" y2="650" class="line"/>
+    <text x="94" y="694" font-size="17" font-weight="800" letter-spacing="3" class="green">02  VEGETATION TYPE</text>
+    <text x="1706" y="694" text-anchor="end" font-size="15" class="muted">Vegetation model</text>
+
+    <!-- Vegetation cards -->
+    <g transform="translate(92 720)" filter="url(#shadow)">
+      <rect width="382" height="264" rx="14" class="card"/>
+      <rect width="382" height="8" rx="4" fill="#a96618"/>
+      <g transform="translate(30 25)">
+        <path d="M8 123l158-53 165 57-158 58z" fill="#d38a24" stroke="#a96618" stroke-width="3"/>
+        <path d="M53 118l34-12M107 137l34-12M161 155l34-12M216 138l34-12M270 120l34-12" stroke="#f7d18b" stroke-width="5" stroke-linecap="round"/>
+      </g>
+      <text x="30" y="202" font-size="25" font-weight="800" class="ink">Bare soil</text>
+      <text x="30" y="229" font-size="16" class="muted">裸土 · no vegetation layer</text>
+    </g>
+
+    <g transform="translate(500 720)" filter="url(#shadow)">
+      <rect width="382" height="264" rx="14" class="card"/>
+      <rect width="382" height="8" rx="4" fill="#1683a3"/>
+      <g transform="translate(30 25)">
+        <path d="M8 150l158-53 165 57-158 58z" fill="#d38a24" stroke="#a96618" stroke-width="3"/>
+        <path d="M63 139c0-38 22-55 42-69M104 153c0-46 25-67 48-87M148 166c0-52 27-73 54-99M193 153c0-40 26-60 47-77M239 137c0-34 22-49 39-63" fill="none" stroke="#348b68" stroke-width="7" stroke-linecap="round"/>
+        <path d="M52 123c13-16 26-15 37 0M101 130c14-20 29-18 42 0M154 139c14-18 30-17 42 0M207 129c13-16 27-15 39 0M259 118c12-14 25-13 36 0" fill="none" stroke="#69aa78" stroke-width="7" stroke-linecap="round"/>
+      </g>
+      <text x="30" y="202" font-size="25" font-weight="800" class="ink">Turbid veg</text>
+      <text x="30" y="229" font-size="16" class="muted">浑浊植被 · LAI and hotspot</text>
+    </g>
+
+    <g transform="translate(908 720)" filter="url(#shadow)">
+      <rect width="382" height="264" rx="14" class="card"/>
+      <rect width="382" height="8" rx="4" fill="#d38a24"/>
+      <g transform="translate(30 25)">
+        <path d="M8 150l158-53 165 57-158 58z" fill="#d38a24" stroke="#a96618" stroke-width="3"/>
+        <path d="M47 140l113-38M96 159l112-38M145 176l112-38M194 158l113-38" stroke="#f7d18b" stroke-width="6" stroke-linecap="round"/>
+        <path d="M61 136l-8-34M82 143l-8-34M112 153l-8-34M133 160l-8-34M163 170l-8-34M184 163l-8-34M214 153l-8-34M235 146l-8-34M265 136l-8-34" stroke="#348b68" stroke-width="6" stroke-linecap="round"/>
+      </g>
+      <text x="30" y="202" font-size="25" font-weight="800" class="ink">Crop rows</text>
+      <text x="30" y="229" font-size="16" class="muted">作物行 · row width and height</text>
+    </g>
+
+    <g transform="translate(1316 720)" filter="url(#shadow)">
+      <rect width="392" height="264" rx="14" class="card"/>
+      <rect width="392" height="8" rx="4" fill="#348b68"/>
+      <g transform="translate(30 25)">
+        <path d="M8 150l158-53 165 57-158 58z" fill="#d38a24" stroke="#a96618" stroke-width="3"/>
+        <path d="M80 143V84M80 84l-25-25M80 98l29-28M168 172V93M168 101l-32-28M168 117l37-31M250 145V75M250 84l-30-28M250 99l38-31" stroke="#725a45" stroke-width="9" stroke-linecap="round"/>
+        <circle cx="54" cy="59" r="31" fill="#348b68"/><circle cx="103" cy="70" r="29" fill="#4d9872"/><circle cx="137" cy="92" r="31" fill="#348b68"/>
+        <circle cx="139" cy="68" r="29" fill="#69aa78"/><circle cx="197" cy="74" r="31" fill="#348b68"/><circle cx="238" cy="57" r="30" fill="#4d9872"/><circle cx="285" cy="73" r="31" fill="#348b68"/>
+      </g>
+      <text x="30" y="202" font-size="25" font-weight="800" class="ink">Forest crowns</text>
+      <text x="30" y="229" font-size="16" class="muted">林冠 · crown radii and density</text>
+    </g>
+
+    <g transform="translate(92 1030)">
+      <circle cx="9" cy="-6" r="8" fill="#d53b36"/>
+      <text x="30" y="0" font-size="17" class="muted">Every surface can be combined with every vegetation type. Urban outputs include roof, wall and street components.</text>
+      <text x="1708" y="0" text-anchor="end" font-size="16" font-weight="700" class="blue">STREAM TIRT · TiRT.exe</text>
+    </g>
+  </g>
+</svg>
