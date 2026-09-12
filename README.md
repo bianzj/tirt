@@ -296,3 +296,9 @@ planck(10.5, temperature)
 ## 联系方式
 
 Email: bianzj@aircas.ac.cn
+
+## 许可证 / License
+
+本项目采用 [PolyForm Noncommercial License 1.0.0](LICENSE)。允许依照许可证进行非商业使用、修改和分发；任何商业使用均须事先取得许可方的单独书面授权。
+
+This project is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE). Noncommercial use, modification, and distribution are permitted under its terms. Commercial use requires a separate prior written license from the licensor.
