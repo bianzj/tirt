@@ -1,11 +1,7 @@
 import numpy as np
-from base.physicsF import *
-from base.path import *
-
-try:
-    import scipy.integrate as sci
-except ModuleNotFoundError:
-    sci = None
+import scipy.integrate as sci
+from .physicsF import *
+from .path import *
 '''
 gap probability 透过率
 inside: 表示穿过了相干冠层
@@ -584,5 +580,3 @@ def gap_probability_under_outside_voxel(std, xi_up, yj_up, zk_up, density, hc, h
     hcr_up = ((hc + temp) * 0.5 - zk_up) * tgthx
 
     return gap_outside_up, pl_outside_up, upArea, hcr_up, inter, stemProj
-
-

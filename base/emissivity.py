@@ -1,16 +1,9 @@
 import numpy as np
-from base.gap import *
-from base.hotspot import *
-from base.scatter import *
-try:
-    import scipy.integrate as sci
-except ModuleNotFoundError:
-    sci = None
-
-try:
-    import matplotlib.pyplot as plt
-except ModuleNotFoundError:
-    plt = None
+import scipy.integrate as sci
+from .gap import *
+from .hotspot import *
+from .scatter import *
+import matplotlib.pyplot as plt
 
 
 def emissivity_direct(Pcom,Ecom):

@@ -1,0 +1,36 @@
+appId: cn.tirt.desktop
+productName: TiRT
+asar: true
+electronLanguages:
+  - zh-CN
+  - en-US
+directories:
+  output: release
+files:
+  - desktop/**/*
+  - package.json
+  - tirt.ico
+extraResources:
+  - from: dist/TiRT-service.exe
+    to: backend/TiRT-service.exe
+    filter:
+      - "**/*"
+  - from: tirt.ico
+    to: tirt.ico
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: TiRT-Setup-${version}-x64.${ext}
+  icon: tirt.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: TiRT
+  deleteAppDataOnUninstall: false
+  installerIcon: tirt.ico
+  uninstallerIcon: tirt.ico

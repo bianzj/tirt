@@ -24,6 +24,7 @@ GUI_ROOT = PROJECT_ROOT / "gui"
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from run import run  # noqa: E402
+from gui.tirteb_server import Handler as EnergyBalanceHandler  # noqa: E402
 
 
 def _read_csv(path: Path) -> list[dict[str, float | str]]:
@@ -42,11 +43,11 @@ def _read_csv(path: Path) -> list[dict[str, float | str]]:
         return rows
 
 
-class Handler(SimpleHTTPRequestHandler):
-    """Serve the TiRT directional UI and its local simulation endpoint."""
+class Handler(EnergyBalanceHandler):
+    """Serve all TiRT pages and simulation endpoints from one local server."""
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=str(GUI_ROOT), **kwargs)
+        SimpleHTTPRequestHandler.__init__(self, *args, directory=str(GUI_ROOT), **kwargs)
 
     def log_message(self, format, *args):
         """Windowed EXE builds do not have a usable stderr stream."""
@@ -67,10 +68,16 @@ class Handler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_GET(self):  # noqa: N802
-        if urlparse(self.path).path == "/api/health":
-            self._json(200, {"ok": True, "project": str(PROJECT_ROOT), "engine": "tirt"})
+        path = urlparse(self.path).path
+        if path == "/api/health":
+            self._json(200, {
+                "ok": True,
+                "project": str(PROJECT_ROOT),
+                "engine": "tirt",
+                "features": ["directional", "energy_balance", "multi_angle"],
+            })
             return
-        super().do_GET()
+        SimpleHTTPRequestHandler.do_GET(self)
 
     def do_POST(self):  # noqa: N802
         path = urlparse(self.path).path
@@ -78,6 +85,8 @@ class Handler(SimpleHTTPRequestHandler):
             self._json(200, {"ok": True, "message": "TiRT is shutting down"})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
+        if path in {"/api/run_time", "/api/run_angle"}:
+            return EnergyBalanceHandler.do_POST(self)
         if path != "/api/run":
             self._json(404, {"error": "Not found"})
             return

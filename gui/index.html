@@ -29,6 +29,8 @@
         </div>
       </div>
       <div class="topbar-actions">
+        <button id="language-toggle" class="button button-secondary language-toggle" type="button" title="Switch to Chinese" aria-label="Switch to Chinese"><span data-language-label>中文</span></button>
+        <a class="button button-secondary version-switch" href="time.html" title="Open energy-balance model"><span class="button-icon">&#8594;</span>Energy balance</a>
         <span id="status-pill" class="status-pill idle"><i></i><span>Ready</span></span>
         <button id="run-button" class="button button-primary" aria-busy="false"><span class="button-icon run-icon" aria-hidden="true">&#9654;</span><span class="button-label">Run simulation</span></button>
         <button id="save-output-button" class="button button-secondary" disabled><span class="button-icon">&#8595;</span>Save observations.csv</button>
@@ -200,8 +202,10 @@
         </section>
       </section>
     </main>
+    <footer class="app-footer">出品: TIRTLab　邮箱: <a href="mailto:bianzj@aircas.ac.cn">bianzj@aircas.ac.cn</a></footer>
   </div>
   <div id="toast" class="toast" role="status"></div>
+  <script type="module" src="language.js?v=1"></script>
   <script type="module" src="app.js?v=stream-tirt-light-3"></script>
 </body>
 </html>

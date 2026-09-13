@@ -5,13 +5,12 @@
 #####################################################
 
 import numpy as np
-import numpy
-from base.hotspot import *
-from base.gap import *
-from base.scatter import *
-from base.proportion import *
-from base.radiance import *
-from base.emissivity import *
+from .hotspot import *
+from .gap import *
+from .scatter import *
+from .proportion import *
+from .radiance import *
+from .emissivity import *
 
 class Crown():
 
@@ -63,18 +62,18 @@ class Crown():
         self.emissivity_leaf = emissivity_leaf
 
     def set_angle(self,view_zenith_angle,solar_zenith_angle,relative_azimuth_angle):
-        if type(view_zenith_angle) == np.ndarray:
+        if type(view_zenith_angle) == numpy.ndarray:
             self.number_angle = np.max([self.number_angle, np.size(view_zenith_angle)])
-        if type(solar_zenith_angle) == np.ndarray:
+        if type(solar_zenith_angle) == numpy.ndarray:
             self.number_angle = np.max([self.number_angle, np.size(solar_zenith_angle)])
-        if type(relative_azimuth_angle) == np.ndarray:
+        if type(relative_azimuth_angle) == numpy.ndarray:
             self.number_angle = np.max([self.number_angle, np.size(relative_azimuth_angle)])
 
-        if (self.number_angle > 1) and type(view_zenith_angle) != np.ndarray:
+        if (self.number_angle > 1) and type(view_zenith_angle) != numpy.ndarray:
             view_zenith_angle = np.repeat(view_zenith_angle, self.number_angle)
-        if (self.number_angle > 1) and type(solar_zenith_angle) != np.ndarray:
+        if (self.number_angle > 1) and type(solar_zenith_angle) != numpy.ndarray:
             solar_zenith_angle = np.repeat(solar_zenith_angle, self.number_angle)
-        if (self.number_angle > 1) and type(relative_azimuth_angle) != np.ndarray:
+        if (self.number_angle > 1) and type(relative_azimuth_angle) != numpy.ndarray:
             relative_azimuth_angle = np.repeat(relative_azimuth_angle, self.number_angle)
 
         self.viewing_zenith_angle = np.asarray(view_zenith_angle)

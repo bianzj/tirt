@@ -1,0 +1,203 @@
+﻿# TIRTEB single-point input,,,
+# section,key,value,description
+,,,
+[case],,,
+case,meteo,data/defined/meteo.txt,meteorological data file
+case,esun_file,data/defined/Esun_.dat,solar direct spectral source
+case,esky_file,data/defined/Esky_.dat,solar sky spectral source
+case,optical_coefficients_file,data/defined/optipar_new.csv,leaf and BSM optical coefficient source
+case,case_name,hom_terrain,case name
+,,,
+[surface],,,
+surface,surface_model,terrain,plane=flat surface; terrain=sloped surface; urban=buildings and streets
+surface,vegetation_model,hom,bare=bare soil; hom=homogeneous canopy; raw=row/ridge canopy; crown=individual crown/forest canopy
+,,,
+[terrain],,,
+terrain,terrain_type,2,1=single slope using slope/aspect; 2=compound slope using radius/height/density
+terrain,terrain_slope,30,single-slope inclination in degrees; used when terrain_type=1
+terrain,terrain_aspect,0,single-slope aspect in degrees clockwise from north; used when terrain_type=1
+terrain,terrain_radius,100,equivalent compound-slope radius in m; used when terrain_type=2
+terrain,terrain_height,20,equivalent compound-slope height in m; used when terrain_type=2
+terrain,terrain_density,1,compound-slope spatial density; used when terrain_type=2
+,,,
+[urban],,,
+urban,building_density,0.0015,building plan density
+urban,building_length,10,building length m
+urban,building_width,10,building width m
+urban,building_height,20,building height m
+urban,urban_street_radiation_factor,1.0,overall street-radiation correction; no street visibility weighting
+urban,urban_vegetation_fraction,0.30,vegetation footprint fraction in street area
+urban,urban_roughness_length,0.15,above-canopy momentum roughness length m
+urban,urban_canyon_roughness_ratio,0.05,canyon roughness length divided by mean building plan scale
+urban,urban_canyon_min_ratio,1.05,minimum canyon-to-roof aerodynamic resistance ratio
+urban,urban_leaf_wind_decay,0.5,leaf wind attenuation per LAI within the canyon
+urban,urban_leaf_boundary_factor,70,leaf boundary-layer resistance coefficient
+
+[aerodynamics],,,
+aerodynamics,aero_zo,10,roughness length m
+aerodynamics,aero_d,1.34,zero-plane displacement m
+aerodynamics,aero_rbc,10,canopy boundary resistance s m-1
+aerodynamics,aero_cr,0.35,canopy resistance coefficient
+aerodynamics,aero_cd,0.2,canopy drag coefficient
+aerodynamics,aero_cd1,20.6,canopy drag parameter
+aerodynamics,aero_psicor,0.2,psychrometric correction
+aerodynamics,aero_cssoil,0.01,soil aerodynamic coefficient
+aerodynamics,aero_rwc,0,roughness correction
+aerodynamics,aero_rbs,10,soil boundary resistance s m-1
+
+[atmosphere],,,
+atmosphere,z,15,meteorological reference height m
+atmosphere,ea,15,initial vapor pressure Pa
+atmosphere,ca,380,atmospheric CO2 ppm
+atmosphere,oa,209,atmospheric O2 mmol mol-1
+atmosphere,shortwave_diffuse_fraction,-1,-1=Erbs partition of global shortwave; 0-1=measured diffuse fraction
+,,,
+[vegetation_structure],,,
+vegetation_structure,lai,2,leaf area index
+vegetation_structure,stand_density,1,vegetation stand density
+vegetation_structure,width,3,vegetation canopy width m
+vegetation_structure,height,3,vegetation height m
+vegetation_structure,G,0.5,leaf projection parameter; normally 0 to 1
+vegetation_structure,lidfa,-0.35,leaf angle distribution parameter a
+vegetation_structure,lidb,-0.15,leaf angle distribution parameter b
+vegetation_structure,hspot,0.2,hotspot parameter in m
+vegetation_structure,leaf_width,0.2,leaf width in m
+,,,
+[row_structure],,,
+row_structure,row_width,0.8,ridge width m
+row_structure,row_blank,0.8,ridge spacing m
+row_structure,row_height,1.5,ridge height m
+row_structure,row_azimuth,90,ridge direction degrees
+,,,
+[crown_structure],,,
+crown_structure,crown_radius,1.5,crown radius m
+crown_structure,crown_height,3,crown height m
+crown_structure,crown_width,3,crown width m
+crown_structure,crown_density,0.1,crown density
+,,,
+[vegetation_spectrum],,,
+vegetation_spectrum,vegetation_spectrum_source,model,model=PROSPECT simulation; measured=read vegetation_spectrum_file
+vegetation_spectrum,vegetation_spectrum_file,data/spectrals/leaf_spectrum.txt,measured leaf spectrum wavelength reflectance transmittance
+,,,
+[soil_spectrum],,,
+soil_spectrum,soil_spectrum_source,model,model=BSM simulation; measured=read soil_spectrum_file
+soil_spectrum,soil_spectrum_file,data/spectrals/soil_spectrum.txt,measured soil spectrum wavelength reflectance
+soil_spectrum,hapke_enable,0,0=use soil reflectance directly; 1=use simple Hapke/Thapke angular correction
+soil_spectrum,hapke_K,1.0,Hapke/Thapke angular coefficient for optical and thermal directions
+,,,
+[urban_spectrum],,,
+urban_spectrum,urban_spectrum_source,model,model=constant urban spectra; measured=read urban_spectrum_file
+urban_spectrum,urban_spectrum_file,data/spectrals/urban_spectrum.txt,columns: wavelength roof_rho wall_rho street_rho roof_emissivity wall_emissivity street_emissivity
+urban_spectrum,urban_roof_spectrum_file,data/defined/VNIR_terra_cotta_tiles_roofing_tile.txt,measured roof VNIR reflectance
+urban_spectrum,urban_wall_spectrum_file,data/defined/VNIR_construction_concrete_cement_solid.txt,measured wall VNIR reflectance
+urban_spectrum,urban_street_spectrum_file,data/defined/VNIR_construction_tar_asphalt.txt,measured street VNIR reflectance
+urban_spectrum,urban_reflectance_roof,0.05,model roof reflectance
+urban_spectrum,urban_reflectance_wall,0.08,model wall reflectance
+urban_spectrum,urban_reflectance_street,0.045,model street reflectance
+urban_spectrum,urban_absorption_roof,0.95,shortwave optical absorption; default 1-reflectance
+urban_spectrum,urban_absorption_wall,0.92,shortwave optical absorption; default 1-reflectance
+urban_spectrum,urban_absorption_street,0.955,shortwave optical absorption; default 1-reflectance
+,,,
+[prospect],,,
+prospect,cab,58,chlorophyll content
+prospect,cw,0.013,leaf water content
+prospect,cdm,0.0036,dry matter content
+prospect,cs,0,other leaf material content
+prospect,n,1.86,leaf structure parameter
+prospect,leaf_reflectance_tir,0.015,TIR leaf reflectance
+prospect,leaf_transmittance_tir,0.01,TIR leaf transmittance
+,,,
+[bsm],,,
+bsm,bsm_brightness,0.25,BSM brightness
+bsm,bsm_latitude,25,BSM latitude
+bsm,bsm_longitude,45,BSM longitude
+bsm,soil_reflectance_tir,0.045,TIR soil reflectance
+,,,
+[physiology],,,
+physiology,vcmax,80,maximum carboxylation rate
+physiology,ballberry_m,9,Ball-Berry parameter
+physiology,leaf_type,0,0=C3; 1=C4
+physiology,tparam1,0.2,temperature parameter 1
+physiology,tparam2,0.3,temperature parameter 2
+physiology,tparam3,281,temperature parameter 3 K
+physiology,tparam4,313,temperature parameter 4 K
+physiology,tparam5,328,temperature parameter 5 K
+physiology,rdparam,0.015,respiration parameter
+physiology,tyear,20,annual temperature
+physiology,beta,0.4,photosynthesis parameter
+physiology,knpqs,0,NPQ parameter
+physiology,qls,1,photoprotection parameter
+physiology,kv,0.6396,vertical profile parameter
+physiology,stressfactor,1,stress factor
+physiology,stomatal_method,farquhar,farquhar=photosynthesis-based conductance; ballberry=Ball-Berry conductance
+physiology,stomatal_g0,0.01,minimum stomatal conductance mol m-2 s-1
+,,,
+[soil_thermal],,,
+soil_thermal,soil_rss,200,soil surface resistance
+soil_thermal,soil_cs,1180,soil volumetric heat capacity
+soil_thermal,soil_rhos,1100,soil density
+soil_thermal,soil_lambda,1.55,soil thermal conductivity
+soil_thermal,soil_rbs,10,soil boundary resistance
+soil_thermal,soil_moisture,0.25,soil water content
+soil_thermal,soil_temperature_c,20,initial soil temperature C
+soil_thermal,satwater,0.45,saturated water content
+soil_thermal,soil_depth_step,0.05,depth-method vertical step in m
+soil_thermal,soil_tir_water_effect,0,0=ignore soil water effect on TIR emissivity; 1=linear dry-to-wet correction
+soil_thermal,soil_tir_emissivity_dry,0.955,dry-soil TIR emissivity
+soil_thermal,soil_tir_emissivity_wet,0.99,wet-soil TIR emissivity
+soil_thermal,soil_tir_moisture_dry,0.05,dry reference volumetric soil water content
+soil_thermal,soil_tir_moisture_wet,0.45,wet reference volumetric soil water content
+,,,
+[urban_thermal],,,
+urban_thermal,urban_rss,3662.8562,urban surface resistance s m-1
+urban_thermal,urban_cs,1000000,urban volumetric heat capacity J m-3 K-1
+urban_thermal,urban_rhos,1800,urban material density kg m-3
+urban_thermal,urban_lambda,1.5,urban thermal conductivity W m-1 K-1
+urban_thermal,urban_rbs,10,urban boundary resistance s m-1
+urban_thermal,urban_temperature_c,20,initial urban surface temperature C
+urban_thermal,urban_depth_step,0.05,depth-method vertical step in m
+urban_thermal,urban_wall_thickness,0.5,wall thickness m
+urban_thermal,urban_wall_layers,3,number of wall layers
+urban_thermal,urban_internal_temperature_c,24,inside wall boundary temperature C
+urban_thermal,urban_wall_diffuse_factor,0.5,vertical wall diffuse shortwave factor
+urban_thermal,urban_emissivity_roof,0.95,roof thermal emissivity
+urban_thermal,urban_emissivity_wall,0.92,wall thermal emissivity
+urban_thermal,urban_emissivity_street,0.955,street thermal emissivity
+,,,
+[run],,,
+run,year,2024,year
+run,doy,172,day of year
+run,utc_offset_hours,8,local standard-time offset from UTC; Beijing time is UTC+8
+run,start_time,214,local simulation start time as day-of-year decimal
+run,end_time,215,local simulation end time as day-of-year decimal
+run,latitude,39.9,site latitude degrees
+run,longitude,116.4,site longitude degrees
+run,dem,0,elevation m
+run,max_iter,50,maximum energy balance iterations
+run,soil_heat_method,surface,direct=net-radiation estimate; surface=surface differential; depth=depth differential
+run,urban_heat_method,depth,roof/wall default depth; street follows soil_heat_method
+run,soil_heat_fraction,0.25,direct-method soil heat storage fraction
+run,urban_heat_fraction,0.4,direct-method urban heat storage fraction
+run,temperature_method,robust,direct=direct temperature correction; robust=ebal.m residual correction
+run,output_intermediate,yes,yes=write intermediate.csv; no=do not write intermediate variables
+,,,
+[observations],,,
+observations,observation_time_mode,time,all=every time; time=exact day-of-year times; hour=matching daily hour/fraction
+observations,observation_times,172.5,absolute day-of-year times for mode time; *.5 is allowed in mode hour
+observations,observation_hours,*.5,mode hour selectors; *.5=every day at fraction .5; 12=every day at 12:00
+observations,direction_source,file,direct=use vza/vaa lists; file=read directions_file
+observations,directions_file,data/directions/observation_directions.txt,view direction file
+observations,vza,0.0;30.0;60.0,direct view zenith angles degrees
+observations,vaa,0.0;90.0;180.0,direct view azimuth angles degrees
+observations,spectral_source,file,direct=use wavelengths list; file=read spectrals_file
+observations,spectrals_file,data/spectrals/observation_spectrals_tirteb.txt,observation wavelength file
+observations,wavelengths,0.55;0.86;10.5,direct wavelengths um
+observations,observation_quantity,temperature,for wavelengths >=2.5 um: temperature=brightness temperature; reflectance=reflectance
+
+[effective_overrides]
+effective_overrides,surface_model,urban,applied for this case
+effective_overrides,vegetation_model,row,applied for this case
+effective_overrides,start_time,214.0139,applied for this case
+effective_overrides,end_time,214.0764,applied for this case
+effective_overrides,max_iter,20,applied for this case
+effective_overrides,observation_time_mode,all,applied for this case

@@ -22,6 +22,9 @@ body { background: #0a100f; color: var(--ink); font-size: 13px; letter-spacing: 
 button, input, select { font: inherit; }
 button { cursor: pointer; }
 .app-shell { min-height: 100%; display: flex; flex-direction: column; }
+.app-footer { flex: 0 0 28px; display: flex; align-items: center; justify-content: center; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; letter-spacing: .02em; }
+.app-footer a { color: var(--cyan); text-decoration: none; }
+.app-footer a:hover { text-decoration: underline; }
 
 .topbar { height: 70px; flex: 0 0 70px; display: flex; align-items: center; justify-content: space-between; padding: 0 26px; border-bottom: 1px solid var(--line); background: #0d1615; }
 .brand-lockup { display: flex; align-items: center; gap: 12px; }
@@ -32,6 +35,7 @@ h1 { margin-top: 3px; font-size: 17px; letter-spacing: .01em; }
 h2 { font-size: 15px; font-weight: 650; margin-top: 3px; }
 h3 { font-size: 13px; font-weight: 650; margin-top: 5px; }
 .topbar-actions { display: flex; gap: 14px; align-items: center; }
+.language-toggle { min-width: 48px; justify-content: center; padding-inline: 10px; font-weight: 750; letter-spacing: .02em; }
 .status-pill { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; }
 .status-pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 12px rgba(148, 212, 125, .55); }
 .status-pill.busy i { background: var(--amber); box-shadow: 0 0 12px rgba(237, 184, 102, .55); }

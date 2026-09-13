@@ -1,5 +1,5 @@
 import numpy as np
-from base.crown import *
+from .crown import *
 ### version 0.1 有错误，但是能跑
 ### version 0.5 有错误，修正了一部分，也能跑，这个版本投了iGARSS
 ### version 1.0 修正了一大部分，但是不能改变建筑的方位角，或者是说所有的建筑的方位角是固定的，同时来说，这么跑会快一点
@@ -911,7 +911,6 @@ class Urban_Veg:
 
     def set_structural_input(self, shapes):
         return self.set_strcutural_input(shapes)
-
     def set_thermal_input(self,Trs,Trh,Tws,Twh,Tss,Tsh):
         self.Troof_sunlit = Trs
         self.Troof_shaded = Trh

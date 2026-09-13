@@ -1,10 +1,6 @@
 import numpy as np
-from base.physicsF import *
-
-try:
-    import scipy.integrate as sci
-except ModuleNotFoundError:
-    sci = None
+import scipy.integrate as sci
+from .physicsF import *
 
 '''
 路径长度
@@ -287,7 +283,6 @@ def oblique_ellipsoid(zk,rk, za, hc, hcr, rcr):
 
 
 	return np.abs(upArea), np.abs(upVol)
-
 def crosscutting_ellipsoid(zk, xza, hc, hcr, rcr):
 	'''
 	冠层表面以上部分的体积和投影面积

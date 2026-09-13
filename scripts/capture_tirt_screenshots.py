@@ -8,7 +8,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import Select, WebDriverWait
+from selenium.webdriver.support.ui import WebDriverWait
 
 ROOT = Path(__file__).resolve().parent.parent
 PYTHON = Path(r"C:\work\miniconda\envs\python311\python.exe")
@@ -38,6 +38,19 @@ def run_current(driver, wait: WebDriverWait) -> None:
     time.sleep(0.4)
 
 
+def select_value(driver, element_id: str, value: str) -> None:
+    """Select values even when the control is below the current viewport."""
+    driver.execute_script(
+        """
+        const select = document.getElementById(arguments[0]);
+        select.value = arguments[1];
+        select.dispatchEvent(new Event('change', {bubbles: true}));
+        """,
+        element_id,
+        value,
+    )
+
+
 def main() -> None:
     port = 8786
     proc = start_server(port)
@@ -58,8 +71,8 @@ def main() -> None:
         run_current(driver, wait)
         screenshot(driver, "02_default_results.png")
 
-        Select(driver.find_element(By.ID, "surface-model")).select_by_value("urban")
-        Select(driver.find_element(By.ID, "vegetation-model")).select_by_value("crown")
+        select_value(driver, "surface-model", "urban")
+        select_value(driver, "vegetation-model", "crown")
         driver.execute_script("document.querySelector('#building-height').value='35'; document.querySelector('#crown-density').value='0.04';")
         screenshot(driver, "03_urban_crown_settings.png")
         run_current(driver, wait)

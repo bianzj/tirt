@@ -5,12 +5,12 @@
 #####################################################
 
 import numpy as np
-from base.hotspot import *
-from base.gap import *
-from base.scatter import *
-from base.proportion import *
-from base.radiance import *
-from base.emissivity import *
+from .hotspot import *
+from .gap import *
+from .scatter import *
+from .proportion import *
+from .radiance import *
+from .emissivity import *
 
 
 class Slope_Veg():

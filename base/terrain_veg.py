@@ -1,6 +1,6 @@
 import numpy as np
 
-from base.crown import *
+from .crown import *
 ###----------------------------------
 ### 这里考虑了山地本身的遮挡和子像元内植被的复合效应
 ### 1. determine the mountainous surface

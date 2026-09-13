@@ -143,7 +143,7 @@ def run_api_tests(base_url: str) -> list[Result]:
 
 def start_server(mode: str, port: int) -> subprocess.Popen:
     if mode == "exe":
-        cmd = [str(ROOT / "dist" / "TiRT.exe"), "--no-browser", "--port", str(port)]
+        cmd = [str(ROOT / "dist" / "TiRT-service.exe"), "--server-only", "--port", str(port)]
     else:
         python = str(PYTHON if PYTHON.exists() else sys.executable)
         cmd = [python, str(ROOT / "gui" / "server.py"), "--host", "127.0.0.1", "--port", str(port)]

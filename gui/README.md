@@ -1,16 +1,16 @@
-# TiRT Directional Three.js GUI
+# GUI
 
-This folder contains the browser interface for the TiRT directional runner.
+`gui/` contains the unified TiRT pages. Directional, energy-balance and multi-angle functions share one local service and one desktop window.
 
 ## Start
 
 From the project root:
 
 ```bash
-python gui/server.py --port 8765
+python gui/launcher.py --server-only --port 8765
 ```
 
-Open `http://127.0.0.1:8765/` in a browser. The server uses the TiRT root `run()` function, so the result panel reflects the current directional implementation and the selected input values.
+For development, open `http://127.0.0.1:8765/` in a browser. For normal use, run `start_tirt.bat` or `npm run desktop`; Electron provides the application window without browser tabs or address bars.
 
 ## Layout
 
@@ -33,3 +33,13 @@ The backend `geometry_mode` still follows the project input convention:
 - `2`: read a TXT direction file, or use an uploaded local TXT file.
 
 Three.js and `OrbitControls` are vendored in `gui/vendor/`, so the 3D scene works through the local server without a browser network dependency.
+
+## Energy balance GUI
+
+The temporal and directional energy-balance pages are served by the same TiRT server:
+
+```bash
+python gui/server.py --port 8765
+```
+
+The TiRT desktop window opens the directional model. Use the `Energy balance` button to open the time-series page, or `/angle/` during browser-based development. These pages use the energy-balance input template and the local `/api/run_time` and `/api/run_angle` endpoints. No second server is required.

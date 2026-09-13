@@ -27,6 +27,41 @@ python run.py --input input.csv --output cases/row_demo/output.csv --model row
 
 统一入口支持植被与地表的组合模型：`plane`、`slope`、`terrain`、`urban` 地表可分别组合 `bare`、`hom`、`row`、`crown` 植被。参数集中在 `input.csv`，输出按“观测方向 × 波段”记录亮温、辐亮度和各组分发射率。
 
+## TiRT 功能模块
+
+能量平衡、时间序列和多角度计算已经属于 TiRT 的功能模块，用户只启动一个 TiRT 桌面窗口：
+
+```bash
+npm install
+npm run desktop
+```
+
+TiRT 窗口使用 Electron 提供，不会显示浏览器标签栏、地址栏或浏览器菜单；页面中的 `Energy balance` 进入时间序列能量平衡，`Directional model` 返回方向性计算。两者共用同一个服务和项目数据，关闭窗口会同时关闭后台服务。
+
+底层批处理仍可直接调用 `tirteb_run.py` 和 `angle_run.py`，它们是兼容接口，不需要单独启动 GUI 服务。
+
+## 软件界面
+
+以下截图均来自项目内置的 TiRT 本地 GUI：
+
+| 主界面 | 结果查看 |
+| --- | --- |
+| ![TiRT 主界面](docs/screenshots/01_home.png) | ![TiRT 结果](docs/screenshots/02_default_results.png) |
+
+| 城市场景设置 | 城市场景结果 |
+| --- | --- |
+| ![TiRT 城市场景设置](docs/screenshots/03_urban_crown_settings.png) | ![TiRT 城市场景结果](docs/screenshots/04_urban_crown_results.png) |
+
+| 自定义观测角度 | 移动端界面 |
+| --- | --- |
+| ![TiRT 自定义观测角度](docs/screenshots/05_manual_geometry_results.png) | ![TiRT 移动端界面](docs/screenshots/06_mobile_view.png) |
+
+| 能量平衡模块 | 能量平衡结果 |
+| --- | --- |
+| ![TiRT 能量平衡](docs/screenshots/07_energy_balance.png) | [查看能量平衡结果图](docs/figures/time_214p056_10p5.png) |
+
+更多场景和移动端截图见 [`docs/screenshots/`](docs/screenshots/)，示例结果图见 [`docs/figures/`](docs/figures/)。
+
 ## input.csv 结构
 
 输入分组采用 `section,key,value,description` 格式：
@@ -92,7 +127,7 @@ python -m plot.run_plot \
 
 ## Three.js 界面模拟器
 
-`gui/` 提供浏览器界面，用于设置输入、预览地表场景并查看 TiRT 方向性结果：
+`gui/` 提供 TiRT 页面，用于设置输入、预览地表场景并查看方向性和时间序列结果：
 
 ```bash
 python gui/server.py --port 8765
@@ -111,30 +146,69 @@ chmod +x start_tirt.command
 ./start_tirt.command
 ```
 
-Windows 用户请安装 Miniconda，然后双击 `start_tirt.bat`。脚本首次运行会根据 `environment.yml` 创建 `tirt` 环境并安装依赖，之后会自动启动浏览器。也可以在 Anaconda Prompt 中执行：
+Windows 用户请安装 Miniconda，然后双击 `start_tirt.bat`。脚本首次运行会根据 `environment.yml` 创建 `tirt` 环境并安装 Python 依赖，同时安装 Electron 桌面依赖，之后启动无浏览器栏的 TiRT 窗口。也可以在 Anaconda Prompt 中执行：
 
 ```bat
 cd C:\work\tirt
 start_tirt.bat
 ```
 
-当前项目提供的是基于 Python/Conda 的本地运行版本，尚未生成独立的 Windows `.exe`。如果需要不安装 Python 和 Conda 的发布包，需要在 Windows 系统中使用 PyInstaller 单独构建。推荐使用 `--onedir` 文件夹模式，生成的发布目录应包含 `TiRT.exe`、`_internal/`、`data/`、`gui/` 和 `input.csv`；`input.csv` 和 `data/` 保留在 exe 外部，便于修改输入。macOS 上不能可靠构建 Windows `.exe`。
+当前项目提供基于 Python/Conda 的开发运行版本和 Electron 桌面发布版本。Windows 下运行 `build_tirt_exe.bat` 会先生成内部 `dist/TiRT-service.exe`，再生成最终安装包 `release/TiRT-Setup-1.0.2-x64.exe`；安装后的 `TiRT.exe` 同时包含方向性、能量平衡和时间变化窗口。macOS 上不能可靠构建 Windows `.exe`。
 
 ## 目录结构
 
 ```text
 tirt/
-├── base/                # 全部现行模型、工具和示例入口
-│   ├── hom.py           # 均质植被模型
-│   ├── row.py           # 垄行作物模型
-│   ├── crown.py         # 离散树冠模型
-│   ├── *_voxel.py       # 体素模型
-│   ├── terrain*.py      # 地形模型
-│   ├── urban*.py        # 城市模型
-│   └── run_*.py         # 示例入口
-├── plot/                # 极坐标图和太阳主平面图
-└── old/                 # 历史代码
+├── run.py                  # TiRT 统一方向性辐射传输入口
+├── tirteb_run.py           # TiRT 能量平衡批处理入口
+├── angle_run.py            # TiRT 多角度批处理入口
+├── input.csv               # TiRT 默认输入模板
+├── input_tirteb.csv        # 能量平衡默认输入模板
+├── base/                   # 统一 Python 核心包（保持 base 导入兼容）
+│   ├── gap.py              # 间隙概率与几何路径
+│   ├── hotspot.py          # 热点效应
+│   ├── proportion.py       # 四组分方向比例
+│   ├── scatter.py          # VNIR/TIR 散射
+│   ├── hom/row/crown*.py  # 均质、垄行、树冠及体素模型
+│   ├── terrain*.py         # 坡面、复合地形及地形植被模型
+│   ├── urban*.py           # 城市建筑及城市植被模型
+│   ├── radiation.py        # 统一辐射准备、合并和诊断
+│   ├── aerodynamic.py     # 空气动力学阻抗
+│   ├── biochemical.py      # 光合/气孔阻抗
+│   ├── evapo.py/eb.py      # 蒸散、能量平衡和热量更新
+│   ├── io.py/modelio.py    # 能量平衡输入、光谱和结构解析
+│   ├── structs.py          # 能量平衡数据结构
+│   ├── util_*.py           # TiRT 历史示例使用的辅助工具
+│   └── run_tirt_*.py       # 低层 TiRT 示例和回归入口
+├── data/
+│   ├── defined/            # 光谱系数、太阳光谱和气象数据
+│   ├── directions/         # 观测方向文件
+│   └── spectrals/          # TiRT 示例观测光谱
+├── cases/                  # 输入案例及运行结果（结果可重新生成）
+├── gui/                    # TiRT 统一页面、时间序列和角度页面
+│   ├── server.py           # TiRT GUI 服务（默认 8765）
+│   ├── tirteb_server.py    # 能量平衡 API 兼容模块
+│   └── angle/              # TiRT 角度页面
+├── desktop/                # Electron 桌面窗口和服务生命周期管理
+├── package.json            # Electron 开发/打包脚本
+├── electron-builder.yml    # Windows 安装包配置
+├── plot/                   # 输出 CSV 的方向性绘图工具
+├── analysis/               # 结果分析脚本和分析产物
+├── scripts/                # 验证、截图和视频生成脚本
+├── tests/                  # GUI、物理和回归测试
+├── docs/                   # 用户手册、方法说明和测试报告
+├── .vscode/                # 可选的 VS Code 运行和调试配置
+└── *.{bat,command,spec}    # 启动脚本和 PyInstaller 配置
 ```
+
+### 入口选择
+
+| 需求 | 入口 | 输入 | 输出 |
+| --- | --- | --- | --- |
+| TiRT 方向亮温、发射率 | `run.py` | `input.csv` | `cases/<case>/output.csv` |
+| TiRT 桌面界面 | `desktop/main.mjs` | `input.csv`、`input_tirteb.csv` | Electron 窗口 |
+| TiRT 能量平衡批处理 | `tirteb_run.py` | `input_tirteb.csv` | `output.csv`、`observations.csv` |
+| TiRT 多角度批处理 | `angle_run.py` | `input_tirteb.csv` | 角度结果 `output.csv` |
 
 ## 环境安装
 

@@ -5,12 +5,11 @@
 #####################################################
 
 import numpy as np
-import numpy
-from base.hotspot import *
-from base.gap import *
-from base.scatter import *
-from base.emissivity import *
-from base.radiance import *
+from .hotspot import *
+from .gap import *
+from .scatter import *
+from .emissivity import *
+from .radiance import *
 
 class Hom():
 
@@ -56,18 +55,18 @@ class Hom():
 
     def set_angle(self,view_zenith_angle,solar_zenith_angle,relative_azimuth_angle):
 
-        if type(view_zenith_angle) == np.ndarray:
+        if type(view_zenith_angle) == numpy.ndarray:
             self.number_angle = np.max([self.number_angle, np.size(view_zenith_angle)])
-        if type(solar_zenith_angle) == np.ndarray:
+        if type(solar_zenith_angle) == numpy.ndarray:
             self.number_angle = np.max([self.number_angle, np.size(solar_zenith_angle)])
-        if type(relative_azimuth_angle) == np.ndarray:
+        if type(relative_azimuth_angle) == numpy.ndarray:
             self.number_angle = np.max([self.number_angle, np.size(relative_azimuth_angle)])
 
-        if (self.number_angle > 1) and type(view_zenith_angle) != np.ndarray:
+        if (self.number_angle > 1) and type(view_zenith_angle) != numpy.ndarray:
             view_zenith_angle = np.resize(view_zenith_angle, self.number_angle)
-        if (self.number_angle > 1) and type(solar_zenith_angle) != np.ndarray:
+        if (self.number_angle > 1) and type(solar_zenith_angle) != numpy.ndarray:
             solar_zenith_angle = np.resize(solar_zenith_angle, self.number_angle)
-        if (self.number_angle > 1) and type(relative_azimuth_angle) != np.ndarray:
+        if (self.number_angle > 1) and type(relative_azimuth_angle) != numpy.ndarray:
             relative_azimuth_angle = np.resize(relative_azimuth_angle, self.number_angle)
 
         self.viewing_zenith_angle = np.asarray(view_zenith_angle)
@@ -95,7 +94,7 @@ class Hom():
 
         Ecom = np.asarray([es,es,el,el])
         Tcom = np.asarray([Tss,Tsh,Tls,Tlh])
-        Rcom = planck(self.wavelength,Tcom)
+        Rcom = planck(Tcom)
 
         Pcom = proportion_bidirectional_hom_one(lai,hspot,vza,sza,vsa)
         Ecom_direct,Ecom_direct_sum = emissivity_direct(Pcom,Ecom)
@@ -109,4 +108,4 @@ class Hom():
         if ifradiance == 1:
             return self.radiance
         else:
-            return inv_planck(self.wavelength, self.radiance)
+            return inv_planck(self.radiance, self.wavelength)

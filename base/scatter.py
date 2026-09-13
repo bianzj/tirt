@@ -1,19 +1,10 @@
 import numpy as np
-from base.gap import *
-from base.hotspot import *
-from base.proportion import *
-
-try:
-    import scipy.integrate as sci
-except ModuleNotFoundError:
-    sci = None
-
-try:
-    import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d import Axes3D
-except ModuleNotFoundError:
-    plt = None
-    Axes3D = None
+import scipy.integrate as sci
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from .gap import *
+from .hotspot import *
+from .proportion import *
 
 ''' 
 多次散射项
@@ -34,7 +25,7 @@ def multiple_scattering_analytical(lai,vza,refl_soil,refl_leaf):
     bv = gap_probability_hom_analytical(lai, vza)
     M = gap_probability_hom_hemisphere_analytical(lai)
     alpha = np.asarray([0.2855375, 0.2885375, 0.2964427, 0.3003953, 0.3083004, 0.3201581, 0.3399209, 0.3715415, 0.4189723, 1])
-    vza_index_bottom = np.asarray(vza / 10, dtype=int)
+    vza_index_bottom = np.asarray(vza / 10, dtype=np.int)
     vza_index_top = vza_index_bottom + 1
 
     ratio = (vza % 10) / 10.0

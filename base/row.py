@@ -3,13 +3,12 @@
  垄行结构场景的热辐射方向性模型
 '''
 import numpy as np
-import numpy
-from base.hotspot import *
-from base.gap import *
-from base.scatter import *
-from base.proportion import *
-from base.emissivity import *
-from base.radiance import *
+from .hotspot import *
+from .gap import *
+from .scatter import *
+from .proportion import *
+from .emissivity import *
+from .radiance import *
 
 class Row():
 
@@ -42,8 +41,7 @@ class Row():
 
     def set_structure(self,lai,hspot,row_width,row_blank,row_height):
         self.leaf_area_index = lai
-        # Keep the hotspot limit finite when the UI value is zero.
-        self.hspot = max(float(hspot), 1.0e-6)
+        self.hspot = hspot
         self.row_width = row_width
         self.row_blank = row_blank
         self.row_height = row_height
@@ -70,15 +68,15 @@ class Row():
         self.number_angle = np.max([self.number_angle,np.size(solar_azimuth_angle)])
         self.number_angle = np.max([self.number_angle,np.size(row_azimuth_angle)])
 
-        if (self.number_angle >= 1) and type(view_zenith_angle) != np.ndarray:
+        if (self.number_angle >= 1) and type(view_zenith_angle) != numpy.ndarray:
             view_zenith_angle = np.resize(view_zenith_angle,self.number_angle)
-        if (self.number_angle >= 1) and type(solar_zenith_angle) != np.ndarray:
+        if (self.number_angle >= 1) and type(solar_zenith_angle) != numpy.ndarray:
             solar_zenith_angle = np.resize(solar_zenith_angle, self.number_angle)
-        if (self.number_angle >= 1) and type(view_azimuth_angle) != np.ndarray:
+        if (self.number_angle >= 1) and type(view_azimuth_angle) != numpy.ndarray:
             view_azimuth_angle = np.resize(view_azimuth_angle, self.number_angle)
-        if (self.number_angle >= 1) and type(solar_azimuth_angle) != np.ndarray:
+        if (self.number_angle >= 1) and type(solar_azimuth_angle) != numpy.ndarray:
             solar_azimuth_angle = np.resize(solar_azimuth_angle, self.number_angle)
-        if (self.number_angle >= 1) and type(row_azimuth_angle) != np.ndarray:
+        if (self.number_angle >= 1) and type(row_azimuth_angle) != numpy.ndarray:
             row_azimuth_angle = np.resize(row_azimuth_angle, self.number_angle)
 
 
@@ -117,7 +115,7 @@ class Row():
 
         Ecom = np.asarray([es,es,el,el])
         Tcom = np.asarray([Tss,Tsh,Tls,Tlh])
-        Rcom = planck(self.wavelength,Tcom)
+        Rcom = planck(Tcom)
 
         Pcom = proportion_bidirectional_row_one(lai,hspot,row_width,row_blank,row_height,vza,vaa,sza,saa,raa)
         Ecom_direct,Ecom_direct_sum = emissivity_direct(Pcom,Ecom)
@@ -132,5 +130,4 @@ class Row():
         if ifradiance == 1:
             return self.radiance
         else:
-            return inv_planck(self.wavelength, self.radiance)
-
+            return inv_planck(self.radiance, self.wavelength)

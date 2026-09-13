@@ -1,11 +1,7 @@
 import numpy
 import numpy as np
-from base.gap import *
-
-try:
-    import scipy.integrate as sci
-except ModuleNotFoundError:
-    sci = None
+import scipy.integrate as sci
+from .gap import *
 
 '''
 热点/双向透过率
@@ -283,7 +279,7 @@ def hotspot_integrated(lai, hspot, vza, sza, raa,  G = 0.5):
     '''
     nz = 20
     xl = np.linspace(0,-1,nz)
-    dx = float(1.0/nz)
+    dx = np.float(1.0/nz)
     gapvs = np.zeros(nz)
     global lai0,G0,hspot0,sza0,vza0,raa0
     lai0 = lai*1.0
@@ -297,7 +293,7 @@ def hotspot_integrated(lai, hspot, vza, sza, raa,  G = 0.5):
         t1 = xl[j]-dx
         t2 = xl[j]
         gapvs[j] = sci.quad(hotspot_layer_function, t1, t2)[0]
-        gapvs[j] = gapvs[j]/float(dx)
+        gapvs[j] = gapvs[j]/np.float(dx)
 
     return gapvs
 
@@ -694,5 +690,3 @@ def hotspot_projection_area_under(std, density, hspot, xv, yv, zv, plv, upAreav,
 
     bidirectional_gap = np.exp(-sumu)
     return bidirectional_gap
-
-

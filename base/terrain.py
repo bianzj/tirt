@@ -1,5 +1,5 @@
 import numpy as np
-from base.physicsF import *
+from .physicsF import *
 
 ###----------------------------------
 ### 这里考虑了山地本身，相互遮挡
