@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -11,18 +12,15 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 ROOT = Path(__file__).resolve().parent.parent
-PYTHON = Path(r"C:\work\miniconda\envs\python311\python.exe")
 FIREFOX = Path(r"C:\Program Files\Mozilla Firefox\firefox.exe")
 OUT = ROOT / "docs" / "screenshots"
 
 
 def start_server(port: int) -> subprocess.Popen:
     return subprocess.Popen(
-        [str(PYTHON), str(ROOT / "gui" / "server.py"), "--host", "127.0.0.1", "--port", str(port)],
+        [sys.executable, str(ROOT / "gui" / "server.py"), "--host", "127.0.0.1", "--port", str(port)],
         cwd=ROOT,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
+        stdout=subprocess.DEVNULL,
     )
 
 

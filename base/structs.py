@@ -10,13 +10,6 @@ def _number(values: Mapping[str, Any], key: str, default: float = 0.0) -> float:
     return float(default if value in (None, "") else value)
 
 
-def _numbers(values: Mapping[str, Any], key: str) -> tuple[float, ...]:
-    value = values.get(key, "")
-    if value in (None, ""):
-        return ()
-    return tuple(float(item.strip()) for item in str(value).replace(";", ",").split(",") if item.strip())
-
-
 def _time_numbers(values: Mapping[str, Any], key: str) -> tuple[float, ...]:
     """Read numeric times while allowing wildcard hour syntax such as *.5."""
     value = values.get(key, "")
@@ -109,13 +102,6 @@ class InputStructure:
 
     surface_model: str = "plane"
     vegetation_model: str = "hom"
-    terrain_type: int = 1
-    terrain_slope: float = 0.0
-    terrain_aspect: float = 0.0
-    terrain_radius: float = 100.0
-    terrain_height: float = 20.0
-    terrain_density: float = 1.0
-    terrain_base_model: str = "hom"
     defined_path: Optional[Path] = None
     meteo_path: Optional[Path] = None
     cases_dir: Optional[Path] = None
@@ -130,12 +116,7 @@ class InputStructure:
     latitude: float = 39.9
     longitude: float = 116.4
     dem: float = 0.0
-    slope: float = 0.0
-    aspect: float = 0.0
-    vza: float = 0.0
-    vaa: float = 0.0
-    wavelength: float = 10.5
-    max_iter: int = 50
+    max_iter: int = 100
     soil_heat_method: str = "surface"
     urban_heat_method: str = "depth"
     temperature_method: str = "robust"
@@ -153,37 +134,8 @@ class InputStructure:
     urban_rbs: float = 10.0
     urban_temperature_c: float = 20.0
     urban_depth_step: float = 0.05
-    urban_emissivity_roof: float = 0.95
-    urban_emissivity_wall: float = 0.92
-    urban_emissivity_street: float = 0.955
-    lai: float = 0.0
-    height: float = 3.0
-    gleaf: float = 0.5
-    lidfa: float = -0.35
-    lidfb: float = -0.15
-    hspot: float = 0.2
-    leaf_width: float = 0.2
-    row_width: float = 0.8
-    row_blank: float = 0.8
-    row_height: float = 1.5
-    row_azimuth: float = 0.0
-    crown_radius: float = 1.5
-    crown_height: float = 3.0
-    crown_width: float = 3.0
-    crown_density: float = 1.0
-    building_density: float = 0.0015
-    building_length: float = 10.0
-    building_width: float = 10.0
-    building_height: float = 20.0
-    observation_wavelengths: tuple[float, ...] = ()
     observation_times: tuple[float, ...] = ()
     observation_time_mode: str = "all"
-    observation_vza: tuple[float, ...] = ()
-    observation_vaa: tuple[float, ...] = ()
-    observation_direction_mode: str = "file"
-    directions_file: Optional[Path] = None
-    observation_spectral_mode: str = "file"
-    spectrals_file: Optional[Path] = None
     output_intermediate: bool = False
     raw: Dict[str, Any] = field(default_factory=dict, repr=False)
 
@@ -194,15 +146,7 @@ class InputStructure:
             return value if value.is_absolute() else base / value
 
         model = str(config.get("surface_model", "plane")).strip().lower().replace("-", "_")
-        if model == "slope":
-            model = "terrain"
         vegetation = str(config.get("vegetation_model", config.get("vegetation_type", "hom"))).strip().lower()
-        def numbers(*keys: str) -> tuple[float, ...]:
-            for key in keys:
-                result = _numbers(config, key)
-                if result:
-                    return result
-            return ()
         # A normal run is always stored below the configured cases directory.
         # case_result_dir remains an internal override used by --compare.
         if config.get("case_result_dir") not in (None, ""):
@@ -213,18 +157,9 @@ class InputStructure:
             if not case_name:
                 case_name = "homogeneous"
             result_dir = cases_root / case_name
-        direction_source = config.get("direction_source", config.get("observation_direction_mode", "file"))
-        spectral_source = config.get("spectral_source", config.get("observation_spectral_mode", "file"))
         return cls(
             surface_model=model,
             vegetation_model=vegetation,
-            terrain_type=1 if str(config.get("surface_model", "")).strip().lower() == "slope" else int(float(config.get("terrain_type", 1))),
-            terrain_slope=_number(config, "terrain_slope"),
-            terrain_aspect=_number(config, "terrain_aspect"),
-            terrain_radius=_number(config, "terrain_radius", 100.0),
-            terrain_height=_number(config, "terrain_height", 20.0),
-            terrain_density=_number(config, "terrain_density", 1.0),
-            terrain_base_model=str(config.get("terrain_base_model", "hom")),
             defined_path=None,
             meteo_path=path("meteo", "data/defined/meteo.txt"),
             cases_dir=path("cases_dir", "cases"),
@@ -239,12 +174,7 @@ class InputStructure:
             latitude=_number(config, "latitude", 39.9),
             longitude=_number(config, "longitude", 116.4),
             dem=_number(config, "dem"),
-            slope=_number(config, "slope"),
-            aspect=_number(config, "aspect", _number(config, "slope_aspect")),
-            vza=(numbers("vza", "observation_vza") or (0.0,))[0],
-            vaa=(numbers("vaa", "observation_vaa") or (0.0,))[0],
-            wavelength=_number(config, "wavelength", 10.5),
-            max_iter=int(float(config.get("max_iter", 50))),
+            max_iter=int(float(config.get("max_iter", 100))),
             soil_heat_method=str(config.get("soil_heat_method", "surface")).strip().lower(),
             urban_heat_method=str(config.get("urban_heat_method", "depth")).strip().lower(),
             temperature_method=str(config.get("temperature_method", "robust")).strip().lower(),
@@ -262,65 +192,14 @@ class InputStructure:
             urban_rbs=_number(config, "urban_rbs", 10.0),
             urban_temperature_c=_number(config, "urban_temperature_c", 20.0),
             urban_depth_step=_number(config, "urban_depth_step", 0.05),
-            urban_emissivity_roof=_number(config, "urban_emissivity_roof", 0.95),
-            urban_emissivity_wall=_number(config, "urban_emissivity_wall", 0.92),
-            urban_emissivity_street=_number(config, "urban_emissivity_street", 0.955),
             output_intermediate=_boolean(config, "output_intermediate", False),
-            lai=_number(config, "lai"),
-            height=_number(config, "height", 3.0),
-            gleaf=_number(config, "gleaf", 0.5),
-            lidfa=_number(config, "lidfa", -0.35),
-            lidfb=_number(config, "lidfb", -0.15),
-            hspot=_number(config, "hspot", 0.2),
-            leaf_width=_number(config, "leaf_width", 0.2),
-            row_width=_number(config, "row_width", _number(config, "ridge_width", 0.8)),
-            row_blank=_number(config, "row_blank", _number(config, "ridge_blank", 0.8)),
-            row_height=_number(config, "row_height", _number(config, "ridge_height", 1.5)),
-            row_azimuth=_number(config, "row_azimuth", _number(config, "ridge_azimuth")),
-            crown_radius=_number(config, "crown_radius", 1.5),
-            crown_height=_number(config, "crown_height", 3.0),
-            crown_width=_number(config, "crown_width", 3.0),
-            crown_density=_number(config, "crown_density", 1.0),
-            building_density=_number(config, "building_density", 0.0015),
-            building_length=_number(config, "building_length", 10.0),
-            building_width=_number(config, "building_width", 10.0),
-            building_height=_number(config, "building_height", 20.0),
-            observation_wavelengths=numbers("wavelengths", "observation_wavelengths"),
             observation_times=_time_numbers(config, "observation_times"),
             observation_time_mode=str(config.get("observation_time_mode", "all")).strip().lower(),
-            observation_vza=numbers("vza", "observation_vza"),
-            observation_vaa=numbers("vaa", "observation_vaa"),
-            observation_direction_mode=str(direction_source).strip().lower(),
-            directions_file=path("directions_file", "data/directions/observation_directions.txt"),
-            observation_spectral_mode=str(spectral_source).strip().lower(),
-            spectrals_file=path("spectrals_file", "data/spectrals/observation_spectrals.txt"),
             raw=dict(config),
         )
 
     def as_config(self) -> Dict[str, Any]:
         return dict(self.raw)
-
-    def active_structure(self) -> Dict[str, Any]:
-        common = {"lai": self.lai, "height": self.height, "leaf_width": self.leaf_width, "hspot": self.hspot}
-        if self.vegetation_model == "bare":
-            return {"lai": 0.0}
-        if self.vegetation_model == "row":
-            return {**common, "row_width": self.row_width, "row_blank": self.row_blank,
-                    "row_height": self.row_height, "row_azimuth": self.row_azimuth}
-        if self.vegetation_model == "crown":
-            return {**common, "crown_radius": self.crown_radius, "crown_height": self.crown_height,
-                    "crown_width": self.crown_width, "crown_density": self.crown_density,
-                    "gleaf": self.gleaf, "lidfa": self.lidfa, "lidfb": self.lidfb}
-        if self.surface_model == "terrain":
-            return {**common, "terrain_type": self.terrain_type,
-                    "terrain_slope": self.terrain_slope, "terrain_aspect": self.terrain_aspect,
-                    "terrain_radius": self.terrain_radius, "terrain_height": self.terrain_height,
-                    "terrain_density": self.terrain_density}
-        if self.surface_model == "urban":
-            return {"building_density": self.building_density,
-                    "building_length": self.building_length, "building_width": self.building_width,
-                    "building_height": self.building_height}
-        return common
 
 
 @dataclass
@@ -344,17 +223,17 @@ class DefinedStructure(MappingStruct):
     def from_mapping(cls, values: Mapping[str, Any]) -> "DefinedStructure":
         data = dict(values)
         groups = {
-            "canopy": ("lai", "stand_density", "height", "width", "gleaf", "lidfa", "lidfb", "hspot", "leaf_width"),
+            "canopy": ("lai", "canopy_height", "gleaf", "lidfa", "lidfb", "hspot", "leaf_width", "crown_rad_a", "crown_rad_b", "crown_height", "crown_density", "row_width", "row_blank", "row_height", "row_azimuth"),
             "leaf": ("leaf_reflectance", "leaf_transmittance", "leaf_emissivity"),
             "biochemistry": ("vcmax", "ballberry_m", "leaf_type", "kv", "rdparam", "tparam", "tyear", "beta", "knpqs", "qls", "stressfactor", "stomatal_method", "stomatal_g0"),
             "soil_optical": ("soil_reflectance", "soil_emissivity", "hapke_enable", "hapke_K"),
-            "soil_thermal": ("soil_rss", "soil_cs", "soil_rhos", "soil_lambda", "soil_rbs", "soil_moisture", "soil_temperature_c", "satwater", "soil_depth_step", "soil_tir_water_effect", "soil_tir_emissivity_dry", "soil_tir_emissivity_wet", "soil_tir_moisture_dry", "soil_tir_moisture_wet"),
+            "soil_thermal": ("soil_rss", "soil_cs", "soil_rhos", "soil_lambda", "soil_rbs", "soil_moisture", "soil_temperature_c", "satwater", "soil_depth_step"),
             "urban_thermal": ("urban_rss", "urban_cs", "urban_rhos", "urban_lambda", "urban_rbs", "urban_temperature_c", "urban_depth_step", "urban_wall_thickness", "urban_wall_layers", "urban_internal_temperature_c", "urban_wall_diffuse_factor", "urban_emissivity_roof", "urban_emissivity_wall", "urban_emissivity_street"),
-            "urban_spectrum": ("urban_spectrum_source", "urban_spectrum_file", "urban_reflectance_roof_spectrum", "urban_reflectance_wall_spectrum", "urban_reflectance_street_spectrum", "urban_emissivity_roof_spectrum", "urban_emissivity_wall_spectrum", "urban_emissivity_street_spectrum"),
+            "urban_spectrum": ("urban_reflectance_roof_spectrum", "urban_reflectance_wall_spectrum", "urban_reflectance_street_spectrum"),
             "run": ("soil_heat_method", "urban_heat_method", "soil_temperature_method", "urban_temperature_method", "soil_heat_fraction", "urban_heat_fraction", "temperature_method"),
             "aerodynamic": ("aero_zo", "aero_d", "aero_rbc", "aero_cr", "aero_cd", "aero_cd1", "aero_psicor", "aero_cssoil", "aero_rwc", "aero_rbs"),
-            "atmosphere": ("z", "ea", "ca", "oa", "shortwave_diffuse_fraction"),
-            "spectra": ("wavelengths", "fesun", "fesky", "leaf_reflectance_spectrum", "leaf_transmittance_spectrum", "soil_reflectance_spectrum"),
+            "atmosphere": ("z", "ca", "oa", "shortwave_diffuse_fraction"),
+            "spectra": ("wavelengths", "fesun", "fesky", "leaf_reflectance_spectrum", "leaf_transmittance_spectrum", "soil_reflectance_spectrum", "tir_wavelengths", "tir_emissivity"),
         }
         return cls(data, **{name: {key: data[key] for key in keys if key in data} for name, keys in groups.items()})
 

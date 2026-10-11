@@ -16,7 +16,7 @@ let toastTimer;
 
 const $ = (id) => document.getElementById(id);
 if (window.location.protocol === "file:") {
-  window.location.replace("http://127.0.0.1:8901/angle/");
+  window.location.replace("http://127.0.0.1:8765/angle/");
 }
 const root = document.documentElement;
 const colors = { cyan: "#1683a3", amber: "#d38a24", coral: "#d53b36", muted: "#5d7383", grid: "#c9dae4", ink: "#173044" };

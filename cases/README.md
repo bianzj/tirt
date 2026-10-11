@@ -12,4 +12,4 @@ cases/my_case/
 
 `input.csv` 和必要的外部数据可以纳入版本管理；`output.csv`、`observations.csv`、`intermediate.csv`、`summary.csv` 和 `plots/` 都是可重新生成的产物，已由 `.gitignore` 排除。
 
-目录名以下划线开头的目录（如 `_verify_run`）用于测试或临时验证，不作为正式案例。
+目录名以下划线开头的目录（如 `_verify_run`）由验证脚本生成，不作为正式案例，整体由 `.gitignore` 排除。

@@ -32,15 +32,17 @@ python tirteb_run.py --input input_tirteb.csv --output cases/my_case/output.csv
 
 1. 在 Site and period 设置经纬度、DOY 范围和气象文件。
 2. 在 Observation 设置方向、波长和观测时间筛选。
-3. 在 Scene structure 选择平面、地形或城市，以及裸土、均质、垄行或树冠。
-4. 在 Spectral information 设置 PROSPECT、BSM、热红外参数，或上传 measured 光谱。
+3. 在 Scene structure 选择平面、单坡、复合地形或城市，以及裸土、均质、垄行或树冠（复合地形和城市上的植被按树冠计算）。
+4. 在 Spectral information 设置 PROSPECT、BSM、热红外发射率，或上传叶片/土壤可见光近红外光谱与城市光谱。
 5. 在 Plant physiology 和 Thermal/energy balance 中调整方法和参数。
 6. 点击 Run time series，等待状态变为 Complete。
 7. 使用图表选择 Tv_C、LE、H 或 G，再保存 `output.csv`、`observations.csv` 和当前 `input_tirteb.csv`。
 
 ## 输入文件
 
-方向文件每行至少包含：
+`input_tirteb.csv` 与方向性模型的 `input.csv` 使用同一套参数名称和含义（地表、坡面、地形、建筑、垄行、树冠、热红外发射率、观测几何和波段），参数说明见 [TIRTEB 理论与方法说明](TIRTEB_theory_and_methods.md#参数体系)。
+
+方向文件（`geometry_mode=2` 时的 `geometry_file`）每行至少包含：
 
 ~~~text
 vza vaa
@@ -54,7 +56,7 @@ vza vaa
 10.5
 ~~~
 
-叶片 measured 文件可使用三列 wavelength、leaf_reflectance、leaf_transmittance；土壤 measured 文件使用两列 wavelength、soil_reflectance。城市 measured 文件使用七列：波长、屋顶/墙面/街道反射率、屋顶/墙面/街道发射率。文件波长可以用 um，也可以使用 nm；程序会自动识别小于等于 20 的波长为 um。
+叶片可见光近红外文件（`leaf_optics_source=file`）可使用三列 wavelength、reflectance、transmittance；土壤文件（`soil_optics_source=file`）使用两列 wavelength、reflectance。热红外发射率光谱文件与 TiRT 相同：`vegetation_spectrum_file`、`soil_spectrum_file` 为 wavelength、emissivity 两列；`urban_spectrum_file` 为波长加屋顶/墙面/街道发射率四列，或七列（波长、屋顶/墙面/街道可见光近红外反射率、屋顶/墙面/街道发射率）。文件波长可以用 µm，也可以使用 nm；程序会自动识别小于等于 20 的波长为 µm。
 
 ## 绘图
 
@@ -70,5 +72,6 @@ python analysis/plot_observations.py --result-dir cases/my_case --time 214.5 --b
 
 - 端口被占用：使用 --port 8890，再打开对应地址。
 - 没有观测记录：检查 observation_time_mode 和气象文件中的实际时间是否匹配。
-- measured 文件报错：至少提供两行有效数值，并保证波长列和光谱列顺序正确。
+- 叶片或土壤光谱文件报错：至少提供两行有效数值，并保证波长列和光谱列顺序正确。
+- 复合地形报错“总占据率必须小于 1”：`terrain_density` 是每平方米的圆锥数，需满足 `terrain_density·π·terrain_radius² < 1`。
 - 需要调试能量平衡：设置 output_intermediate=yes，检查 intermediate.csv。

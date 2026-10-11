@@ -1,6 +1,8 @@
 import numpy as np
 
 from .crown import *
+from .physicsF import projection_overlap
+from .terrain import Terrain, _self_lit_fraction, _unit
 ###----------------------------------
 ### 这里考虑了山地本身的遮挡和子像元内植被的复合效应
 ### 1. determine the mountainous surface
@@ -13,8 +15,8 @@ class Terrain_Veg:
 
     ### h, r, density
     shapes = np.asarray([[10,10,0.003],[10,5,0.001],[10,15,0.001]])
-    ### lai, hspot, stand, radi_horizontal, radi_vertical
-    forestshape = np.asarray([1.0,0.001,3,3,0.2])
+    ### lai, stand, radi_horizontal, radi_vertical, hspot, trunk height (crown base)
+    forestshape = np.asarray([1.0,0.001,3,3,0.2,3])
 
     crown = Crown()
 
@@ -103,7 +105,7 @@ class Terrain_Veg:
 
         projv = projv/(1-poccupied)
         projs = projs/(1-poccupied)
-        Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
+        Overlapping = projection_overlap(tantv, tants, up)
         projvs = projv + projs * Overlapping
 
         # partmax = np.max([projv, projs])
@@ -126,13 +128,18 @@ class Terrain_Veg:
         hcr = forestshape[3]
         rcr = forestshape[2]
         Pcomtemp = proportion_bidirectional_crown_one(lai, std, hspot, hcr, rcr, np.asarray([vza]),
-                                                      np.asarray([sza]), np.asarray([raa]))
+                                                      np.asarray([sza]), np.asarray([raa]), hcb=forestshape[5])
         ### 只有光照山坡的光照植被和光照土壤才是光照
         ### 在阴影山坡的所有植被和土壤全是阴影
+        self._leaf_view_ground = Pcomtemp[2][0] + Pcomtemp[3][0]
         pPlaneV_veg_sunlit = pPlaneV_sunlit*Pcomtemp[2][0]
         pPlaneV_veg_shaded = pPlaneV_sunlit*Pcomtemp[3][0] + pPlaneV_shaded*Pcomtemp[2][0] + pPlaneV_shaded*Pcomtemp[3][0]
         pPlaneV_soil_sunlit = pPlaneV_sunlit*Pcomtemp[0][0]
         pPlaneV_soil_shaded = pPlaneV_sunlit*Pcomtemp[1][0] + pPlaneV_shaded*Pcomtemp[0][0] + pPlaneV_shaded*Pcomtemp[1][0]
+        ### 森林与背景之间的散射（同平地树冠模型），在地形阴影中的部分全部归为阴影叶片
+        scat = np.asarray(emissivity_scatter_analytical(lai, self.Em, Esoil, np.asarray([vza]), np.asarray([sza]))[0], dtype=float).reshape(4, -1)[:, 0]
+        pPlaneV_scat_sunlit = pPlaneV_sunlit * scat[2]
+        pPlaneV_scat_shaded = pPlaneV_sunlit * scat[3] + pPlaneV_shaded * (scat[2] + scat[3])
         ### 测试集合
         alla1 = pPlaneV_veg_sunlit+pPlaneV_veg_shaded+pPlaneV_soil_sunlit+pPlaneV_soil_shaded
         ####----------------------------------------------
@@ -148,6 +155,8 @@ class Terrain_Veg:
         pMount_soil = 0
         pMount_veg_sunlit = 0
         pMount_soil_sunlit = 0
+        pMount_scat = 0
+        pMount_scat_sunlit = 0
         for kshape1 in range(n_shape):
             shape1 = shapes[kshape1]
 
@@ -180,7 +189,7 @@ class Terrain_Veg:
                 height_temp = dheight * (kh + 0.5)
                 dh = shapes[:, 0] - height_temp
                 alpha2 = np.arctan(shapes[:,1] / shapes[:,0])
-                r1 = height_temp / height1 * radius1
+                r1 = (1 - height_temp / height1) * radius1
                 w = (r1*np.pi*dheight+r1*2+dheight)  ### 高度并不是等效的，这里是不同高度的权重
 
                 L2_v = dh * tantv
@@ -207,7 +216,7 @@ class Terrain_Veg:
 
             projv = projv / n_part/weight/(1-poccupied)  ### 因为没有考虑本身圆形情况，延伸出来的部分
             projs = projs / n_part/weight/(1-poccupied)
-            Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
+            Overlapping = projection_overlap(tantv, tants, up)
             projvs = projv + projs * Overlapping
 
             # partmax = np.max([projv, projs])
@@ -217,8 +226,16 @@ class Terrain_Veg:
             # projvs = partmax + partmin * Overlapping
 
             ### 计算山地的平均光照和可视比例
-            gapv_mount = np.exp(-projv)
-            gapvs_mount = np.exp(-projvs)
+            # exp(-gap_shift) is common to all shapes and cancels in the normalisation by temp; it avoids 0/0 as vza -> 90
+            if kshape1 == 0 or projv < gap_shift:
+                rescale = 1.0 if kshape1 == 0 else np.exp(projv - gap_shift)
+                pMountV, pMountV_sunlit = pMountV * rescale, pMountV_sunlit * rescale
+                pMount_veg, pMount_soil = pMount_veg * rescale, pMount_soil * rescale
+                pMount_veg_sunlit, pMount_soil_sunlit = pMount_veg_sunlit * rescale, pMount_soil_sunlit * rescale
+                pMount_scat, pMount_scat_sunlit = pMount_scat * rescale, pMount_scat_sunlit * rescale
+                gap_shift = projv
+            gapv_mount = np.exp(-(projv - gap_shift))
+            gapvs_mount = np.exp(-(projvs - gap_shift))
 
             slope = alpha1 * 180 / np.pi
             pMountV_temp = 0
@@ -227,28 +244,18 @@ class Terrain_Veg:
             if L1_v <= radius1:
                 ### 如果没有投影出来，那可视就都是本圆
                 pMountV_temp =  density1 * gapv_mount * (( np.pi) * radius1 * radius1)
-                if sza > slope:
-                    ### 如果此时光照角度大于圆锥倾斜，则光照部分类似于椭球的方式计算
-                    cosphi = uv * ui + sv * si * up
-                    pMountV_sunlit_temp = density1 * gapvs_mount *(( np.pi) * radius1 * radius1) * (1 + cosphi) * 0.5
-                else:
-                    ### 如果此时光照角度小于圆锥倾斜，则所有可视，所有光照
-                    gapvs_mount = 1.0
-                    pMountV_sunlit_temp = density1 * gapv_mount * ((np.pi) * radius1 * radius1)
             else:
                 ### 投影出本圆，那可视就都是本圆+投影出来的部分，是Li圆锥的计算方法
                 pMountV_temp = density1 * gapv_mount * ((1.0/np.tan(gamma1_v) + gamma1_v + np.pi / 2.0) * radius1*radius1)
-                if sza > slope:
-                    ### 如果此时光照角度大于圆锥倾斜，则光照是类椭球计算方式
-                    cosphi = uv * ui + sv * si * up
-                    pMountV_sunlit_temp = density1 * gapvs_mount * ((1.0/np.tan(gamma1_v) + gamma1_v + np.pi / 2.0) * radius1*radius1) * (1 + cosphi) * 0.5
-                else:
-                    ### 如果此时光照角度大于圆锥倾斜，则光照是完全的光照
-                    pMountV_sunlit_temp = density1 * gapv_mount * ((1.0/np.tan(gamma1_v) + gamma1_v + np.pi / 2.0) * radius1*radius1)
+            # other cones' shadows only; self-shading is resolved per facet orientation below
+            mutual = np.exp(-projs * Overlapping)
+            beta1 = np.pi / 2 - alpha1
+            v_dir = _unit(np.asarray(vza * rd), np.asarray(vaa * rd))
+            s_dir = _unit(np.asarray(sza * rd), np.asarray(saa * rd))
+            pMountV_sunlit_temp = pMountV_temp * mutual * _self_lit_fraction(beta1, v_dir, s_dir)
             pMountV = pMountV + pMountV_temp
             pMountV_sunlit = pMountV_sunlit + pMountV_sunlit_temp
 
-            ### 这里不进行方位角的积分，选择了采用方位角的中心进行计算
             forestshape = self.forestshape
             lai = forestshape[0]
             std = forestshape[1]
@@ -256,47 +263,32 @@ class Terrain_Veg:
             hcr = forestshape[3]
             rcr = forestshape[2]
 
-
             ### 计算每个离散360方向上的角度贡献
-            n = 360
-            lza = np.zeros(n) + slope
-            laa = np.arange(0, n, 1)
-            vzatemp = np.zeros(n) + vza
-            vaatemp = np.zeros(n) + vaa
-            vlatemp = np.abs(vaa - laa)
-            vsatemp = np.abs(vaatemp - saa)
-            szatemp = np.zeros(n) + sza
-            stdtemp = np.zeros(n) + std
-            hspotemp = np.zeros(n) + hspot
-            hcrtemp = np.zeros(n) + hcr
-
-            uii = np.cos(lza * rd)
-            uvv = np.cos(vzatemp * rd)
-            sii = np.sin(lza * rd)
-            svv = np.sin(vzatemp * rd)
-            upp = np.cos(vlatemp * rd)
-            # tantv = np.tan(vzatemp * rd)
-            tantl = np.tan(vlatemp * rd)
-            cosang = uvv * uii + svv * sii * upp
-            ang = np.arccos(cosang) / rd
-
-            ### 当大于0的时候，才是能看到的情况，否则是看不到的，也是没有贡献的
-            ind = cosang >= 0
-            weight_all = np.sum(cosang[ind])
-            weight = cosang[ind]/weight_all
-            vzatemp = vzatemp[ind]
-            vsatemp = vsatemp[ind]
-            szatemp = szatemp[ind]
-            hspotemp = hspotemp[ind]
-            # stdtemp = stdtemp[ind]
-            # hcrtemp = hcrtemp[ind]
-
-            stdtemp = stdtemp[ind]*uii[ind]
-            hcrtemp = hcrtemp[ind]*uii[ind]
-
-            ### 在这些有效角度下的贡献，其贡献的权重是其方向上投影有关系的
-
-            Pcomtemp = proportion_bidirectional_crown_one(lai, stdtemp, hspotemp, hcrtemp, rcr, np.asarray(vzatemp), np.asarray(szatemp), np.asarray(vsatemp))
+            # facet normals: zenith = side slope beta1 = atan(h/r), azimuth laa
+            laa = np.arange(0, 360, 1) * rd
+            normals = _unit(np.full(laa.size, beta1), laa)
+            cosang = normals @ v_dir
+            coss = normals @ s_dir
+            ind = cosang > 1e-9
+            weight = cosang[ind] / np.sum(cosang[ind])
+            normals, cosang, coss = normals[ind], cosang[ind], coss[ind]
+            # facet-local geometry (cf. slope_veg/slope1); relative azimuth between the in-plane projections of v and s
+            v_t = v_dir - cosang[:, None] * normals
+            s_t = s_dir - coss[:, None] * normals
+            cos_raa = np.sum(v_t * s_t, 1) / np.maximum(np.linalg.norm(v_t, axis=1) * np.linalg.norm(s_t, axis=1), 1e-12)
+            vza_loc = np.minimum(np.arccos(np.clip(cosang, -1, 1)) / rd, 89.999)
+            sza_loc = np.minimum(np.arccos(np.clip(coss, -1, 1)) / rd, 89.0)
+            raa_loc = np.arccos(np.clip(cos_raa, -1, 1)) / rd
+            # Boolean crowns standing on a facet: densities per facet area are lai*cos(beta), std*cos(beta); the path
+            # factor is 1/cos(local zenith) (gap MC on tilted planes: 0.736 vs 0.738; old global-angle form 0.746/0.776 vs 0.603)
+            cos_beta = np.cos(beta1)
+            Pcomtemp = np.asarray(proportion_bidirectional_crown_one(lai * cos_beta, std * cos_beta, hspot, hcr, rcr, vza_loc, sza_loc, raa_loc, hcb=forestshape[5]))
+            # facets turned away from the sun are entirely shaded
+            lit = coss > 0
+            Pcomtemp[1] = Pcomtemp[1] + Pcomtemp[0] * ~lit
+            Pcomtemp[3] = Pcomtemp[3] + Pcomtemp[2] * ~lit
+            Pcomtemp[0] = Pcomtemp[0] * lit
+            Pcomtemp[2] = Pcomtemp[2] * lit
 
             Pcom = np.sum(Pcomtemp * weight,axis=1)
             pVeg = Pcom[2]+Pcom[3]
@@ -305,8 +297,12 @@ class Terrain_Veg:
             pSoil_sunlit = Pcom[0]
             pMount_veg = pMount_veg + pMountV_temp * pVeg                                ### 植被的贡献
             pMount_soil = pMount_soil + pMountV_temp * pSoil                             ### 土壤的贡献
-            pMount_soil_sunlit = pMount_soil_sunlit + pMountV_sunlit_temp * pSoil_sunlit ### 阳坡 * 光照土壤
-            pMount_veg_sunlit = pMount_veg_sunlit + pMountV_sunlit_temp * pVeg_sunlit    ### 阳坡 * 光照植被
+            pMount_soil_sunlit = pMount_soil_sunlit + pMountV_temp * mutual * pSoil_sunlit
+            pMount_veg_sunlit = pMount_veg_sunlit + pMountV_temp * mutual * pVeg_sunlit
+            # forest-background scattering of the facet canopy in facet-local angles; unlit facets are all shaded
+            scat = np.asarray(emissivity_scatter_analytical(lai * cos_beta, self.Em, Esoil, vza_loc, sza_loc)[0], dtype=float).reshape(4, -1)
+            pMount_scat = pMount_scat + pMountV_temp * np.sum((scat[2] + scat[3]) * weight)
+            pMount_scat_sunlit = pMount_scat_sunlit + pMountV_temp * mutual * np.sum(scat[2] * lit * weight)
 
 
 
@@ -322,17 +318,21 @@ class Terrain_Veg:
         pMountV_veg_shaded = pMount_veg * temp - pMountV_veg_sunlit
         pMountV_soil_sunlit = pMount_soil_sunlit * temp
         pMountV_soil_shaded = pMount_soil * temp - pMountV_soil_sunlit
-
+        pMountV_scat_sunlit = pMount_scat_sunlit * temp
+        pMountV_scat_shaded = pMount_scat * temp - pMountV_scat_sunlit
+        # composition of the facet surface seen by the sensor, used as reflector in the scatter term
+        self._leaf_view_facet = pMount_veg / (pMount_veg + pMount_soil)
         ### 测试集，加成1和加成2
         alla2 = pMountV_veg_sunlit+pMountV_veg_shaded+pMountV_soil_shaded+pMountV_soil_sunlit
         alla = pPlaneV_veg_sunlit + pMountV_veg_sunlit+ pPlaneV_veg_shaded + pMountV_veg_shaded+ pPlaneV_soil_sunlit + pMountV_soil_sunlit+ pPlaneV_soil_shaded + pMountV_soil_shaded
         # print(pPlaneV_sunlit,pPlaneV_shaded,pMountV_sunlit,pMountV_shaded)
         # print(Pcom,np.sum(Pcom))
         if ifP ==1:
-            return pPlaneV, pMountV
+            return pPlaneV, pMountVnew
         elif ifP == 2:
-            return pPlaneV_soil_sunlit + pMountV_soil_sunlit, pPlaneV_soil_shaded + pMountV_soil_shaded,\
-                   pPlaneV_veg_sunlit + pMountV_veg_sunlit, pPlaneV_veg_shaded + pMountV_veg_shaded
+            return (pPlaneV_soil_sunlit + pMountV_soil_sunlit) * self.Es, (pPlaneV_soil_shaded + pMountV_soil_shaded) * self.Es,\
+                   (pPlaneV_veg_sunlit + pMountV_veg_sunlit) * self.Em + pPlaneV_scat_sunlit + pMountV_scat_sunlit,\
+                   (pPlaneV_veg_shaded + pMountV_veg_shaded) * self.Em + pPlaneV_scat_shaded + pMountV_scat_shaded
 
         elif ifP ==3:
             return 0, 0
@@ -341,295 +341,59 @@ class Terrain_Veg:
 
 
     def calculate_component_scatter_emissivity(self, kangle,ifP = 0):
-        shapes = self.shapes
-        Es = self.Es
-        n_shape = self.n_shape
-        n_dem = self.n_dim
-        n_part = self.n_part
-        vza = self.vza_[kangle]
-        vaa = self.vaa_[kangle]
+        """Terrain-scale single scattering between canopy-covered facets and canopy-covered ground.
+
+        Geometry (i0v, eu/ed/p, ws, path sunlit shares) is shared with the bare Terrain model. Every surface is a
+        soil+crown mixture: it emits Es*G (soil) and Em*(1-G) (leaves), G = hemispherical canopy gap, and reflects with
+        the composition the sensor sees on it. The crown kernel used here has no within-canopy scattering, so nothing
+        is counted twice.
+        """
+        t = Terrain.scatter_terms(self, kangle)
+        Es, Em = self.Es, self.Em
+        lai, std, rcr, hcr, hspot, hcb = self.forestshape[:6]
+        beta = np.mean(np.arctan(self.shapes[:, 0] / self.shapes[:, 1]))
         sza = self.sza
-        saa = self.saa
-        raa = vaa - saa
 
-        if raa > 180:raa = 360-raa
+        # 4-point Gauss-Legendre in mu = cos(theta) on (0,1) for hemispherical (cosine-weighted) averages
+        x, w = np.polynomial.legendre.leggauss(4)
+        mu, w = 0.5 * (x + 1), 0.5 * w
+        rel = np.arange(0, 360, 60.0)
+        MU, REL = np.meshgrid(mu, np.minimum(rel, 360 - rel), indexing="ij")
+        WT = (np.repeat(w * mu, rel.size) / rel.size).reshape(MU.shape) * 2
+        zen = np.degrees(np.arccos(MU)).reshape(-1)
 
+        def hemispherical(lai_x, std_x):
+            P = np.asarray(proportion_bidirectional_crown_one(lai_x, std_x, hspot, hcr, rcr, zen, np.full(zen.size, min(sza, 89.0)), REL.reshape(-1), hcb=hcb))
+            wt = WT.reshape(-1)
+            gap = np.sum(wt * (P[0] + P[1]))
+            soil_lit = np.sum(wt * P[0]) / max(np.sum(wt * (P[0] + P[1])), 1e-12)
+            leaf_lit = np.sum(wt * P[2]) / max(np.sum(wt * (P[2] + P[3])), 1e-12)
+            return gap, soil_lit, leaf_lit
 
-        rd = np.pi / 180.0
-        ui = np.cos(sza * rd)
-        uv = np.cos(vza * rd)
-        si = np.sin(sza * rd)
-        sv = np.sin(vza * rd)
-        up = np.cos(raa * rd)
-        tantv = np.tan(vza * rd)
-        tants = np.tan(sza * rd)
+        G_g, sig_s, sig_l = hemispherical(lai, std)
+        G_f = hemispherical(lai * np.cos(beta), std * np.cos(beta))[0]
 
-        ####----------------------------------------------
-        ### PLANE surface
-        ###-----------------------------------------------
-        height1r = 0
-        projv = 0
-        projs = 0
-        poccupied = 0
-        projvs = 0
-        for kshape2 in range(n_shape):
-            shape2 = shapes[kshape2]
-            radius2 = shape2[1]
-            height2 = shape2[0]
-            density2 = shape2[2]
-            poccupied = poccupied + density2 * np.pi * (radius2*radius2)
-            dh = height2 - height1r
-            alpha2 = np.arctan(radius2/height2)
+        rho_f = self._leaf_view_facet * (1 - Em) + (1 - self._leaf_view_facet) * (1 - Es)
+        rho_g = self._leaf_view_ground * (1 - Em) + (1 - self._leaf_view_ground) * (1 - Es)
+        x_ff = t["p"] * t["i0v"] * rho_f
+        x_fg = t["ws"] * rho_g
+        x_gf = t["ed"] * t["i0v"] * rho_f
+        lit_f = x_ff * t["s_ww"] + x_fg * t["s_ws"]
+        lit_g = x_gf * t["ground_sunlit"]
 
-            L2_v = dh * tantv
-            if L2_v < radius2: L2_v = radius2*1.0
-            theta2_v = np.arctan(L2_v*np.tan(alpha2)/radius2)
-            gamma2_v = np.arcsin(radius2/L2_v)
-            if dh <= 0 or L2_v <= radius2: continue
-            projv_mount = density2 * (np.cos(gamma2_v) + gamma2_v + np.pi/2.0)*radius2*radius2
-            projv = projv + projv_mount
-
-
-            L2_s = dh * tants
-            if L2_s < radius2: L2_s = radius2*1.0
-            theta2_s = np.arctan(L2_s*np.tan(alpha2)/radius2)
-            gamma2_s = np.arcsin(radius2/L2_s)
-            if dh <= 0 or L2_s <= radius2: continue
-            projs_mount = density2 * (1.0/np.tan(gamma2_s) + gamma2_s + np.pi/2.0)*radius2*radius2
-            projs = projs + projs_mount
-
-        Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
-        projvs = projv + projs * Overlapping
-        pPlaneV = np.exp(-projv)*(1-poccupied)
-        pPlaneS = np.exp(-projs)*(1-poccupied)
-        pPlaneV_sunlit = np.exp(-projvs)*(1-poccupied)
-        pPlaneV_shaded = pPlaneV - pPlaneV_sunlit
-
-        ### 半球投影的归一化
-        if2 = 1.0
-        ### 上半球的方向
-        n_hza0 = 90
-        n_haa0 = 60
-        hza0 = np.linspace(0, 89, n_hza0) # hemisphere space
-        haa0 = np.linspace(0, 360, n_haa0)
-        hza,haa = np.meshgrid(hza0,haa0)
-        hza = np.reshape(hza,-1)  ### to linear
-        haa = np.reshape(haa,-1)  ### to linear
-
-        ### step of hza in rad unit rather zhan degree unit
-        dangle = np.pi/2.0/n_hza0 # 角度的步长
-        tantemp = np.tan(hza * rd)   ### 半球的正切
-        # fweiplus = np.sin(hza*rd)*dangle *np.cos(hza*rd) # 角度的归一化方式, 一般是0.5
-        fweiplus = np.sin(hza * rd) * dangle  ##### 一般是1.0
-        fweiplusSum = np.sum(if2*fweiplus)  ### 权重累计，如果没有meshgrid，应该是0.5，现在总和是0.5*n_haa0
-
-        alpha2 = np.arctan(shapes[:, 1] / shapes[:, 0])
-
-        L2_v = shapes[:,0] * tantv
-        ind = L2_v < shapes[:, 1]
-        L2_v[ind] = shapes[ind, 1]
-        theta2_v = np.arctan(L2_v * np.tan(alpha2) / shapes[:, 1])
-        gamma2_v = np.arcsin(shapes[:, 1] / L2_v)
-        projv_mount = (shapes[:, 2] * (1.0/np.tan(gamma2_v) + gamma2_v + np.pi / 2.0) * shapes[:, 1] * shapes[:, 1])
-        tempSv = np.sum(projv_mount)
-        f0 = np.exp(-tempSv)
-        i0v = 1-f0
-
-
-        eu = 0.0
-        ed = 0.0
-        au = 0.5
-        ad = 0.5
-
-        for kshape1 in range(n_shape):
-            shape1 = shapes[kshape1]
-
-            radius1 = shape1[1]
-            height1 = shape1[0]
-            density1 = shape1[2]
-            height1r = height1
-            dheight = height1 / n_part
-            projv = 0
-            projs = 0
-
-            alpha1 = np.arctan(radius1 / height1)
-            L1_v = height1 * tantv
-            if L1_v < radius1: L1_v = radius1 * 1.0
-            theta1_v = np.arctan(L1_v * np.tan(alpha1) / radius1)
-            gamma1_v = np.arcsin(radius1 / L1_v)
-
-
-            for kh in range(n_part):
-                heighttemp = dheight * (kh + 0.5)
-                tempdS = ( dheight * density1)* tantv *(heighttemp/height1)*(2*radius1)
-
-                projStemp = 0
-                proj_roof = 0
-                tempSv = 0
-                for kshape2 in range(n_shape):
-                    shape2 = shapes[kshape2]
-                    radius2 = shape2[1]
-                    height2 = shape2[0]
-                    density2 = shape2[2]
-
-                    if (height2 - heighttemp > 0):
-
-                        dh = height2 - height1r
-                        alpha2 = np.arctan(radius2 / height2)
-                        L2_v = dh * tantemp
-                        ind = L2_v < radius2
-                        L2_v[ind] = radius2
-                        theta2_v = np.arctan(L2_v * np.tan(alpha2) / radius2)
-                        gamma2_v = np.arcsin(radius2 / L2_v)
-                        projtemp_mount = density2 * (1.0/np.tan(gamma2_v) + gamma2_v + np.pi / 2.0) * radius2 * radius2
-                        ind = (dh<=0)+(L2_v<=radius2)
-                        projtemp_mount[ind] = 0
-                        projStemp = projStemp + projtemp_mount
-
-                        L2_v = dh * tantv
-                        if L2_v < radius2: L2_v = radius2 * 1.0
-                        theta2_v = np.arctan(L2_v * np.tan(alpha2) / radius2)
-                        gamma2_v = np.arcsin(radius2 / L2_v)
-                        if dh <= 0 or L2_v <= radius2: continue
-                        projv_mount = density2 * (1.0/np.tan(gamma2_v) + gamma2_v + np.pi / 2.0) * radius2 * radius2
-                        tempSv = tempSv + projv_mount
-
-                ftempv = np.exp(-(tempSv))
-                ftemp = np.exp(-(projStemp))
-                eu = eu + np.sum(if2 * ftemp * fweiplus / fweiplusSum) * tempdS * ftempv
-
-                projStemp = 0
-                tempSv = 0
-                for kshape2 in range(n_shape):
-                    shape2 = shapes[kshape2]
-                    radius2 = shape2[1]
-                    height2 = shape2[0]
-                    density2 = shape2[2]
-
-                    if (height2 - heighttemp < 0):
-
-                        dh = height2
-                        alpha2 = np.arctan(radius2 / height2)
-                        L2_v = dh * tantemp
-                        ind = L2_v < radius2
-                        L2_v[ind] = radius2
-                        theta2_v = np.arctan(L2_v * np.tan(alpha2) / radius2)
-                        gamma2_v = np.arcsin(radius2 / L2_v)
-                        # if dh <= 0 or L2_v <= radius2: continue
-                        projtemp_mount = density2 * (1.0/np.tan(gamma2_v) + gamma2_v + np.pi / 2.0) * radius2 * radius2
-
-                        ind = (dh <= 0) + (L2_v <= radius2)
-                        projtemp_mount[ind] = 0
-
-                        projStemp = projStemp + projtemp_mount
-                    if (height2 - heighttemp > 0):
-
-                        dh = heighttemp
-                        alpha2 = np.arctan(radius2 / heighttemp)
-                        L2_v = dh * tantemp
-                        ind = L2_v < radius2
-                        L2_v[ind] = radius2
-                        theta2_v = np.arctan(L2_v * np.tan(alpha2) / radius2)
-                        gamma2_v = np.arcsin(radius2 / L2_v)
-                        # if dh <= 0 or L2_v <= radius2: continue
-                        projtemp_mount = density2 * (1.0/np.tan(gamma2_v) + gamma2_v + np.pi / 2.0) * radius2 * radius2
-                        ind = (dh <= 0) + (L2_v <= radius2)
-                        projtemp_mount[ind] = 0
-                        projStemp = projStemp + projtemp_mount
-
-
-                ftemp = np.exp(-(projStemp))
-                ed = ed + np.sum(if2 * ftemp * fweiplus/ fweiplusSum) * tempdS * ftempv
-
-        eu = eu / i0v*0.5
-        ed = ed / i0v*0.5
-        p = 1 - eu - ed
-        if i0v == 0:
-            p = 0
-            eu = 0
-            ed = 0
-
-        ### 到达街道，然后街道的比例，然后街道离开地面到达天空的概率
-        heighttemp = 0
-        ws = 0
-        C = 1.05
-        projStemp = 0
-        poccupied = 0
-        tempSv = 0
-        for kshape2 in range(n_shape):
-            shape2 = shapes[kshape2]
-            radius2 = shape2[1]
-            height2 = shape2[0]
-            density2 = shape2[2]
-            poccupied = poccupied + density2 * np.pi * (radius2*radius2)
-            if (height2 - heighttemp > 0):
-
-                dh = height2 - height1r
-                alpha2 = np.arctan(radius2 / height2)
-                L2_v = dh * tantemp
-                ind = L2_v < radius2
-                L2_v[ind] = radius2
-                theta2_v = np.arctan(L2_v * np.tan(alpha2) / radius2)
-                gamma2_v = np.arcsin(radius2 / L2_v)
-                if dh <= 0 or L2_v <= radius2: continue
-                projtemp_mount = density2 * (1.0/np.tan(gamma2_v) + gamma2_v + np.pi / 2.0) * radius2 * radius2
-                projStemp = projStemp + projtemp_mount
-
-                L2_v = dh * tantv
-                if L2_v < radius2: L2_v = radius2 * 1.0
-                theta2_v = np.arctan(L2_v * np.tan(alpha2) / radius2)
-                gamma2_v = np.arcsin(radius2 / L2_v)
-                if dh <= 0 or L2_v <= radius2: continue
-                projv_mount = density2 * (1.0/np.tan(gamma2_v) + gamma2_v + np.pi / 2.0) * radius2 * radius2
-                tempSv = tempSv + projv_mount
-
-        ftemp = np.exp(-(projStemp))
-        ftempv = np.exp(-(tempSv)) ### 到达该体元的概率
-        tempds = 1-poccupied
-        ws = (1-np.sum(if2*(ftemp) * fweiplus/ fweiplusSum)) * ftempv * tempds
-
-
-
-        eww = Es * (1 - Es) * p * i0v
-        ews = Es * (1-Es) * ws
-        esw = Es *(1-Es) * ed * i0v
-
-        vsraa = (180.0 - np.abs(raa)) / 180.0  # sunlit part becasue of raa
-        vhraa = 1 - vsraa
-        ## 场景中有多少光照组分
-
-        area = 0
-        fts = 1.0
-        for kshape1 in range(n_shape):
-            shape1 = shapes[kshape1]
-            radius1 = shape1[1]
-            height1 = shape1[0]
-            density1 = shape1[2]
-            height1r = height1
-            L1_s = height1 * tants
-            if L1_s < radius1: L2_v = radius1 * 1.0
-            gamma1_s = np.arcsin(radius1 / L1_s)
-            projs_mount = density1 * (1.0/np.tan(gamma1_s) + gamma1_s + np.pi / 2.0) * radius1 * radius1
-            area = area + projs_mount
-        if area > 0:
-            fts = (1 - np.exp(-area)) / (area)
-
-
-        emw = ews + eww
-        emws = emw * fts*vsraa
-        emwh = emw - emws
-        ems = esw
-        emss = ems * pPlaneS
-        emsh = ems - emss
+        soil = Es * (G_f * (x_ff + x_fg) + G_g * x_gf)
+        soil_sunlit = Es * sig_s * (G_f * lit_f + G_g * lit_g)
+        leaf = Em * ((1 - G_f) * (x_ff + x_fg) + (1 - G_g) * x_gf)
+        leaf_sunlit = Em * sig_l * ((1 - G_f) * lit_f + (1 - G_g) * lit_g)
 
         if ifP == 1:
-            return ems,emw
+            return soil, leaf
         elif ifP == 2:
-            return emss, emsh, emws, emwh
+            return soil_sunlit, soil - soil_sunlit, leaf_sunlit, leaf - leaf_sunlit
         elif ifP == 3:
             return 0, 0, 0, 0
         else:
-            return esw + ews + eww
+            return soil + leaf
 
     def set_strcutural_input(self,shapes):
         self.shapes = shapes
@@ -660,8 +424,7 @@ class Terrain_Veg:
         emissivity_ = []
         for kangle in range(self.n_angle):
             direct = self.calculate_component_direct_emissivity(kangle,ifP)
-            # scatter = self.calculate_component_scatter_emissivity(kangle,ifP)
-            scatter = 0
+            scatter = self.calculate_component_scatter_emissivity(kangle,ifP)
             direct = np.asarray(direct)
             scatter = np.asarray(scatter)
             # scatter[:] = 0

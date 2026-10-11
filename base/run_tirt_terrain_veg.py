@@ -29,7 +29,7 @@ def main():
     shapes = np.asarray([[10, 10, 0.001],[10, 10, 0.001]])
 
 
-    forestshape = np.asarray([lai,stand,rcr,hcr,hspot])
+    forestshape = np.asarray([lai,stand,rcr,hcr,hspot,hcr])
     print('terrain:',100*0.002*np.pi)
     print('tree:',np.pi*rcr*rcr*stand)
     terrain = Terrain_Veg()

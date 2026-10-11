@@ -1,15 +1,16 @@
 import math
 
+import numpy as np
+
+_EXPINT_NODES = np.arange(1000, 100000) / 1000.0
+
 
 def _expint(x):
     """C++ Utils::expint numerical integral."""
     if x <= 0.0:
         return float("inf")
-    total = 0.0
-    for i in range(1000, 100000):
-        ii = i / 1000.0
-        total += math.exp(-x * ii) / ii * 0.001
-    return total
+    # cumsum keeps the sequential summation order of the C++ loop (np.sum is pairwise).
+    return float(np.cumsum(np.exp(-x * _EXPINT_NODES) / _EXPINT_NODES * 0.001)[-1])
 
 
 def calctav(alpha, nr):

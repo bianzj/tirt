@@ -6,66 +6,47 @@ from pathlib import Path
 
 import numpy as np
 
-from base.brightness import urban_brightness, urban_canopy_fraction, urban_component_fractions, urban_directional_reflectance, vegetation_brightness
-from base.modelio import read_defined, read_directions, read_input, read_meteo, read_spectrals
+from base.brightness import nearest_wavelength_index, urban_canopy_fraction, urban_component_fractions, urban_directional_reflectance
+from base.inputio import geometry, wavelengths
+from base.modelio import read_defined, read_input, read_meteo
 from base.model import run_node
+from base.radiation import component_proportions, directional_reflectance
 from base.solar import slope_direction
 from base.structs import InputStructure, ObservationStructure, RTStructure
-from base.radiation import component_proportions, directional_reflectance
+from run import _surface_result
 
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_INPUT = ROOT / "input_tirteb.csv"
-FEATURE_BANDS = ((0.55, "optical"), (0.86, "infrared"), (10.5, "thermal_infrared"))
-DEFAULT_OBSERVATION_VZA = (0.0, 30.0, 60.0)
-DEFAULT_OBSERVATION_VAA = (0.0, 90.0, 180.0)
 OUTPUT_FIELDS = (
     "node", "time", "veg", "surface", "Ta_C",
     "Tss_C", "Tsh_C", "Tls_C", "Tlh_C", "LE", "H", "G",
     "Troof_sunlit_C", "Troof_shaded_C", "Twall_sunlit_C", "Twall_shaded_C",
     "Tstreet_sunlit_C", "Tstreet_shaded_C", "Tleaf_sunlit_C", "Tleaf_shaded_C",
-    "Tv_C", "red", "nir",
+    "Rn", "Tv_C", "red", "nir",
 )
 OBSERVATION_BASE_FIELDS = (
     "node", "time", "veg", "surface", "vza", "vaa", "sza", "saa",
 )
+MODEL_NAMES = {"bare": "bare", "hom": "homogeneous", "row": "row", "crown": "crown"}
 
 
 def model_name(settings):
-    surface = settings.get("surface_model")
-    if surface == "urban" or settings["surface_type"] == 13 or settings["distribution"] == 4:
+    if settings["surface_model"] == "urban":
         return "urban"
-    vegetation = settings.get("vegetation_model")
-    if vegetation in {"bare", "bare_soil", "soil", "barren"}:
-        return "bare"
-    if vegetation in {"hom", "homogeneous"}:
-        return "homogeneous"
-    if vegetation in {"row", "raw"}:
-        return "row"
-    if vegetation in {"crown", "forest"}:
-        return "crown"
-    if settings["distribution"] == 2 or settings["surface_type"] in (12, 14):
-        return "row"
-    if settings["surface_type"] in (1, 2, 3, 4, 5):
-        return "crown"
-    return "homogeneous"
+    return MODEL_NAMES[settings["vegetation_model"]]
 
 
-def _config_path(config, base, key, default):
-    value = config.get(key, default)
-    path = Path(value)
-    return path if path.is_absolute() else base / path
-
-
-def _config_numbers(config, key, default):
-    value = config.get(key)
-    if value in (None, ""):
-        return tuple(default)
-    text = str(value).replace(";", ",")
-    return tuple(float(item.strip()) for item in text.split(",") if item.strip())
+def _tir_band(settings, wavelength):
+    """Component emissivities of the thermal band closest to `wavelength`."""
+    index = nearest_wavelength_index(settings["tir_wavelengths"], wavelength)
+    return {name: values[index] for name, values in settings["tir_emissivity"].items()}
 
 
 def _spectral_values(settings, wavelength, model=""):
+    if float(wavelength) >= 2.5:
+        band = _tir_band(settings, wavelength)
+        return 1.0 - band["leaf_e"], 0.0, 1.0 - band["soil_e"]
     wavelength_nm = float(wavelength) * 1000.0
     index = int(round(wavelength_nm - 400.0))
     leaf_rho = settings.get("leaf_reflectance", 0.0)
@@ -83,47 +64,41 @@ def _spectral_values(settings, wavelength, model=""):
             soil_rho = soil_spectrum[index]
         if model == "urban":
             urban_street = settings.get("urban_reflectance_street_spectrum", [])
-            if len(urban_street) == len(settings.get("wavelengths", [])):
-                urban_index = int(round(wavelength_nm - 400.0))
-                if 0 <= urban_index < len(urban_street):
-                    soil_rho = urban_street[urban_index]
-    if float(wavelength) >= 2.5:
-        leaf_rho = _tir_spectral_value(settings, "leaf_reflectance_tir_spectrum", "leaf_reflectance", wavelength)
-        leaf_tau = _tir_spectral_value(settings, "leaf_transmittance_tir_spectrum", "leaf_transmittance", wavelength)
-        soil_rho = _tir_spectral_value(settings, "soil_reflectance_tir_spectrum", "soil_reflectance", wavelength)
+            if len(urban_street) == len(settings.get("wavelengths", [])) and index < len(urban_street):
+                soil_rho = urban_street[index]
     return float(leaf_rho), float(leaf_tau), float(soil_rho)
 
 
-def _tir_spectral_value(settings, key, scalar_key, wavelength):
-    spectrum = settings.get(key, [])
-    wavelengths = settings.get("tir_wavelengths", [])
-    if len(spectrum) == len(wavelengths) and wavelengths:
-        index = int(np.argmin(np.abs(np.asarray(wavelengths, dtype=float) - float(wavelength))))
-        return float(spectrum[index])
-    return float(settings.get(scalar_key, 0.0))
+def _thermal_radiance(config, settings, state, wavelength, vza, vaa):
+    """TiRT directional radiance at the energy-balance component temperatures."""
+    sunlit = state.get("sunlit_surface", True)
 
+    def pair(sunlit_key, shaded_key):
+        shaded = float(state.get(shaded_key, state["Tsh"]))
+        return (float(state.get(sunlit_key, state["Tss"])) if sunlit else shaded), shaded
 
-def _tir_band_settings(settings, wavelength):
-    band_settings = dict(settings)
-    leaf_reflectance = _tir_spectral_value(settings, "leaf_reflectance_tir_spectrum", "leaf_reflectance", wavelength)
-    leaf_transmittance = _tir_spectral_value(settings, "leaf_transmittance_tir_spectrum", "leaf_transmittance", wavelength)
-    soil_reflectance = _tir_spectral_value(settings, "soil_reflectance_tir_spectrum", "soil_reflectance", wavelength)
-    band_settings["leaf_reflectance"] = leaf_reflectance
-    band_settings["leaf_transmittance"] = leaf_transmittance
-    band_settings["leaf_emissivity"] = max(1.0 - leaf_reflectance - leaf_transmittance, 1.0e-6)
-    band_settings["soil_reflectance"] = soil_reflectance
-    band_settings["soil_emissivity"] = max(1.0 - soil_reflectance, 1.0e-6)
-    return band_settings
-
-
-def _band_observation(settings, meteo, state, name, wavelength, vza, vaa):
-    if settings.get("surface_model") == "terrain" and int(settings.get("terrain_type", 1)) == 1:
-        local_vza, local_vaa, _ = slope_direction(
-            vza,
-            vaa,
-            state.get("terrain_slope", 0.0),
-            state.get("terrain_aspect", 0.0),
+    components = {"soil": pair("Tss", "Tsh"), "leaf": pair("Tls", "Tlh")}
+    components["terrain"] = components["soil"]
+    if settings["surface_model"] == "urban":
+        components.update(
+            roof=pair("Troof_sunlit", "Troof_shaded"), wall=pair("Twall_sunlit", "Twall_shaded"),
+            street=pair("Tstreet_sunlit", "Tstreet_shaded"),
         )
+    temperatures = {}
+    for name, (sunlit_k, shaded_k) in components.items():
+        temperatures[f"{name}_sunlit_k"] = str(sunlit_k)
+        temperatures[f"{name}_shaded_k"] = str(shaded_k)
+    # Below the horizon every component is shaded, so the sun only has to stay at a finite zenith.
+    sun = (min(float(state["sza_global"]), 89.0), float(state["saa_global"]))
+    return _surface_result(
+        dict(config, **temperatures), settings["surface_model"], settings["vegetation_model"],
+        float(wavelength), (float(vza), float(vaa), *sun), _tir_band(settings, wavelength),
+    )
+
+
+def _band_observation(config, settings, meteo, state, name, wavelength, vza, vaa):
+    if settings["surface_model"] == "slope":
+        local_vza, local_vaa, _ = slope_direction(vza, vaa, settings["slope_angle"], settings["slope_aspect"])
     else:
         local_vza, local_vaa = float(vza), float(vaa)
     sunlit = state.get("sunlit_surface", True)
@@ -148,10 +123,7 @@ def _band_observation(settings, meteo, state, name, wavelength, vza, vaa):
             leaf_tau,
             soil_rho,
             sunlit=sunlit,
-            use_hapke=(
-                float(wavelength) < 2.5
-                and int(settings.get("hapke_enable", settings.get("hapke_optical_enable", 0))) == 1
-            ),
+            use_hapke=float(wavelength) < 2.5 and int(settings.get("hapke_enable", 0)) == 1,
         )
     proportions = component_proportions(
         settings, state["sza"], state["saa"], local_vza, local_vaa, sunlit=sunlit
@@ -164,11 +136,7 @@ def _band_observation(settings, meteo, state, name, wavelength, vza, vaa):
     else:
         transmittance = leaf_fraction * leaf_tau
     if wavelength >= 2.5:
-        band_settings = _tir_band_settings(settings, wavelength)
-        if name == "urban":
-            radiance, brightness_temperature = urban_brightness(band_settings, state, wavelength, local_vza, local_vaa)
-        else:
-            radiance, brightness_temperature = vegetation_brightness(band_settings, state, wavelength, local_vza, local_vaa)
+        radiance, brightness_temperature = _thermal_radiance(config, settings, state, wavelength, vza, vaa)
         reflected = float("nan")
     else:
         radiance = float("nan")
@@ -184,20 +152,15 @@ def _band_observation(settings, meteo, state, name, wavelength, vza, vaa):
     })
 
 
-def _band_name(wavelength):
-    if wavelength < 0.7:
-        return "optical"
-    if wavelength < 2.5:
-        return "infrared"
-    return "thermal_infrared"
-
-
-def _observation_band_name(wavelength):
-    if abs(float(wavelength) - 0.55) < 1e-6:
-        return "red"
-    if abs(float(wavelength) - 0.86) < 1e-6:
-        return "nir"
-    return _band_name(wavelength)
+def _observation_directions(config, input_path, state):
+    """View directions of one time step; geometry_mode 1/3 planes follow the sun of that step."""
+    sun = {"sza": str(state["sza_global"]), "saa": str(state["saa_global"])}
+    directions = []
+    for vza, vaa, _, _ in geometry(dict(config, **sun), input_path):
+        direction = (float(vza), float(vaa))
+        if direction not in directions:
+            directions.append(direction)
+    return directions
 
 
 def _wavelength_tag(wavelength):
@@ -217,16 +180,15 @@ def _urban_surface_totals(settings, state):
     canopy = urban_canopy_fraction(settings, 0.0)
     canopy_weight = weights["street"] * canopy
     weights["street"] *= 1.0 - canopy
-    totals = {"LE": 0.0, "H": 0.0, "G": 0.0}
+    totals = {"Rn": 0.0, "LE": 0.0, "H": 0.0, "G": 0.0}
+    prefixes = {"Rn": "N_", "LE": "LE_", "H": "H_", "G": "G_"}
     for component, weight in weights.items():
         for suffix in ("sunlit", "shaded"):
-            totals["LE"] += weight * 0.5 * state.get("LE_" + component + suffix, 0.0)
-            totals["H"] += weight * 0.5 * state.get("H_" + component + suffix, 0.0)
-            totals["G"] += weight * 0.5 * state.get("G_" + component + suffix, 0.0)
+            for total, prefix in prefixes.items():
+                totals[total] += weight * 0.5 * state.get(prefix + component + suffix, 0.0)
     for suffix in ("sunlit", "shaded"):
-        totals["LE"] += canopy_weight * 0.5 * state.get("LE_leaf" + suffix, 0.0)
-        totals["H"] += canopy_weight * 0.5 * state.get("H_leaf" + suffix, 0.0)
-        totals["G"] += canopy_weight * 0.5 * state.get("G_leaf" + suffix, 0.0)
+        for total, prefix in prefixes.items():
+            totals[total] += canopy_weight * 0.5 * state.get(prefix + "leaf" + suffix, 0.0)
     return totals
 
 
@@ -295,8 +257,7 @@ def run(input_path=DEFAULT_INPUT, output_path=None, **overrides):
     input_path = Path(input_path).resolve()
     config = read_input(input_path)
     base = input_path.parent
-    config["_input_base"] = str(base)
-    config.update({key: str(value) for key, value in overrides.items() if value is not None})
+    config.update({key.lower(): str(value) for key, value in overrides.items() if value is not None})
     input_data = InputStructure.from_config(config, base)
 
     meteo_path = input_data.meteo_path
@@ -310,23 +271,8 @@ def run(input_path=DEFAULT_INPUT, output_path=None, **overrides):
     year, doy = input_data.year, input_data.doy
     latitude, longitude = input_data.latitude, input_data.longitude
     dem, max_iter = input_data.dem, input_data.max_iter
-    observation_wavelengths = _config_numbers(
-        config, "observation_wavelengths", [band[0] for band in FEATURE_BANDS]
-    )
-    observation_wavelengths = input_data.observation_wavelengths or observation_wavelengths
-    observation_vza = input_data.observation_vza or DEFAULT_OBSERVATION_VZA
-    observation_vaa = input_data.observation_vaa or DEFAULT_OBSERVATION_VAA
+    observation_wavelengths = [float(item) for item in wavelengths(config, input_path)]
     observation_times = input_data.observation_times
-    if input_data.observation_direction_mode in {"file", "txt", "read"}:
-        observation_directions = read_directions(input_data.directions_file)
-    else:
-        observation_directions = tuple(
-            (view_zenith, view_azimuth)
-            for view_zenith in observation_vza
-            for view_azimuth in observation_vaa
-        )
-    if input_data.observation_spectral_mode in {"file", "txt", "read"}:
-        observation_wavelengths = read_spectrals(input_data.spectrals_file)
     observation_time_mode = input_data.observation_time_mode
     if observation_time_mode in {"all", "every", "full"}:
         selected_times = None
@@ -344,13 +290,9 @@ def run(input_path=DEFAULT_INPUT, output_path=None, **overrides):
     else:
         raise ValueError("observation_time_mode must be all, time, or hour")
 
-    settings = read_defined(None, config)
+    settings = read_defined(config)
     if model_name(settings) == "urban":
-        scene_height = max(
-            float(settings.get("urban_building_height", 0.0)),
-            float(settings.get("height", 0.0)),
-        )
-        settings["z"] = max(15.0, scene_height)
+        settings["z"] = max(15.0, float(settings["urban_building_height"]), float(settings["canopy_height"]))
     all_records = read_meteo(meteo_path)
     records = [
         record for record in all_records
@@ -382,25 +324,13 @@ def run(input_path=DEFAULT_INPUT, output_path=None, **overrides):
     vertical_vza, vertical_vaa = 0.0, 0.0
 
     for node, meteo in enumerate(records):
-        if settings.get("surface_model") == "terrain":
-            if int(settings.get("terrain_type", 1)) == 1:
-                terrain_slope = float(settings.get("terrain_slope", 0.0))
-                terrain_aspect = float(settings.get("terrain_aspect", 0.0))
-            else:
-                radius = max(float(settings.get("terrain_radius", 100.0)), 1e-6)
-                height = float(settings.get("terrain_height", 20.0))
-                terrain_slope = float(np.degrees(np.arctan2(height, radius)))
-                terrain_aspect = float(settings.get("terrain_aspect", 0.0))
-        else:
-            terrain_slope, terrain_aspect = 0.0, 0.0
         state = run_node(
             settings, meteo, node, year, doy, latitude, longitude,
-            dem, terrain_slope, vertical_vza, vertical_vaa, previous, max_iter, terrain_aspect,
-            input_data.utc_offset_hours,
+            dem, vertical_vza, vertical_vaa, previous, max_iter, input_data.utc_offset_hours,
         )
-        vertical_rt = _band_observation(settings, meteo, state, name, 10.5, vertical_vza, vertical_vaa)
-        red_rt = _band_observation(settings, meteo, state, name, 0.55, vertical_vza, vertical_vaa)
-        nir_rt = _band_observation(settings, meteo, state, name, 0.86, vertical_vza, vertical_vaa)
+        vertical_rt = _band_observation(config, settings, meteo, state, name, 10.5, vertical_vza, vertical_vaa)
+        red_rt = _band_observation(config, settings, meteo, state, name, 0.55, vertical_vza, vertical_vaa)
+        nir_rt = _band_observation(config, settings, meteo, state, name, 0.86, vertical_vza, vertical_vaa)
         proportions = component_proportions(
             settings,
             state["sza"],
@@ -410,17 +340,20 @@ def run(input_path=DEFAULT_INPUT, output_path=None, **overrides):
             sunlit=state.get("sunlit_surface", True),
         )
         if name == "urban":
-            urban_totals = _urban_surface_totals(settings, state)
-            le_total, h_total, g_soil = urban_totals["LE"], urban_totals["H"], urban_totals["G"]
+            totals = _urban_surface_totals(settings, state)
         else:
-            le_total = sum(weight * state.get(key, 0.0) for weight, key in zip(
-                proportions, ("LE_soilsunlit", "LE_soilshaded", "LE_leafsunlit", "LE_leafshaded"),
-            ))
-            h_total = sum(weight * state.get(key, 0.0) for weight, key in zip(
-                proportions, ("H_soilsunlit", "H_soilshaded", "H_leafsunlit", "H_leafshaded"),
-            ))
-            g_soil = proportions[0] * state.get("G_sunlit", 0.0) + proportions[1] * state.get("G_shaded", 0.0)
-        totals = {"LE": le_total, "H": h_total, "G": g_soil}
+            # Soil fluxes per unit soil area and leaf fluxes per unit leaf area, weighted to unit ground.
+            weights = (state["soil_sunlit_fraction"], state["soil_shaded_fraction"], state["lai_sunlit"], state["lai_shaded"])
+
+            def scene(prefix):
+                return sum(weight * state.get(prefix + key, 0.0) for weight, key in zip(
+                    weights, ("soilsunlit", "soilshaded", "leafsunlit", "leafshaded")))
+
+            totals = {
+                "Rn": scene("N_"), "LE": scene("LE_"), "H": scene("H_"),
+                "G": weights[0] * state.get("G_sunlit", 0.0) + weights[1] * state.get("G_shaded", 0.0),
+            }
+        le_total, h_total, g_soil = totals["LE"], totals["H"], totals["G"]
         leaf_temperature_sunlit = (
             float("nan") if name == "bare" else state["Tls"] - 273.15
         )
@@ -450,7 +383,7 @@ def run(input_path=DEFAULT_INPUT, output_path=None, **overrides):
             "Tstreet_shaded_C": urban_temperatures["Tstreet_shaded"],
             "Tleaf_sunlit_C": leaf_temperature_sunlit if name == "urban" else float("nan"),
             "Tleaf_shaded_C": leaf_temperature_shaded if name == "urban" else float("nan"),
-            "LE": le_total, "H": h_total, "G": g_soil,
+            "LE": le_total, "H": h_total, "G": g_soil, "Rn": totals["Rn"],
             "Tv_C": vertical_rt["brightness_temperature_K"] - 273.15,
             "red": red_rt["reflectance"],
             "nir": nir_rt["reflectance"],
@@ -460,8 +393,9 @@ def run(input_path=DEFAULT_INPUT, output_path=None, **overrides):
         previous = state
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    input_snapshot = output_path.parent / "input.csv"
-    if input_path.resolve() != input_snapshot.resolve():
+    input_snapshot = (output_path.parent / "input.csv").resolve()
+    # Never overwrite the project's own input templates with a case snapshot.
+    if input_path.resolve() != input_snapshot and input_snapshot.parent != ROOT:
         try:
             shutil.copy2(input_path, input_snapshot)
             if overrides:
@@ -501,13 +435,13 @@ def run(input_path=DEFAULT_INPUT, output_path=None, **overrides):
             selected_time = round(float(meteo["time"]), 8) in selected_times
         else:
             selected_time = _matches_observation_hour(meteo["time"], selected_fractions)
+        if not selected_time:
+            continue
         state = final_states[node]
-        for view_zenith, view_azimuth in observation_directions:
-            if not selected_time:
-                continue
+        for view_zenith, view_azimuth in _observation_directions(config, input_path, state):
             results = {}
             for wavelength in observation_wavelengths:
-                values = _band_observation(settings, meteo, state, name, wavelength, view_zenith, view_azimuth)
+                values = _band_observation(config, settings, meteo, state, name, wavelength, view_zenith, view_azimuth)
                 quantity = _observation_quantity(config, wavelength)
                 results.update(_observation_columns(wavelength, values, quantity))
             observations.append(ObservationStructure(
@@ -530,6 +464,7 @@ def run(input_path=DEFAULT_INPUT, output_path=None, **overrides):
 SOIL_METHODS = ("direct", "surface", "depth")
 STOMATAL_METHODS = ("farquhar", "ballberry")
 SOIL_TEMPERATURE_METHODS = ("direct", "robust")
+COMPARISON_FIELDS = ("soil_heat_method", "stomatal_method", "soil_temperature_method")
 
 
 def run_comparison(input_path=DEFAULT_INPUT, output_root=None, start_time=None, end_time=None, max_iter=None):
@@ -556,12 +491,13 @@ def run_comparison(input_path=DEFAULT_INPUT, output_root=None, start_time=None, 
                 if max_iter is not None:
                     overrides["max_iter"] = max_iter
                 result = run(input_path, **overrides)
+                methods = {key: overrides[key] for key in COMPARISON_FIELDS}
                 with Path(result).open(newline="", encoding="utf-8") as file:
-                    summary.extend(csv.DictReader(file))
+                    summary.extend({**methods, **row} for row in csv.DictReader(file))
     output_root.mkdir(parents=True, exist_ok=True)
     summary_path = output_root / "summary.csv"
     with summary_path.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=OUTPUT_FIELDS)
+        writer = csv.DictWriter(file, fieldnames=(*COMPARISON_FIELDS, *OUTPUT_FIELDS))
         writer.writeheader()
         writer.writerows(summary)
     return summary_path
@@ -580,7 +516,8 @@ def main():
     if args.compare:
         print(run_comparison(args.input, args.output_root, args.start_time, args.end_time, args.max_iter))
     else:
-        run(args.input, args.output)
+        limits = {"start_time": args.start_time, "end_time": args.end_time, "max_iter": args.max_iter}
+        print(run(args.input, args.output, **{key: item for key, item in limits.items() if item is not None}))
 
 
 if __name__ == "__main__":

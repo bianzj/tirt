@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 
@@ -32,8 +33,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo TiRT 正在启动: http://127.0.0.1:8765/
-set "TIRT_PYTHON=%PYTHON_EXE%"
+echo TiRT 正在启动...
+set "TIRT_PYTHON=%CONDA_PREFIX%\python.exe"
 
 if not exist "node_modules\electron\dist\electron.exe" (
     echo 正在安装 TiRT 桌面窗口依赖...

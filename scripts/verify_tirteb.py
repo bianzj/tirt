@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT))
 from tirteb_run import OUTPUT_FIELDS, run, run_comparison
 
 
-SURFACES = ("plane", "terrain", "urban")
+SURFACES = ("plane", "slope", "terrain", "urban")
 VEGETATION = ("bare", "hom", "row", "crown")
 
 
@@ -94,7 +94,7 @@ def main() -> None:
         shutil.rmtree(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
 
-    short = {"start_time": 214.0139, "end_time": 214.0764, "max_iter": 20}
+    short = {"start_time": 214.0139, "end_time": 214.0764, "max_iter": 100}
     short_all = {**short, "observation_time_mode": "all"}
     check("default", input_path, output_root, **short_all)
     for surface in SURFACES:
@@ -108,13 +108,22 @@ def main() -> None:
                 **short_all,
             )
 
-    check("terrain_single_slope", input_path, output_root, **{**short_all, "surface_model": "terrain", "terrain_type": 1, "terrain_slope": 30, "terrain_aspect": 45})
-    check("terrain_compound", input_path, output_root, **{**short_all, "surface_model": "terrain", "terrain_type": 2, "terrain_radius": 60, "terrain_height": 25, "terrain_density": 1.2})
-    check("direction_file", input_path, output_root, **{**short_all, "observation_direction_mode": "file", "direction_source": "file", "directions_file": "data/directions/observation_directions.txt"})
-    check("spectral_file", input_path, output_root, **{**short_all, "observation_spectral_mode": "file", "spectral_source": "file", "spectrals_file": "data/spectrals/observation_spectrals.txt"})
+    check("slope_facing_northeast", input_path, output_root, **{**short_all, "surface_model": "slope", "slope_angle": 30, "slope_aspect": 45})
+    check("terrain_cones", input_path, output_root, **{**short_all, "surface_model": "terrain", "terrain_radius": 30, "terrain_height": 25, "terrain_density": 0.0002})
+    check("direction_file", input_path, output_root, **{**short_all, "geometry_mode": 2, "geometry_file": "data/directions/observation_directions.txt"})
+    check("principal_planes", input_path, output_root, **{**short_all, "geometry_mode": 1, "principal_vza_step": 15, "principal_vza_max": 60})
+    check("spectral_file", input_path, output_root, **{**short_all, "spectral_source": "file", "spectrals_file": "data/spectrals/observation_spectrals.txt"})
     check("selected_times", input_path, output_root, **{**short, "observation_time_mode": "time", "observation_times": "214.0139;214.0556"})
-    check("selected_hours", input_path, output_root, observation_time_mode="hour", observation_hours="0.0139", start_time=214.0, end_time=215.0, max_iter=20)
+    check("selected_hours", input_path, output_root, observation_time_mode="hour", observation_hours="0.0139", start_time=214.0, end_time=215.0, max_iter=100, output_intermediate="yes")
     check("intermediate", input_path, output_root, **{**short_all, "output_intermediate": "yes"})
+    for name in ("selected_hours", "intermediate"):
+        open_steps = [
+            row["time"] for row in read_intermediate(output_root / name / "intermediate.csv")
+            if str(row.get("closed", "")).strip().lower() not in {"true", "1", "1.0"}
+        ]
+        if open_steps:
+            raise AssertionError(f"{name}: energy balance / Obukhov iteration did not converge at {open_steps}")
+    print("PASS energy balance and Obukhov iteration converged at every step")
 
     urban_bare = read_rows(output_root / "matrix_urban_bare" / "output.csv")
     urban_hom = read_rows(output_root / "matrix_urban_hom" / "output.csv")
@@ -125,7 +134,7 @@ def main() -> None:
     print("PASS urban vegetation separation and brightness range")
     assert_urban_resistance(output_root)
 
-    comparison = run_comparison(input_path, output_root / "method_comparison", start_time=214.0139, end_time=214.0764, max_iter=15)
+    comparison = run_comparison(input_path, output_root / "method_comparison", start_time=214.0139, end_time=214.0764, max_iter=100)
     comparison_rows = read_rows(Path(comparison))
     if len(comparison_rows) != 12 * 4:
         raise AssertionError(f"unexpected comparison rows: {len(comparison_rows)}")

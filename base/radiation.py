@@ -1,12 +1,13 @@
 import math
+from functools import lru_cache
 import numpy as np
 
 from .gap import gap_probability_hom_analytical
 from .hotspot import hotspot_analytical, hotspot_layer, hotspot_vegetation_volume
 from .proportion import proportion_bidirectional_crown_one, proportion_bidirectional_hom_one, proportion_bidirectional_row_one
 from .rt_transfer import (
-    diffuse_scatter_tir,
-    diffuse_scatter_vnir,
+    canopy_longwave,
+    canopy_shortwave,
     directional_single_scatter,
     tirt_direct,
     tirt_scatter,
@@ -15,7 +16,8 @@ from .terrain_rt import compound_terrain_proportions
 from .soilopt import hapke_reflectance
 
 
-SIGMA = 5.67e-8
+# Leaf projection of the spherical leaf angle distribution assumed by the TiRT canopy models.
+LEAF_PROJECTION = 0.5
 
 
 def _shade_components(values):
@@ -34,7 +36,29 @@ def relative_azimuth(saa, vaa):
     return np.minimum(difference, 360.0 - difference)
 
 
-def _vegetation_proportions(settings, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
+_PROPORTION_KEYS = (
+    "lai", "vegetation_model", "hspot",
+    "crown_rad_a", "crown_rad_b", "crown_height", "crown_density",
+    "row_width", "row_blank", "row_height", "row_azimuth",
+)
+
+
+def _proportion_key(settings):
+    # The key must list every settings entry read by _vegetation_proportions_uncached.
+    return tuple((name, settings[name]) for name in _PROPORTION_KEYS if name in settings)
+
+
+def _vegetation_proportions(settings, sza, saa, vza=0.0, vaa=0.0, sunlit=True, key=None):
+    key = _proportion_key(settings) if key is None else key
+    return np.array(_vegetation_proportions_cached(key, float(sza), float(saa), float(vza), float(vaa), bool(sunlit)))
+
+
+@lru_cache(maxsize=65536)
+def _vegetation_proportions_cached(key, sza, saa, vza, vaa, sunlit):
+    return tuple(_vegetation_proportions_uncached(dict(key), sza, saa, vza, vaa, sunlit))
+
+
+def _vegetation_proportions_uncached(settings, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
     lai = max(float(settings["lai"]), 0.0)
     if lai <= 0.0:
         return np.asarray([1.0, 0.0, 0.0, 0.0])
@@ -44,9 +68,12 @@ def _vegetation_proportions(settings, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
     vaa_ = np.asarray([float(vaa)])
     vsa_ = relative_azimuth(saa_, vaa_)
     vegetation_model = str(settings.get("vegetation_model", "")).strip().lower()
-    if vegetation_model in {"crown", "forest"} or settings["surface_type"] in (1, 2, 3, 4, 5):
-        values = proportion_bidirectional_crown_one(lai, max(settings["stand_density"], 1e-6), settings["hspot"], max(settings["height"], 1e-6), max(settings["width"], 1e-6), vza_, sza_, vsa_)
-    elif vegetation_model in {"row", "raw"} or settings["distribution"] == 2 or settings["surface_type"] in (12, 14):
+    if vegetation_model == "crown":
+        values = proportion_bidirectional_crown_one(
+            lai, settings["crown_density"], settings["hspot"], settings["crown_rad_b"], settings["crown_rad_a"],
+            vza_, sza_, vsa_, hcb=settings["crown_height"],
+        )
+    elif vegetation_model == "row":
         values = proportion_bidirectional_row_one(
             lai,
             settings["hspot"],
@@ -68,10 +95,8 @@ def _vegetation_proportions(settings, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
 
 
 def _component_proportions(settings, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
-    if (
-        settings.get("surface_model") == "terrain"
-        and int(settings.get("terrain_type", 1)) == 2
-    ):
+    if settings.get("surface_model") == "terrain":
+        key = _proportion_key(settings)
         return compound_terrain_proportions(
             settings,
             sza,
@@ -85,6 +110,7 @@ def _component_proportions(settings, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
                 local_vza,
                 local_vaa,
                 local_sunlit,
+                key,
             ),
             sunlit,
         )
@@ -93,6 +119,38 @@ def _component_proportions(settings, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
 
 def component_proportions(settings, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
     return _component_proportions(settings, sza, saa, vza, vaa, sunlit)
+
+
+def urban_canopy_fraction(settings, vza=0.0):
+    """Street fraction hidden by the street crowns along the view direction (TiRT crown gap probability)."""
+    if float(settings.get("lai", 0.0)) <= 0.0:
+        return 0.0
+    vza = min(max(float(vza), 0.0), 89.0)
+    fractions = _vegetation_proportions(settings, vza, 0.0, vza, 0.0, True)
+    return float(fractions[2] + fractions[3])
+
+
+def sun_extinction(sza):
+    """Direct-beam extinction per unit LAI, G / cos(sza); the zenith is capped at 85 degrees as in SCOPE."""
+    return LEAF_PROJECTION / math.cos(math.radians(min(float(sza), 85.0)))
+
+
+def flux_weights(settings, sza, saa, sunlit=True):
+    """Per unit ground: sunlit and shaded soil fractions and sunlit and shaded leaf area indices.
+
+    Component fluxes are per unit soil or leaf area; these weights give the scene fluxes per unit
+    ground, as in SCOPE ebal. The sunlit leaf area follows from the beam the canopy intercepts:
+    (1 - gap seen from the sun) = LAI_sunlit * G / cos(sza).
+    """
+    lai = max(float(settings.get("lai", 0.0)), 0.0)
+    if not sunlit or float(sza) >= 90.0:
+        return 0.0, 1.0, 0.0, lai
+    if lai <= 0.0:
+        return 1.0, 0.0, 0.0, 0.0
+    fractions = _vegetation_proportions(settings, min(float(sza), 89.0), saa, min(float(sza), 89.0), saa, True)
+    gap = float(fractions[0] + fractions[1])
+    lai_sunlit = min((1.0 - gap) / sun_extinction(sza), lai)
+    return gap, 1.0 - gap, lai_sunlit, lai - lai_sunlit
 
 
 def optical_properties(settings):
@@ -192,6 +250,8 @@ def prepare_shortwave(settings, meteo, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
         fesun = np.full(2001, 1.0 / 2001.0)
         fesky = np.full(2001, 1.0 / 2001.0)
         wavelengths = np.arange(400.0, 2401.0)
+    # A sunlit leaf intercepts the beam with its projection G per unit leaf area: horizontal irradiance * G / cos(sza).
+    leaf_projection = sun_extinction(sza)
     for index in range(2001):
         lrho = leaf_rho_spectrum[index] if len(leaf_rho_spectrum) == 2001 else rho
         ltau = leaf_tau_spectrum[index] if len(leaf_tau_spectrum) == 2001 else tau
@@ -202,9 +262,8 @@ def prepare_shortwave(settings, meteo, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
         esky = diffuse_horizontal * float(fesky[index]) * 0.001
         try:
             if settings["lai"] > 0.0:
-                diffuse_leaf, diffuse_soil, diffuse_soil_incident = diffuse_scatter_vnir(
-                    settings["lai"], lrho, ltau, rs, sza, esun, esky, vza,
-                    float(relative_azimuth(saa, vaa)), return_incident=True,
+                diffuse_leaf, diffuse_soil, diffuse_soil_incident = canopy_shortwave(
+                    settings["lai"], lrho, ltau, rs, sza, esun if sunlit else 0.0, esky,
                 )
             else:
                 diffuse_leaf, diffuse_soil, diffuse_soil_incident = 0.0, esky * sabs, esky
@@ -217,7 +276,7 @@ def prepare_shortwave(settings, meteo, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
         result["directVrad_incident_spectrum"].append(esun if sunlit else 0.0)
         result["diffuseVrad_incident"] += esky
         result["diffuseVrad_incident_spectrum"].append(esky)
-        direct_leaf = esun * labs if sunlit else 0.0
+        direct_leaf = esun * leaf_projection * labs if sunlit else 0.0
         direct_soil = esun * sabs if sunlit else 0.0
         result["directVrad_leaf"] += direct_leaf
         result["directVrad_soil"] += direct_soil
@@ -234,43 +293,28 @@ def prepare_shortwave(settings, meteo, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
     return result
 
 
-def prepare_longwave(settings, meteo, state, sza=0.0, saa=0.0, vza=0.0, vaa=0.0):
-    result = {"directTrad_leaf": 0.0, "diffuseTrad_leaf": 0.0, "directTrad_soil": 0.0, "diffuseTrad_soil": 0.0}
+def prepare_longwave(settings, meteo, state, sza=0.0, saa=0.0, sunlit=True):
+    """Absorbed longwave per unit area: leaves (both faces; sunlit = diffuse + direct entry) and soil."""
     sky = float(meteo["longwave"])
     lai = float(settings["lai"])
-    shortwave = max(float(meteo.get("shortwave", 0.0)), 0.0)
-    leaf_emissivity = max(1.0 - float(settings["leaf_reflectance"]), 0.0)
-    # The upper leaf side sees the sky, while the lower side sees the
-    # vegetation/soil boundary.  Treating both sides as sky was the main
-    # reason for unrealistically cold leaves at night.
-    lower_surface = 0.5 * SIGMA * (state["Tss"] ** 4 + state["Tsh"] ** 4)
-    sky_leaf = leaf_emissivity * (sky + lower_surface)
-    sky_soil = sky * (1.0 - settings["soil_reflectance"])
-    # The TIR transfer approximation uses the solar direction as its source
-    # direction and becomes ill-conditioned at the horizon.  Fade it out
-    # before that limit and use the sky boundary when the shortwave driver
-    # says that the sun is effectively absent.
-    tir_weight = max(0.0, min(1.0, (80.0 - float(sza)) / 10.0))
-    if lai > 0.0 and shortwave >= 20.0 and sza < 89.0 and tir_weight > 0.0:
-        lai_rt = lai
-        if settings["surface_type"] in (1, 2, 3, 4, 5):
-            lai_rt = lai
-        # diffuse_scatter_tir returns (soil, leaf); keep the component order
-        # explicit here so the hotter leaf emission cannot heat shaded soil.
-        tir_soil, tir_leaf = diffuse_scatter_tir(lai_rt, settings["leaf_reflectance"], 0.0, settings["soil_reflectance"], sza, sky, state["Tss"], state["Tsh"], state["Tls"], state["Tlh"], vza, float(relative_azimuth(saa, vaa)))
-        result["diffuseTrad_leaf"] = tir_weight * max(float(tir_leaf), 0.0) + (1.0 - tir_weight) * sky_leaf
-        result["diffuseTrad_soil"] = tir_weight * max(float(tir_soil), 0.0) + (1.0 - tir_weight) * sky_soil
-    elif lai > 0.0:
-        # At night (or with the sun below the local horizon), the canopy still
-        # exchanges longwave radiation with the sky.  Returning zero here made
-        # every leaf lose two-sided emission without an atmospheric input.
-        result["diffuseTrad_leaf"] = sky_leaf
-        result["diffuseTrad_soil"] = sky_soil
+    soil_emissivity = max(float(settings["soil_emissivity"]), 0.0)
+    if lai > 0.0:
+        soil_sunlit_fraction = flux_weights(settings, sza, saa, sunlit)[0]
+        extinction = sun_extinction(sza) if sunlit and float(sza) < 90.0 else 0.0
+        leaf_sunlit, leaf_shaded, soil = canopy_longwave(
+            lai, max(float(settings["leaf_emissivity"]), 0.0), soil_emissivity, sky,
+            state["Tls"], state["Tlh"], state["Tss"], state["Tsh"], extinction, soil_sunlit_fraction,
+        )
     else:
-        result["diffuseTrad_soil"] = sky_soil
+        leaf_sunlit = leaf_shaded = 0.0
+        soil = soil_emissivity * sky
+    result = {
+        "directTrad_leaf": leaf_sunlit - leaf_shaded, "diffuseTrad_leaf": leaf_shaded,
+        "directTrad_soil": 0.0, "diffuseTrad_soil": soil,
+    }
     result["longwave_down"] = sky
-    result["tir_scatter_soil"] = result["diffuseTrad_soil"]
-    result["tir_scatter_leaf"] = result["diffuseTrad_leaf"]
+    result["tir_scatter_soil"] = soil
+    result["tir_scatter_leaf"] = leaf_shaded
     return result
 
 
@@ -279,10 +323,11 @@ def merge_radiation(shortwave, longwave):
     result.update(longwave)
     result["shortwave_direct"] = shortwave.get("directVrad_leaf", 0.0) + shortwave.get("directVrad_soil", 0.0)
     result["shortwave_diffuse"] = shortwave.get("diffuseVrad_leaf", 0.0) + shortwave.get("diffuseVrad_soil", 0.0)
-    result["soil_sunlit"] = shortwave.get("directVrad_soil", 0.0) + shortwave.get("diffuseVrad_soil", 0.0) + longwave.get("diffuseTrad_soil", 0.0)
-    result["soil_shaded"] = shortwave.get("diffuseVrad_soil", 0.0) + longwave.get("diffuseTrad_soil", 0.0)
-    result["leaf_sunlit"] = shortwave.get("directVrad_leaf", 0.0) + shortwave.get("diffuseVrad_leaf", 0.0) + longwave.get("diffuseTrad_leaf", 0.0)
-    result["leaf_shaded"] = shortwave.get("diffuseVrad_leaf", 0.0) + longwave.get("diffuseTrad_leaf", 0.0)
+    for component in ("soil", "leaf"):
+        diffuse = shortwave.get(f"diffuseVrad_{component}", 0.0) + longwave.get(f"diffuseTrad_{component}", 0.0)
+        direct = shortwave.get(f"directVrad_{component}", 0.0) + longwave.get(f"directTrad_{component}", 0.0)
+        result[f"{component}_sunlit"] = direct + diffuse
+        result[f"{component}_shaded"] = diffuse
     return result
 
 
@@ -311,4 +356,4 @@ def radiative_transfer_diagnostics(settings, state, vza=0.0, vaa=0.0):
     }
 
 
-__all__ = ["relative_azimuth", "component_proportions", "optical_properties", "directional_reflectance", "prepare_shortwave", "prepare_longwave", "merge_radiation", "radiative_transfer_diagnostics"]
+__all__ = ["relative_azimuth", "component_proportions", "urban_canopy_fraction", "sun_extinction", "flux_weights", "optical_properties", "directional_reflectance", "prepare_shortwave", "prepare_longwave", "merge_radiation", "radiative_transfer_diagnostics"]

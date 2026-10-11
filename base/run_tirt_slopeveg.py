@@ -31,7 +31,7 @@ def main():
     pza = 3.0
     paa = 0.0
 
-    forestshape = np.asarray([lai,stand,rcr,hcr,hspot])
+    forestshape = np.asarray([lai,stand,rcr,hcr,hspot,hcr])
     print('terrain:',100*0.002*np.pi)
     print('tree:',np.pi*rcr*rcr*stand)
     slope = Slope_Veg()

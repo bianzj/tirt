@@ -34,6 +34,16 @@ def inv_planck(wavelength, rad=None):
     return c2 / (np.asarray(wavelength, dtype=float) * np.log(c1 / (np.asarray(rad, dtype=float) * np.power(np.asarray(wavelength, dtype=float), 5)) + 1.0))
 
 
+def projection_overlap(tv, ts, up):
+    """Overlap ratio of view/sun shadow projections; 0 when both directions are vertical."""
+    tv = np.asarray(tv, dtype=float)
+    ts = np.asarray(ts, dtype=float)
+    den = tv + ts
+    num = np.sqrt(np.maximum(tv * tv + ts * ts - 2 * tv * ts * up, 0.0))
+    result = np.divide(num, den, out=np.zeros(np.broadcast(num, den).shape), where=den > 0)
+    return float(result) if result.ndim == 0 else result
+
+
 def leaf_inclination_distribution_function(ala):
     '''
     叶倾角分布函数，通过度数ala计算2.5,7.5.。。87.5度的分布概率，总概率的和为1
@@ -254,7 +264,8 @@ def slope1(vza, vaa, pza, paa):
     # if tip1 > PI / 2:
     #     tip1 = PI - tip1
 
-    phip1 = np.arcsin(y / np.sqrt(r))
+    sr = np.sqrt(r)
+    phip1 = np.arcsin(np.clip(np.divide(y, sr, out=np.zeros_like(sr), where=sr > 0), -1.0, 1.0))
     # if (x < 0):
     #     if (y > 0):
     #         phip1 = 3.14 - phip1

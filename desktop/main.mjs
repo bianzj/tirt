@@ -26,7 +26,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(createWindow).catch((error) => {
     const message = error?.stack || String(error)
     console.error(message)
-    if (!smokeTest) dialog.showErrorBox('TiRT 启动失败', message)
+    if (!smokeTest && !isQuitting) dialog.showErrorBox('TiRT 启动失败', message)
     requestQuit()
   })
   app.on('before-quit', () => {
@@ -69,16 +69,22 @@ async function startBackend() {
   ], {
     cwd: app.isPackaged ? app.getPath('userData') : sourceRoot,
     windowsHide: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'ignore', 'pipe'],
     env: { ...process.env, MPLBACKEND: 'Agg' },
   })
-  backendProcess.stderr?.on('data', (data) => { backendError += String(data) })
-  backendProcess.once('error', (error) => { backendError += `\n${error.message}` })
+  backendProcess.stderr?.on('data', (data) => { backendError = (backendError + String(data)).slice(-8000) })
+  backendProcess.once('error', (error) => {
+    backendError += `\n${error.message}`
+    backendProcess = null
+  })
   backendProcess.once('exit', (code, signal) => {
     backendProcess = null
     if (!isQuitting) {
-      const detail = backendError.trim() || `服务已退出（code=${code}, signal=${signal || 'none'}）`
-      if (!smokeTest) dialog.showErrorBox('TiRT 服务已停止', detail)
+      // Exit code 0 is the in-app Exit button (/api/shutdown), not a failure.
+      if (code !== 0 && !smokeTest) {
+        const detail = backendError.trim() || `服务已退出（code=${code}, signal=${signal || 'none'}）`
+        dialog.showErrorBox('TiRT 服务已停止', detail)
+      }
       requestQuit()
     }
   })
@@ -171,7 +177,7 @@ async function createWindow() {
     return { action: 'deny' }
   })
   mainWindow.webContents.on('will-navigate', (event, target) => {
-    if (!target.startsWith(url)) {
+    if (new URL(target).origin !== new URL(url).origin) {
       event.preventDefault()
       if (/^https?:/i.test(target)) shell.openExternal(target)
     }

@@ -22,6 +22,7 @@ class Slope_Veg():
     stand_density = 0.05
     hcr = 1.0
     rcr = 1.0
+    hcb = None
     leaf_average_inclination_angle = 53
     pza = 0
     paa = 0
@@ -57,12 +58,13 @@ class Slope_Veg():
         self.paa = paa
 
 
-    def set_structure(self,lai,hspot,stand_density,hcr,rcr):
+    def set_structure(self,lai,hspot,stand_density,hcr,rcr,hcb=None):
         self.leaf_area_index = lai
         self.hspot = hspot
         self.stand_density = stand_density
         self.rcr = rcr
         self.hcr = hcr
+        self.hcb = hcb
 
     def set_thermal(self,temperature_soil_sunlit,temperature_soil_shaded,temperature_leaf_sunlit,temperature_leaf_shaded,):
         self.temperature_soil_shaded = np.asarray(temperature_soil_shaded)
@@ -183,7 +185,7 @@ class Slope_Veg():
         Tcom = np.asarray([Tss, Tsh, Tls, Tlh])
         Rcom = planck(wl,Tcom)
 
-        Pcom = proportion_bidirectional_crown_one(lai, stdnew, hspotnew, hcrnew,rcr, vzanew, szanew, vsa)
+        Pcom = proportion_bidirectional_crown_one(lai, stdnew, hspotnew, hcrnew,rcr, vzanew, szanew, vsa, hcb=self.hcb)
         Ecom_direct, Ecom_direct_sum = emissivity_direct(Pcom, Ecom)
 
         ############---------------------------
@@ -194,7 +196,7 @@ class Slope_Veg():
         uvv = np.cos(pza * rd)
         sii = np.sin(sza0 * rd)
         svv = np.sin(pza * rd)
-        upp = np.cos(np.abs(paa - saa) * rd)
+        upp = np.cos(np.abs(paa - saa0) * rd)
         cosang = uvv * uii + svv * sii * upp
         ang = np.arccos(cosang) / rd
         ###------------------------------------

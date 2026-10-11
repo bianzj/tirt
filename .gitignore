@@ -27,8 +27,10 @@ videos/
 *.tmp
 *.bak
 *.spec.bak
+cases/_*/
 cases/**/output.csv
 cases/**/observations.csv
 cases/**/intermediate.csv
 cases/**/summary.csv
 cases/**/plots/
+benchmark/**/runs/

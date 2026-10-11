@@ -11,6 +11,16 @@ area: 异质场景几何投影+路径长度决定；
 
 '''
 
+
+def _overlap_weight(alpha):
+    """Hotspot overlap weight (1 - exp(-a)) / a, continuous at a -> 0."""
+    alpha = np.asarray(alpha, dtype=float)
+    positive = alpha > 1.0e-12
+    safe = np.where(positive, alpha, 1.0)
+    w = np.where(positive, -np.expm1(-safe) / safe, 1.0)
+    return float(w) if w.ndim == 0 else w
+
+
 def hotspot_layer(lai, hspot, vza, sza, vsa, CIs=1, CIv = 1, G = 0.5):
     '''
     热点函数，用于土壤热点计算
@@ -39,20 +49,8 @@ def hotspot_layer(lai, hspot, vza, sza, vsa, CIs=1, CIv = 1, G = 0.5):
     H = 1.0
     d = H * hspot / correction
     delta = np.power(cthets, -2) + np.power(cthetv, -2) - 2 * (cthets * cthetv + sthets * sthetv * cphivs) / (cthets * cthetv)
-    delta[delta<0] = 0
-    # delta = 1.0 * np.sqrt(delta)
-    if type(delta) == numpy.float64:
-        alpha = H * np.sqrt(delta) / d
-        w = (1 - np.exp(- alpha)) / alpha
-    else:
-        w = delta*1.0
-        ind0 = np.where(delta < 0.0001)
-        ind1 = np.where(delta > 0.0001)
-        if np.size(ind0)>0:
-            w[ind0] = 1
-        if np.size(ind1)>0:
-            alpha = H * np.sqrt(delta[ind1]) / d[ind1]
-            w[ind1] = (1 - np.exp(- alpha)) / alpha
+    delta = np.maximum(delta, 0.0)
+    w = _overlap_weight(H * np.sqrt(delta) / d)
 
     pls = CIs * G / cthets
     plv = CIv * G / cthetv
@@ -82,8 +80,8 @@ def hotspot_analytical(lai, hspot, vza, sza, vsa, CIi = 1, CIv = 1, G = 0.5):
     bv = np.exp(-G * lai * CIv / cthetv)
     bi = np.exp(-G * lai * CIi / cthets)
 
-    ### 经验系数
-    index = 0.82 - 0.04 * np.floor(lai / 0.5)
+    ### 经验系数：上层比例随 LAI 线性减小（与原 0.5 步长阶梯在 LAI=0.5k 处一致）
+    index = np.clip(0.82 - 0.08 * lai, 0.0, 0.82)
 
     kv = G / cthetv
     ki = G / cthets
@@ -93,9 +91,10 @@ def hotspot_analytical(lai, hspot, vza, sza, vsa, CIi = 1, CIv = 1, G = 0.5):
     # d = H * hspot * np.ones(np.size(correction))
     d = H * hspot / correction
 
-    delta = 1.0 * np.sqrt(
+    # Round-off can make the radicand slightly negative at the exact hotspot.
+    delta = np.sqrt(np.maximum(
         np.power(cthets, -2) + np.power(cthetv, -2) - 2 * (cthets * cthetv + sthets * sthetv * cphivs) / (
-                    cthets * cthetv))
+                    cthets * cthetv), 0.0))
     bv_upper = 1 - (1 - bv) * index
     bi_upper = 1 - (1 - bi) * index
     hv_upper = -np.log(bv_upper) * cthetv / G / lai  ### 在观测方向的上层比例
@@ -109,43 +108,13 @@ def hotspot_analytical(lai, hspot, vza, sza, vsa, CIi = 1, CIv = 1, G = 0.5):
     lai_upper = lai * h_upper  ### 上层的LAI
     lai_bottom = lai * h_bottom  ### 下层的LAI
     ### w_upper = (1 - np.exp(- H_upper * delta / d)) * d / (H_upper * delta)
-    w_upper = delta * 1.0
-    if type(w_upper) == numpy.float64:
-        if delta < 0.0001:
-            w_upper = 1
-        else:
-            w_upper = (1 - np.exp(- H * delta / d)) * d / (H * delta)
-    else:
-        ind0 = np.where(delta < 0.0001)
-        ind1 = np.where(delta > 0.0001)
-        if np.size(ind0) > 0:
-            w_upper[ind0] = 1
-        if np.size(ind1) > 0:
-            ### 即使分层不能改变高度和半径的比例
-            # alpha = H_upper[ind1] * delta[ind1] / d[ind1]
-            alpha = H * delta[ind1] / d[ind1]
-            w_upper[ind1] = (1 - np.exp(- alpha)) / alpha
+    ### 即使分层不能改变高度和半径的比例，因此上下层使用相同的 H
+    w_upper = _overlap_weight(H * delta / d)
 
     overlapping = G * np.sqrt(1.0 * CIi * CIv / (cthets * cthetv)) * w_upper
     ### 计算上层植被的光照可视背景
     sunlit_fraction_background_upper = np.exp(-(CIi * G / cthets + CIv * G / cthetv - overlapping) * lai_upper)
-    ### w_bottom = (1 - np.exp(-H_bottom * delta / d)) * d / (H_bottom * delta)
-    w_bottom = delta * 1.0
-    if type(w_bottom) == numpy.float64:
-        if delta < 0.0001:
-            w_bottom = 1
-        else:
-            w_bottom = (1 - np.exp(- H * delta / d)) * d / (H * delta)
-    else:
-        ind0 = np.where(delta < 0.0001)
-        ind1 = np.where(delta > 0.0001)
-        if np.size(ind0) > 0:
-            w_bottom[ind0] = 1
-        if np.size(ind1) > 0:
-            ### 即使分层不能改变高度和半径的比例
-            # alpha = H_bottom[ind1] * delta[ind1] / d[ind1]
-            alpha = H * delta[ind1] / d[ind1]
-            w_bottom[ind1] = (1 - np.exp(- alpha)) / alpha
+    w_bottom = w_upper
     ### 计算下层植被的光照比例
     sunlit_fraction_vegetation_bottom = 1 - np.exp(
         -G * np.sqrt(1.0 * CIv * CIi / (cthetv * cthets)) * w_bottom * lai_bottom)
@@ -279,7 +248,7 @@ def hotspot_integrated(lai, hspot, vza, sza, raa,  G = 0.5):
     '''
     nz = 20
     xl = np.linspace(0,-1,nz)
-    dx = np.float(1.0/nz)
+    dx = 1.0 / nz
     gapvs = np.zeros(nz)
     global lai0,G0,hspot0,sza0,vza0,raa0
     lai0 = lai*1.0
@@ -293,7 +262,7 @@ def hotspot_integrated(lai, hspot, vza, sza, raa,  G = 0.5):
         t1 = xl[j]-dx
         t2 = xl[j]
         gapvs[j] = sci.quad(hotspot_layer_function, t1, t2)[0]
-        gapvs[j] = gapvs[j]/np.float(dx)
+        gapvs[j] = gapvs[j]/dx
 
     return gapvs
 
@@ -308,9 +277,9 @@ def hotspot_vegetation_volume(lai, sza, CI = 1.0, G = 0.5):
     '''
     sthets = np.cos(np.deg2rad(sza))
     ### 植被层的透过率
-    gap_probability_illuminate = np.exp(-G * lai * CI / sthets[0])
+    gap_probability_illuminate = np.exp(-G * lai * CI / sthets)
     ### 1-透过率：植被阻挡概率； 植被的叶面积指数情况，计算的只是光照比例
-    sunlit_fraction_volume = (1 - gap_probability_illuminate) / (G * lai * CI) * sthets[0]
+    sunlit_fraction_volume = (1 - gap_probability_illuminate) / (G * lai * CI) * sthets
     return sunlit_fraction_volume
 
 def hotspot_hom_voxel(lai, hspot, vza, sza, vsa,CIv = 1,CIs = 1, G = 0.5):

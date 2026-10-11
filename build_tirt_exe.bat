@@ -2,11 +2,10 @@
 setlocal
 cd /d "%~dp0"
 
-set "CONDA_ROOT=C:\work\miniconda"
-set "PYTHON_EXE=%CONDA_ROOT%\envs\python311\python.exe"
-if not exist "%PYTHON_EXE%" set "PYTHON_EXE=%CONDA_ROOT%\python.exe"
+rem Override with: set "PYTHON_EXE=<path to python.exe with PyInstaller>"
+if not defined PYTHON_EXE set "PYTHON_EXE=C:\work\miniconda\envs\python311\python.exe"
 if not exist "%PYTHON_EXE%" set "PYTHON_EXE=python"
-if exist "%CONDA_ROOT%" set "PATH=%CONDA_ROOT%\envs\python311;%CONDA_ROOT%\envs\python311\Library\bin;%CONDA_ROOT%\envs\python311\Scripts;%PATH%"
+for %%P in ("%PYTHON_EXE%") do if exist "%%~dpPLibrary\bin" set "PATH=%%~dpP;%%~dpPLibrary\bin;%%~dpPScripts;%PATH%"
 set "MPLBACKEND=Agg"
 
 if not exist "node_modules\electron\dist\electron.exe" (
@@ -52,5 +51,6 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Built installer: %CD%\release\TiRT-Setup-1.0.2-x64.exe
+for /f "delims=" %%v in ('node -p "require('./package.json').version"') do set "APP_VERSION=%%v"
+echo Built installer: %CD%\release\TiRT-Setup-%APP_VERSION%-x64.exe
 pause

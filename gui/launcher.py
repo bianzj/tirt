@@ -10,6 +10,7 @@ import argparse
 import ctypes
 import errno
 import json
+import socket
 import sys
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -21,6 +22,16 @@ except ImportError:
 
 
 PORT_SEARCH_COUNT = 20
+
+
+class _ExclusiveServer(ThreadingHTTPServer):
+    # Windows SO_REUSEADDR lets a second server bind an occupied port silently.
+    allow_reuse_address = sys.platform != "win32"
+
+    def server_bind(self):
+        if sys.platform == "win32":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
 
 def _show_error(message: str) -> None:
@@ -35,11 +46,11 @@ def _create_server(host: str, first_port: int) -> tuple[ThreadingHTTPServer, int
     last_error: OSError | None = None
     for port in range(first_port, first_port + PORT_SEARCH_COUNT):
         try:
-            server = ThreadingHTTPServer((host, port), Handler)
+            server = _ExclusiveServer((host, port), Handler)
             return server, int(server.server_address[1])
         except OSError as exc:
             last_error = exc
-            if exc.errno not in {errno.EADDRINUSE, 10048}:
+            if exc.errno not in {errno.EADDRINUSE, errno.EACCES, 10048, 10013}:
                 raise
     last_port = first_port + PORT_SEARCH_COUNT - 1
     raise OSError(f"Ports {first_port}-{last_port} are unavailable") from last_error

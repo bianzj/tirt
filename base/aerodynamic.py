@@ -2,33 +2,49 @@ import math
 
 from .control import KAPPA
 
+GRAVITY = 9.81
+RHOA_CP = 1.2047 * 1004.0
+MIN_WIND = 1.0
+CONVECTIVE_BETA = 1.0
+MIXED_LAYER_HEIGHT = 1000.0
+
+
+def _stable_zeta(value, length):
+    return min(value / length, 1.0)
+
 
 def _stability_functions(length):
+    # Paulson (1970)/Businger-Dyer for L<0; Webb (1970) psi=-5*zeta, zeta<=1, for L>0.
     def psim(value):
-        if length < -4:
-            x = max(1.0 - 16.0 * value / length, 1e-8) ** 0.25
+        if length < 0.0:
+            x = (1.0 - 16.0 * value / length) ** 0.25
             return 2.0 * math.log((1.0 + x) / 2.0) + math.log((1.0 + x * x) / 2.0) - 2.0 * math.atan(x) + math.pi / 2.0
-        if length > 4e3:
-            return -5.0 * value / length
-        return 0.0
+        return -5.0 * _stable_zeta(value, length)
 
     def psih(value):
-        if length < -4:
-            x = max(1.0 - 16.0 * value / length, 1e-8) ** 0.25
+        if length < 0.0:
+            x = (1.0 - 16.0 * value / length) ** 0.25
             return 2.0 * math.log((1.0 + x * x) / 2.0)
-        if length > 4e3:
-            return -5.0 * value / length
-        return 0.0
+        return -5.0 * _stable_zeta(value, length)
 
     def phstar(value, reference, displacement):
-        if length < -4:
-            x = max(1.0 - 16.0 * value / length, 1e-8) ** 0.25
+        if length < 0.0:
+            x = (1.0 - 16.0 * (value - displacement) / length) ** 0.25
             return ((value - displacement) / (reference - displacement)) * ((x * x - 1.0) / (x * x + 1.0))
-        if length > 4e3:
-            return -5.0 * value / length
-        return 0.0
+        return -5.0 * _stable_zeta(value - displacement, length)
 
     return psim, psih, phstar
+
+
+def effective_wind(meteo, state):
+    # Zeng et al. (1998)/CLM: U = sqrt(max(u, 1)^2 + (beta*w*)^2), w* = (g/Ta*H/(rho*cp)*zi)^(1/3).
+    wind = max(float(meteo["wind_speed"]), MIN_WIND)
+    sensible = float(state.get("H_scene", 0.0))
+    if sensible > 0.0:
+        ta = float(meteo["air_temperature_c"]) + 273.15
+        wstar = (GRAVITY / ta * sensible / RHOA_CP * MIXED_LAYER_HEIGHT) ** (1.0 / 3.0)
+        wind = math.hypot(wind, CONVECTIVE_BETA * wstar)
+    return wind
 
 
 def _bulk_resistance(reference_height, roughness_length, wind_speed, length, psim, psih):
@@ -53,8 +69,9 @@ def _bulk_resistance(reference_height, roughness_length, wind_speed, length, psi
 def aerodynamic_resistance(settings, meteo, state, urban=False):
     """Complete equivalent of old/aerodynamic.cpp::aeresist and aeresist_urban."""
     lai = max(float(settings["lai"]), 0.0)
-    hc = max(float(settings["height"]), 0.1)
-    wind = max(float(meteo["wind_speed"]), 0.01)
+    hc = max(float(settings["canopy_height"]), 0.1)
+    wind = effective_wind(meteo, state)
+    state["wind_effective"] = wind
     z = max(float(settings["z"]), hc + 0.1)
     length = float(state.get("L", 1e9))
     psim, psih, phstar = _stability_functions(length)
@@ -64,7 +81,7 @@ def aerodynamic_resistance(settings, meteo, state, urban=False):
         width = max(float(settings.get("urban_building_width", 10.0)), 0.1)
         building_length = max(float(settings.get("urban_building_length", 10.0)), 0.1)
         density = max(float(settings.get("urban_density", 0.0015)), 0.0)
-        scene_height = max(hc, float(settings.get("height", 0.0)))
+        scene_height = max(hc, float(settings.get("canopy_height", 0.0)))
         z = max(15.0, scene_height)
         state["z"] = z
         bai = 1.0
@@ -82,16 +99,15 @@ def aerodynamic_resistance(settings, meteo, state, urban=False):
         town_z0 = min(5.0, hc * 0.1)
         k = 0.35
         r_ratio = 0.74
-        if length > 4e3:
-            psi_m1 = -4.7 * z / length
-            psi_m2 = -4.7 * town_z0 / length / r_ratio
-        elif length < -4:
-            x = max(1.0 - 15.0 * z / length, 1e-8) ** 0.25
-            psi_m1 = math.log(((1.0 + x) / 2.0) ** 2 * (1.0 + x * x) / 2.0) - 2.0 * math.atan(x) + math.pi / 2.0
-            y = max(1.0 - 9.0 * town_z0 / length, 1e-8) ** 0.5
-            psi_m2 = math.log(((1.0 + y) / 2.0) ** 2)
+        # Businger et al. (1971) coefficients; stable zeta clipped to 1 as in psim/psih.
+        if length > 0.0:
+            psi_m1 = -4.7 * _stable_zeta(z, length)
+            psi_m2 = -4.7 * _stable_zeta(town_z0 / r_ratio, length)
         else:
-            psi_m1 = psi_m2 = 0.0
+            x = (1.0 - 15.0 * z / length) ** 0.25
+            psi_m1 = math.log(((1.0 + x) / 2.0) ** 2 * (1.0 + x * x) / 2.0) - 2.0 * math.atan(x) + math.pi / 2.0
+            y = (1.0 - 9.0 * town_z0 / length) ** 0.5
+            psi_m2 = math.log(((1.0 + y) / 2.0) ** 2)
         denominator = max(math.log(max(z / roughness, 1.01)) - (psi_m1 - psi_m2), 1e-6)
         cd = ((k * k) / r_ratio) / denominator**4
         w_can = math.sqrt(max(cd, 0.0)) * abs(uh)
@@ -161,8 +177,9 @@ def aerodynamic_resistance(settings, meteo, state, urban=False):
 
     if lai <= 0.0:
         roughness = 0.01
-        ustar = max(0.001, KAPPA * wind / max(math.log(max(z / roughness, 1.01)) - psim(z), 1e-6))
-        state.update(ustar=ustar, raa_leaf=0.0, raa_soil=max(math.log(max(z, 1.01)) / (KAPPA * ustar), 1e-3))
+        ustar = max(0.001, KAPPA * wind / max(math.log(max(z / roughness, 1.01)) - psim(z) + psim(roughness), 1e-6))
+        # Brutsaert (1982) bulk resistance with z0h = z0m/10 (kB^-1 ~ 2.3); that excess term replaces aero_rbs.
+        state.update(ustar=ustar, raa_leaf=0.0, raa_soil=_bulk_resistance(z, roughness, wind, length, psim, psih))
         return state
 
     sq = math.sqrt(max(float(settings["aero_cd1"]) * lai / 2.0, 1e-8))
@@ -171,18 +188,17 @@ def aerodynamic_resistance(settings, meteo, state, urban=False):
     zr = 2.5 * hc
     displacement = hc * (1.0 - (1.0 - math.exp(-sq)) / sq)
     roughness = max((hc - displacement) * math.exp(-KAPPA * g1 + float(settings["aero_psicor"])), 1e-4)
-    if hc > z:
-        ustar_temp = max(0.001, KAPPA * wind / max(math.log(max((z - displacement) / roughness, 1.01)) - psim(z - displacement), 1e-6))
-        wind = max(0.01, ustar_temp / KAPPA * (math.log(max((hc - displacement) / roughness, 1.01)) - psim(hc - displacement)))
-    ustar = max(0.001, KAPPA * wind / max(math.log(max((z - displacement) / roughness, 1.01)) - psim(z - displacement), 1e-6))
+    ustar = max(0.001, KAPPA * wind / max(math.log(max((z - displacement) / roughness, 1.01)) - psim(z - displacement) + psim(roughness), 1e-6))
+    # Canopy-top eddy diffusivity with phi_h (Dyer 1974): unstable (1-16 zeta)^-1/2, stable 1+5 zeta.
     kh = KAPPA * ustar * max(zr - displacement, 1e-6)
-    if length < -4:
-        kh = KAPPA * ustar * max(zr - displacement, 1e-6) * math.sqrt(max(1.0 - 16.0 * (hc - displacement) / length, 1e-6))
-    elif length > 4e3:
-        kh = KAPPA * ustar * max(zr - displacement, 1e-6) / (1.0 + 5.0 * (hc - displacement) / length)
+    if length < 0.0:
+        kh *= math.sqrt(1.0 - 16.0 * (hc - displacement) / length)
+    else:
+        kh /= 1.0 + 5.0 * _stable_zeta(hc - displacement, length)
+    kh = max(kh, 1e-6)
     canopy_wind = max(ustar / KAPPA * (math.log(max((hc - displacement) / roughness, 1.01)) - psim(hc - displacement)), 0.01)
     rai = 1.0 / (KAPPA * ustar) * (math.log(max((z - displacement) / max(zr - displacement, 1e-6), 1.01)) - psih(z - displacement) + psih(zr - displacement)) if z > zr else 0.0
-    rar = 1.0 / (KAPPA * ustar) * ((zr - hc) / max(zr - displacement, 1e-6)) - phstar(zr, zr, displacement) + phstar(hc, zr, displacement)
+    rar = max(1.0 / (KAPPA * ustar) * ((zr - hc) / max(zr - displacement, 1e-6) - phstar(zr, zr, displacement) + phstar(hc, zr, displacement)), 0.0)
 
     def log_ratio(argument):
         argument = max(argument, 1e-8)
@@ -191,15 +207,17 @@ def aerodynamic_resistance(settings, meteo, state, urban=False):
         e = math.exp(argument)
         return math.log((e - 1.0) / (e + 1.0))
 
-    kh = max(KAPPA * ustar * max(zr - displacement, 1e-6), 1e-6)
     rac = hc * math.sinh(n) / max(n * kh, 1e-6) * (log_ratio(n) - log_ratio(n * (roughness + displacement) / hc)) if n else 0.0
     wind_leaf = max(canopy_wind * math.exp(n * ((roughness + displacement) / hc - 1.0)), 0.01)
     boundary = 70.0 / lai * math.sqrt(max(float(settings["leaf_width"]) / wind_leaf, 1e-8))
     soil = hc * math.sinh(n) / max(n * kh, 1e-6) * (log_ratio(n * (roughness + displacement) / hc) - log_ratio(n * 0.01 / hc)) if n else 0.0
+    # Leaf and soil fluxes are per unit leaf or soil area; as in SCOPE ebal (Van der Tol et al. 2009) the
+    # shared canopy resistances are scaled by (LAI + 1) for them.
+    scale = lai + 1.0
     state.update(
         ustar=ustar,
-        raa_leaf=max(rai + rar + rac + boundary, 1e-3),
-        raa_soil=max(rai + rar + rac + soil + float(settings["aero_rbs"]), 1e-3),
+        raa_leaf=max(scale * (rai + rar + rac + boundary), 1e-3),
+        raa_soil=max(scale * (rai + rar + rac + soil + float(settings["aero_rbs"])), 1e-3),
     )
     return state
 

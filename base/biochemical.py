@@ -16,10 +16,22 @@ def _root(a, b, c, smaller=True):
     return min(roots) if smaller else max(roots)
 
 
+def soil_surface_resistance(settings):
+    method = str(settings.get("soil_rss_method", "sellers")).strip().lower()
+    if method in {"constant", "fixed", "0"}:
+        return max(float(settings.get("soil_rss", RSS)), 0.0)
+    if method in {"sellers", "moisture", "1"}:
+        # Sellers et al. (1992): rss = exp(8.206 - 4.255 W/Wsat).
+        saturation = max(float(settings.get("satwater", 0.45)), 1.0e-6)
+        wetness = min(max(float(settings.get("soil_moisture", 0.25)) / saturation, 0.0), 1.0)
+        return math.exp(8.206 - 4.255 * wetness)
+    raise ValueError("soil_rss_method must be constant or sellers")
+
+
 def farquhar_resistance(settings, meteo, state, netrad):
     """Biochemical::suresist -> biochemical_Farquhar, in C++ order and units."""
-    state["rss"] = max(float(settings.get("soil_rss", RSS)), 0.0)
-    if settings["surface_type"] == 16 or settings["lai"] <= 0.0:
+    state["rss"] = soil_surface_resistance(settings)
+    if settings["lai"] <= 0.0:
         return state
 
     leaf_type = float(settings["leaf_type"])
@@ -34,14 +46,21 @@ def farquhar_resistance(settings, meteo, state, netrad):
     tref = 25.0 + 273.15
     p = float(meteo["pressure"])
     cs0 = float(state.get("cs", settings.get("ca", 380.0)))
-    eb = float(state.get("es", settings.get("ea", meteo["vapor_pressure"])))
+    ea = float(meteo["vapor_pressure"])
     oxygen = float(settings.get("oa", 209.0))
-    q = float(netrad.get("directPrad_leaf", 0.0) + netrad.get("diffusePrad_leaf", 0.0))
+    diffuse_par = float(netrad.get("diffusePrad_leaf", 0.0))
+    direct_par = float(netrad.get("directPrad_leaf", 0.0))
     effcon = 1.0 / 6.0 if leaf_type >= 3.5 else 1.0 / 5.0
 
-    # The source has this historical assignment for both components.
-    for issunlit in (0, 1):
-        tc = state["Tlh"]
+    for issunlit, temperature_key, resistance_key in ((0, "Tlh", "rsshaded"), (1, "Tls", "rssunlit")):
+        tc = state[temperature_key]
+        q = diffuse_par + (direct_par if issunlit else 0.0)
+        # Vapour pressure at the leaf surface (SCOPE heatfluxes): ea moved towards saturation by ra / (ra + rs).
+        ra = float(state.get("raa_leaf", 0.0))
+        rs_previous = float(state.get(resistance_key, float("nan")))
+        eb = ea
+        if ra > 0.0 and math.isfinite(rs_previous):
+            eb = ea + (saturation_vapor_pressure(tc - 273.15) - ea) * ra / (ra + rs_previous)
         cs = cs0 * (1.0e-6 * (p * 1.0e-3))
         o = (oxygen * 1.0e-3) * (p * 1.0e-3)
         if leaf_type > 3.5:
@@ -113,7 +132,7 @@ def suresist(settings, meteo, state, netrad):
 
 def ballberry_resistance(settings, meteo, state, netrad):
     """Empirical Ball-Berry/light-response stomatal resistance in s m-1."""
-    state["rss"] = max(float(settings.get("soil_rss", RSS)), 0.0)
+    state["rss"] = soil_surface_resistance(settings)
     if settings["lai"] <= 0.0:
         state["rssunlit"] = state["rsshaded"] = 625000.0
         return state
@@ -122,19 +141,18 @@ def ballberry_resistance(settings, meteo, state, netrad):
     ambient_es = saturation_vapor_pressure(air_temp - 273.15)
     rh = min(max(float(meteo["vapor_pressure"]) / max(ambient_es, 1.0e-6), 0.05), 1.2)
     ca = max(float(state.get("cs", settings.get("ca", 380.0))), 1.0)
-    par = max(float(netrad.get("directPrad_leaf", 0.0)) + float(netrad.get("diffusePrad_leaf", 0.0)), 0.0)
-    light = par / (par + 100.0)
-    temperature = math.exp(-((float(state["Tlh"]) - 298.15) / 18.0) ** 2)
+    diffuse_par = max(float(netrad.get("diffusePrad_leaf", 0.0)), 0.0)
+    direct_par = max(float(netrad.get("directPrad_leaf", 0.0)), 0.0)
     vcmax = max(float(settings.get("vcmax", 80.0)), 0.0)
     stress = min(max(float(settings.get("stressfactor", 1.0)), 0.0), 1.0)
-    assimilation = vcmax * light * temperature * stress
     slope = max(float(settings.get("ballberry_m", 9.0)), 0.0)
     g0 = max(float(settings.get("stomatal_g0", 0.01)), 1.0e-5)
-    gs = g0 + (1.0 + slope * rh) * assimilation / ca
-    gs = min(max(gs, 1.0e-5), 2.0)
-    resistance = (RHOA / (MAIR * 1.0e-3)) / gs
-    state["rsshaded"] = resistance
-    state["rssunlit"] = resistance
+    for temperature_key, resistance_key, par in (("Tlh", "rsshaded", diffuse_par), ("Tls", "rssunlit", diffuse_par + direct_par)):
+        light = par / (par + 100.0)
+        temperature = math.exp(-((float(state[temperature_key]) - 298.15) / 18.0) ** 2)
+        assimilation = vcmax * light * temperature * stress
+        gs = min(max(g0 + (1.0 + slope * rh) * assimilation / ca, 1.0e-5), 2.0)
+        state[resistance_key] = (RHOA / (MAIR * 1.0e-3)) / gs
     state["ci"] = ca
     return state
 

@@ -70,7 +70,7 @@ if __name__ == '__main__':
     #                      [10, 10, 30, density*0.333,0,90],
     #                      [10, 10, 40, density*0.333,0,90]])
     shapes = np.asarray([[10, 10, 30, density,  0,90]])
-    forestshape = np.asarray([3.0, 0.01, 3, 3, 0.2])
+    forestshape = np.asarray([3.0, 0.01, 3, 3, 0.2, 3])
 
 
     urban.set_angular_input(np.abs(vza_),vaa_,sza,saa)

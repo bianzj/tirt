@@ -94,7 +94,7 @@ class Hom():
 
         Ecom = np.asarray([es,es,el,el])
         Tcom = np.asarray([Tss,Tsh,Tls,Tlh])
-        Rcom = planck(Tcom)
+        Rcom = planck(self.wavelength, Tcom)
 
         Pcom = proportion_bidirectional_hom_one(lai,hspot,vza,sza,vsa)
         Ecom_direct,Ecom_direct_sum = emissivity_direct(Pcom,Ecom)
@@ -108,4 +108,4 @@ class Hom():
         if ifradiance == 1:
             return self.radiance
         else:
-            return inv_planck(self.radiance, self.wavelength)
+            return inv_planck(self.wavelength, self.radiance)

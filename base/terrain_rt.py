@@ -4,7 +4,7 @@ import math
 
 import numpy as np
 
-from .solar import slope_direction
+from .physicsF import slope1
 
 
 def _shade(values):
@@ -12,11 +12,25 @@ def _shade(values):
     return np.asarray([0.0, values[0] + values[1], 0.0, values[2] + values[3]])
 
 
+def _facet_directions(zenith, azimuth, slope_deg, facet_azimuths):
+    """Vectorized solar.slope_direction over facet aspects; slope1 depends on the aspect only via azimuth - aspect."""
+    count = facet_azimuths.size
+    relative = float(azimuth) - facet_azimuths
+    with np.errstate(divide="ignore", invalid="ignore"):
+        local_zenith, local_azimuth = slope1(np.full(count, float(zenith)), relative, float(slope_deg), 0.0)
+    rd = math.pi / 180.0
+    incidence = (
+        math.cos(float(slope_deg) * rd) * math.cos(float(zenith) * rd)
+        + math.sin(float(slope_deg) * rd) * math.sin(float(zenith) * rd) * np.cos(relative * rd)
+    )
+    return local_zenith, local_azimuth, incidence >= 0.0
+
+
 def _shape_values(settings):
-    height = max(float(settings.get("terrain_height", 20.0)), 1.0e-6)
-    radius = max(float(settings.get("terrain_radius", 100.0)), 1.0e-6)
-    density = max(float(settings.get("terrain_density", 1.0)), 0.0)
-    return ((height, radius, density),)
+    return tuple(
+        (max(float(height), 1.0e-6), max(float(radius), 1.0e-6), max(float(density), 0.0))
+        for height, radius, density in settings["terrain_shapes"]
+    )
 
 
 def _safe_tangent(angle):
@@ -167,14 +181,16 @@ def compound_terrain_proportions(settings, sza, saa, vza, vaa, vegetation_propor
             continue
         weights = np.maximum(cos_view[visible], 0.0)
         weights /= max(float(weights.sum()), 1.0e-12)
+        facet_azimuths = azimuths[visible]
+        view_z, view_a, _ = _facet_directions(vza, vaa, math.degrees(alpha), facet_azimuths)
+        sun_z, sun_a, sun_lit = _facet_directions(sza, saa, math.degrees(alpha), facet_azimuths)
         facet_visible_total = np.zeros(4, dtype=float)
         facet_sun_total = np.zeros(4, dtype=float)
-        for weight, laa in zip(weights, azimuths[visible]):
-            facet_view_z, facet_view_a, _ = slope_direction(vza, vaa, math.degrees(alpha), laa)
-            facet_sun_z, facet_sun_a, facet_sunlit = slope_direction(sza, saa, math.degrees(alpha), laa)
+        for index, weight in enumerate(weights):
+            facet_sunlit = bool(sun_lit[index])
             facet = np.asarray(
                 vegetation_proportions(
-                    facet_sun_z, facet_sun_a, facet_view_z, facet_view_a,
+                    float(sun_z[index]), float(sun_a[index]), float(view_z[index]), float(view_a[index]),
                     facet_sunlit and sunlit,
                 ),
                 dtype=float,

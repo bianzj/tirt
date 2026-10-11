@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-if (window.location.protocol === "file:") window.location.replace("http://127.0.0.1:8901/time.html");
+if (window.location.protocol === "file:") window.location.replace("http://127.0.0.1:8765/time.html");
 let meteoText = "";
 const spectrumFiles = { directions: "", wavelengths: "", vegetation_spectrum: "", soil_spectrum: "", urban_spectrum: "" };
 let seriesRows = [];
@@ -134,20 +134,21 @@ function currentOverrides() {
   const [startTime, endTime] = timeRange(value("time-range"));
   return {
     surface_model: value("surface-model"), vegetation_model: value("vegetation-model"),
-    lai: value("lai"), height: value("height"), hspot: value("hspot"), leaf_width: value("leaf-width"),
+    lai: value("lai"), canopy_height: value("canopy-height"), hspot: value("hspot"), leaf_width: value("leaf-width"),
     row_width: value("row-width"), row_blank: value("row-blank"), row_height: value("row-height"), row_azimuth: value("row-azimuth"),
-    crown_radius: value("crown-radius"), crown_width: value("crown-width"), crown_height: value("crown-height"), crown_density: value("crown-density"),
-    terrain_type: value("surface-model") === "slope" ? "1" : value("terrain-type"), terrain_slope: value("terrain-slope"), terrain_aspect: value("terrain-aspect"),
+    crown_rad_a: value("crown-rad-a"), crown_rad_b: value("crown-rad-b"), crown_height: value("crown-height"), crown_density: value("crown-density"),
+    slope_angle: value("slope-angle"), slope_aspect: value("slope-aspect"),
     terrain_height: value("terrain-height"), terrain_radius: value("terrain-radius"), terrain_density: value("terrain-density"),
-    building_density: value("building-density"), building_length: value("building-length"), building_width: value("building-width"), building_height: value("building-height"), urban_vegetation_fraction: value("urban-vegetation-fraction"),
+    building_density: value("building-density"), building_length: value("building-length"), building_width: value("building-width"), building_height: value("building-height"), building_azimuth: value("building-azimuth"),
     urban_roughness_length: value("urban-roughness-length"), urban_canyon_roughness_ratio: value("urban-canyon-roughness-ratio"), urban_canyon_min_ratio: value("urban-canyon-min-ratio"), urban_leaf_wind_decay: value("urban-leaf-wind-decay"), urban_leaf_boundary_factor: value("urban-leaf-boundary-factor"),
     latitude: value("latitude"), longitude: value("longitude"), utc_offset_hours: value("utc-offset"), start_time: startTime, end_time: endTime,
-    direction_source: directionsFromFile ? "file" : "direct", observation_direction_mode: directionsFromFile ? "file" : "direct", vza: observationVza, vaa: observationVaa, observation_vza: observationVza, observation_vaa: observationVaa,
-    spectral_source: "direct", observation_spectral_mode: "direct", wavelengths: wavelengths.join(";"), observation_wavelengths: wavelengths.join(";"),
-    vegetation_spectrum_source: "model", soil_spectrum_source: "model", urban_spectrum_source: "model",
+    geometry_mode: directionsFromFile ? "2" : "0", geometry_pair_mode: "zip", vza: observationVza, vaa: observationVaa,
+    spectral_source: "direct", wavelengths: wavelengths.join(";"),
+    leaf_optics_source: "prospect", soil_optics_source: "bsm", urban_spectrum_source: "direct",
     cab: value("cab"), cw: value("cw"), cdm: value("cdm"), cs: value("cs"), n: value("leaf-n"),
-    leaf_reflectance: value("leaf-reflectance-tir"), leaf_transmittance: value("leaf-transmittance-tir"),
-    soil_brightness: value("soil-brightness"), soil_latitude: value("soil-latitude"), soil_longitude: value("soil-longitude"), soil_reflectance: value("soil-reflectance-tir"),
+    emissivity_leaf: value("emissivity-leaf"), emissivity_soil: value("emissivity-soil"),
+    emissivity_roof: value("emissivity-roof"), emissivity_wall: value("emissivity-wall"), emissivity_street: value("emissivity-street"),
+    bsm_brightness: value("soil-brightness"), bsm_latitude: value("soil-latitude"), bsm_longitude: value("soil-longitude"),
     vcmax: value("vcmax"), ballberry_m: value("ballberry-m"), leaf_type: value("leaf-type"), stomatal_method: value("stomatal-method"), stomatal_g0: value("stomatal-g0"),
     rdparam: value("rdparam"), tyear: value("tyear"), beta: value("beta"), knpqs: value("knpqs"), qls: value("qls"), kv: value("kv"), stressfactor: value("stressfactor"),
     tparam1: value("tparam1"), tparam2: value("tparam2"), tparam3: value("tparam3"), tparam4: value("tparam4"), tparam5: value("tparam5"),
@@ -161,11 +162,13 @@ function currentOverrides() {
 function updateConditionalFields() {
   const surface = value("surface-model");
   const vegetation = value("vegetation-model");
-  $("slope-fields").classList.toggle("is-hidden", surface !== "slope" && surface !== "terrain");
+  // Terrain and urban vegetation is always modelled as discrete crowns.
+  const crowns = vegetation === "crown" || ((surface === "terrain" || surface === "urban") && vegetation !== "bare");
+  $("slope-fields").classList.toggle("is-hidden", surface !== "slope");
   $("terrain-fields").classList.toggle("is-hidden", surface !== "terrain");
   $("urban-fields").classList.toggle("is-hidden", surface !== "urban");
-  $("row-fields").classList.toggle("is-hidden", vegetation !== "row");
-  $("crown-fields").classList.toggle("is-hidden", vegetation !== "crown");
+  $("row-fields").classList.toggle("is-hidden", vegetation !== "row" || crowns);
+  $("crown-fields").classList.toggle("is-hidden", !crowns);
 }
 
 function updateObservationTimeFields() {
@@ -285,7 +288,7 @@ function bindEvents() {
   document.getElementById("exit-button").addEventListener("click", shutdownTiRT);
   $("run-button").addEventListener("click", runSimulation); $("save-button").addEventListener("click", saveCsv); $("save-observations-button").addEventListener("click", saveObservations); $("save-input-button").addEventListener("click", saveInput); $("reset-button").addEventListener("click", () => window.location.reload()); $("quantity").addEventListener("change", () => { updateMetrics(); drawTimeCharts(); }); $("surface-model").addEventListener("change", () => { updateConditionalFields(); updateQuantityOptions(); updateDiagnostics(); window.refreshTemporalScene?.(); }); $("vegetation-model").addEventListener("change", () => { updateConditionalFields(); updateQuantityOptions(); updateDiagnostics(); window.refreshTemporalScene?.(); });
   $("meteo-upload").addEventListener("change", async (event) => { const file = event.target.files[0]; if (!file) return; meteoText = await file.text(); $("meteo-status").textContent = "✓"; $("meteo-status").className = "file-status has-file"; $("meteo-status").setAttribute("aria-label", `Selected ${file.name}`); notify(`Loaded ${file.name}`); });
-  [["angle-upload", "directions", "angle-status"], ["wavelength-upload", "wavelengths", "wavelength-status"], ["vegetation-spectrum-upload", "vegetation_spectrum", "vegetation-spectrum-status"], ["soil-spectrum-upload", "soil_spectrum", "soil-spectrum-status"], ["urban-spectrum-upload", "urban_spectrum", "urban-spectrum-status"]].forEach(([id, key, statusId]) => {
+  [["angle-upload", "directions", "angle-status"], ["wavelength-upload", "wavelengths", "wavelength-status"], ["vegetation-spectrum-upload", "leaf_optics", "vegetation-spectrum-status"], ["soil-spectrum-upload", "soil_optics", "soil-spectrum-status"], ["urban-spectrum-upload", "urban_spectrum", "urban-spectrum-status"]].forEach(([id, key, statusId]) => {
     $(id).addEventListener("change", async (event) => {
       const file = event.target.files[0]; if (!file) return;
       spectrumFiles[key] = await file.text(); const status = $(statusId); status.textContent = "✓"; status.className = "file-status has-file"; status.setAttribute("aria-label", `Selected ${file.name}`);
@@ -295,7 +298,7 @@ function bindEvents() {
     });
   });
   $("observation-time-mode").addEventListener("change", updateObservationTimeFields);
-  const sceneInputs = ["lai", "height", "hspot", "terrain-type", "terrain-slope", "terrain-aspect", "terrain-height", "terrain-radius", "terrain-density", "row-width", "row-blank", "row-height", "row-azimuth", "crown-radius", "crown-width", "crown-height", "crown-density", "building-density", "building-height", "building-length", "building-width", "urban-vegetation-fraction", "latitude", "longitude"];
+  const sceneInputs = ["lai", "canopy-height", "hspot", "slope-angle", "slope-aspect", "terrain-height", "terrain-radius", "terrain-density", "row-width", "row-blank", "row-height", "row-azimuth", "crown-rad-a", "crown-rad-b", "crown-height", "crown-density", "building-density", "building-height", "building-length", "building-width", "building-azimuth", "latitude", "longitude"];
   sceneInputs.push("urban-roughness-length", "urban-canyon-roughness-ratio", "urban-canyon-min-ratio", "urban-leaf-wind-decay", "urban-leaf-boundary-factor");
   sceneInputs.forEach((id) => $(id)?.addEventListener("input", () => window.refreshTemporalScene?.()));
   window.addEventListener("resize", () => { if (seriesRows.length) drawTimeCharts(); window.refreshTemporalScene?.(); });

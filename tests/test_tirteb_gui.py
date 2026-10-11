@@ -13,11 +13,6 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PYTHON = Path(r"C:\work\miniconda\envs\python311\python.exe")
-
-
-def python_executable() -> str:
-    return str(PYTHON if PYTHON.exists() else sys.executable)
 
 
 def reject_nonfinite_json(value: str):
@@ -45,7 +40,7 @@ def wait_ready(base_url: str) -> None:
     while time.time() < deadline:
         try:
             status, payload = request("GET", f"{base_url}/api/health", timeout=3)
-            if status == 200 and payload.get("ok") and payload.get("engine") == "tirteb":
+            if status == 200 and payload.get("ok") and "energy_balance" in payload.get("features", []):
                 return
         except Exception:
             pass
@@ -57,10 +52,8 @@ def payload(**overrides: object) -> dict:
     values = {
         "start_time": "214.0139", "end_time": "214.0764", "max_iter": "20",
         "surface_model": "plane", "vegetation_model": "hom",
-        "observation_direction_mode": "direct", "direction_source": "direct",
-        "vza": "0;20", "vaa": "0;90",
-        "observation_spectral_mode": "direct", "spectral_source": "direct",
-        "wavelengths": "0.55;0.86;10.5", "observation_wavelengths": "0.55;0.86;10.5",
+        "geometry_mode": "0", "vza": "0;20", "vaa": "0;90",
+        "spectral_source": "direct", "wavelengths": "0.55;0.86;10.5",
         "observation_time_mode": "all", "observation_quantity": "temperature",
     }
     values.update(overrides)
@@ -127,12 +120,12 @@ def assert_urban_daylight(data: dict) -> None:
 def run_tests(base_url: str) -> None:
     wait_ready(base_url)
     status, html = request("GET", f"{base_url}/time.html")
-    assert status == 200 and "STREAM TIRT Temporal Simulator" in html
+    assert status == 200 and "Energy Balance" in html
     print("PASS index page")
     assert_angle_run(base_url, "angle plane+hom")
     assert_angle_run(base_url, "angle urban+bare", surface_model="urban", vegetation_model="bare")
     assert_run(base_url, "default", payload())
-    for surface, vegetation in (("plane", "bare"), ("plane", "hom"), ("plane", "row"), ("plane", "crown"), ("terrain", "hom"), ("urban", "bare"), ("urban", "hom"), ("urban", "crown")):
+    for surface, vegetation in (("plane", "bare"), ("plane", "hom"), ("plane", "row"), ("plane", "crown"), ("slope", "hom"), ("terrain", "bare"), ("terrain", "crown"), ("urban", "bare"), ("urban", "hom"), ("urban", "crown")):
         data = assert_run(base_url, f"{surface}+{vegetation}", payload(surface_model=surface, vegetation_model=vegetation))
         if surface == "urban" and vegetation == "hom":
             assert_urban_temperatures(data)
@@ -143,11 +136,10 @@ def run_tests(base_url: str) -> None:
     files = {
         "directions": "0 0\n20 90\n40 180\n",
         "wavelengths": "0.55\n0.86\n10.5\n",
-        "vegetation_spectrum": "0.45 0.10 0.05\n10.5 0.015 0.010\n12.0 0.020 0.010\n",
-        "soil_spectrum": "0.45 0.20\n10.5 0.045\n12.0 0.050\n",
+        "leaf_optics": "0.45 0.10 0.05\n0.86 0.45 0.40\n2.40 0.05 0.03\n",
+        "soil_optics": "0.45 0.20\n0.86 0.30\n2.40 0.35\n",
         "urban_spectrum": "0.45 0.05 0.08 0.045 0.95 0.92 0.955\n10.5 0.05 0.08 0.045 0.95 0.92 0.955\n12.0 0.05 0.08 0.045 0.95 0.92 0.955\n",
     }
-    data = assert_run(base_url, "uploaded files", payload(),)
     status, data = request("POST", f"{base_url}/api/run_time", {**payload(surface_model="urban", vegetation_model="hom"), "files": files})
     if status != 200 or not data.get("ok") or data.get("observation_count", 0) != data.get("count", 0) * 3:
         raise AssertionError(f"uploaded files: HTTP {status} {data}")
@@ -161,10 +153,10 @@ def run_tests(base_url: str) -> None:
 
 def start_server(mode: str, port: int) -> subprocess.Popen:
     if mode == "exe":
-        command = [str(ROOT / "dist" / "STREAM_TIRTEB.exe"), "--no-browser", "--port", str(port)]
+        command = [str(ROOT / "dist" / "TiRT-service.exe"), "--server-only", "--port", str(port)]
     else:
-        command = [python_executable(), str(ROOT / "gui" / "server.py"), "--host", "127.0.0.1", "--port", str(port)]
-    return subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        command = [sys.executable, str(ROOT / "gui" / "server.py"), "--host", "127.0.0.1", "--port", str(port)]
+    return subprocess.Popen(command, cwd=ROOT, stdout=subprocess.DEVNULL)
 
 
 def main() -> None:

@@ -1,4 +1,5 @@
 import math
+from functools import lru_cache
 
 import numpy as np
 
@@ -86,6 +87,11 @@ def cal_lidf(ala):
 
 
 def _scattering_coefficients(sza, vza, raa, ala):
+    return _scattering_coefficients_cached(float(sza), float(vza), float(raa), float(ala))
+
+
+@lru_cache(maxsize=4096)
+def _scattering_coefficients_cached(sza, vza, raa, ala):
     cts = max(math.cos(RD * sza), 1e-6)
     cto = max(math.cos(RD * vza), 1e-6)
     ctscto = max(cts * cto, 1e-6)
@@ -102,39 +108,81 @@ def _scattering_coefficients(sza, vza, raa, ala):
     return ks, ko, bf, sob, sof
 
 
-def diffuse_scatter_vnir(lai, rho, tau, rs, sza, esun, esky, vza=0.0, raa=0.0, ala=53.0, return_incident=False):
-    epsc, epss = 1.0 - rho - tau, 1.0 - rs
-    ks, ko, bf, sob, sof = _scattering_coefficients(sza, vza, raa, ala)
+def _canopy_transfer(lai, rho, tau, sza, ala=53.0):
+    """SAIL four-stream canopy transmittances and reflectances for direct (s) and diffuse (d) light."""
+    ks, _, bf, _, _ = _scattering_coefficients(sza, 0.0, 0.0, ala)
     sdb, sdf = 0.5 * (ks + bf), 0.5 * (ks - bf)
-    dob, dof = 0.5 * (ko + bf), 0.5 * (ko - bf)
     ddb, ddf = 0.5 * (1.0 + bf), 0.5 * (1.0 - bf)
     sigb, sigf = ddb * rho + ddf * tau, ddf * rho + ddb * tau
     att = 1.0 - sigf
     m = math.sqrt(max((att + sigb) * (att - sigb), 0.0))
     sb, sf = sdb * rho + sdf * tau, sdf * rho + sdb * tau
-    vb, vf = dob * rho + dof * tau, dof * rho + dob * tau
     e1, e2 = math.exp(-m * lai), math.exp(-2.0 * m * lai)
     rinf = (att - m) / max(sigb, 1e-12)
     denom = max(1.0 - rinf * rinf * e2, 1e-12)
     re = rinf * e1
     ps = (sf + sb * rinf) * jfunc1(ks, m, lai)
     qs = (sf * rinf + sb) * jfunc2(ks, m, lai)
-    pv = (vf + vb * rinf) * jfunc1(ko, m, lai)
-    qv = (vf * rinf + vb) * jfunc2(ko, m, lai)
-    rho_dd = rinf * (1.0 - e2) / denom
-    tau_dd = (1.0 - rinf * rinf) * e1 / denom
-    tau_sd = (ps - re * qs) / denom
-    rho_sd = (qs - re * ps) / denom
-    tau_ss = math.exp(-ks * lai)
-    eplu1 = rs * ((tau_ss + tau_sd) * esun + tau_dd * esky) / denom
-    e0 = rho_sd * esun + rho_dd * esky + tau_dd * eplu1
-    emin1 = tau_sd * esun + tau_dd * esky + rho_dd * eplu1
-    leaf_diffuse = max(e0 * epsc, 0.0)
-    soil_incident = max(emin1, 0.0)
-    soil_diffuse = soil_incident * epss
-    if return_incident:
-        return leaf_diffuse, soil_diffuse, soil_incident
-    return leaf_diffuse, soil_diffuse
+    return {
+        "tau_ss": math.exp(-ks * lai),
+        "tau_sd": (ps - re * qs) / denom,
+        "rho_sd": (qs - re * ps) / denom,
+        "tau_dd": (1.0 - rinf * rinf) * e1 / denom,
+        "rho_dd": rinf * (1.0 - e2) / denom,
+    }
+
+
+def canopy_shortwave(lai, rho, tau, rs, sza, esun, esky, ala=53.0):
+    """Shortwave of a turbid canopy over soil, conserving energy between canopy, soil and reflection.
+
+    Returns the diffuse and multiply scattered light absorbed per unit leaf area (on top of the direct
+    beam absorbed by sunlit leaves), the diffuse light absorbed per unit soil area and the diffuse
+    irradiance reaching the soil. esun is the horizontal direct irradiance, esky the diffuse one.
+    """
+    t = _canopy_transfer(lai, rho, tau, sza, ala)
+    direct_soil = t["tau_ss"] * esun
+    soil_up = rs * (direct_soil + t["tau_sd"] * esun + t["tau_dd"] * esky) / max(1.0 - rs * t["rho_dd"], 1e-12)
+    reflected = t["rho_sd"] * esun + t["rho_dd"] * esky + t["tau_dd"] * soil_up
+    soil_diffuse = t["tau_sd"] * esun + t["tau_dd"] * esky + t["rho_dd"] * soil_up
+    soil_absorbed = (1.0 - rs) * (direct_soil + soil_diffuse)
+    canopy_absorbed = esun + esky - reflected - soil_absorbed
+    direct_absorbed = esun * (1.0 - t["tau_ss"]) * (1.0 - rho - tau)
+    leaf_diffuse = max(canopy_absorbed - direct_absorbed, 0.0) / max(lai, 1e-12)
+    return leaf_diffuse, max(soil_diffuse, 0.0) * (1.0 - rs), max(soil_diffuse, 0.0)
+
+
+def canopy_longwave(lai, leaf_emissivity, soil_emissivity, sky, leaf_sunlit, leaf_shaded, soil_sunlit, soil_shaded,
+                    sun_extinction, soil_sunlit_fraction):
+    """Layered longwave exchange between sky, leaves and soil in a turbid canopy (as SCOPE RTMt_sb).
+
+    Diffuse radiation is intercepted at a rate of 1 per unit LAI; the leaf share of sunlit leaves in a
+    layer at cumulative LAI x is exp(-sun_extinction * x). Leaf reflection and transmission are split
+    evenly up and down. Returns the longwave absorbed by both faces per unit area of a sunlit leaf and
+    of a shaded leaf, and the longwave absorbed per unit soil area.
+    """
+    layers = max(10, int(math.ceil(10.0 * lai)))
+    dl = lai / layers
+    depth = (np.arange(layers) + 0.5) * dl
+    sunlit = np.exp(-sun_extinction * depth) if sun_extinction > 0.0 else np.zeros(layers)
+    emission = leaf_emissivity * SIGMA * (sunlit * leaf_sunlit ** 4 + (1.0 - sunlit) * leaf_shaded ** 4)
+    soil_emission = soil_emissivity * SIGMA * (
+        soil_sunlit_fraction * soil_sunlit ** 4 + (1.0 - soil_sunlit_fraction) * soil_shaded ** 4
+    )
+    scatter = 0.5 * (1.0 - leaf_emissivity)
+    down = np.zeros(layers + 1)
+    up = np.zeros(layers + 1)
+    down[0] = sky
+    for _ in range(4):
+        for index in range(layers):
+            down[index + 1] = down[index] * (1.0 - dl) + dl * (emission[index] + scatter * (down[index] + up[index + 1]))
+        up[layers] = soil_emission + (1.0 - soil_emissivity) * down[layers]
+        for index in range(layers - 1, -1, -1):
+            up[index] = up[index + 1] * (1.0 - dl) + dl * (emission[index] + scatter * (down[index] + up[index + 1]))
+    absorbed = leaf_emissivity * (down[:-1] + up[1:])
+    shaded = 1.0 - sunlit
+    sunlit_absorbed = float(np.sum(sunlit * absorbed) / np.sum(sunlit)) if np.sum(sunlit) > 1e-9 else float(absorbed.mean())
+    shaded_absorbed = float(np.sum(shaded * absorbed) / np.sum(shaded)) if np.sum(shaded) > 1e-9 else float(absorbed.mean())
+    return sunlit_absorbed, shaded_absorbed, soil_emissivity * float(down[layers])
 
 
 def directional_single_scatter(lai, rho, tau, sza, vza, raa, ala=53.0):
@@ -149,40 +197,6 @@ def directional_single_scatter(lai, rho, tau, sza, vza, raa, ala=53.0):
     else:
         path = (math.exp(-ko * lai) - math.exp(-ks * lai)) / delta
     return max((sob * float(rho) + sof * float(tau)) * path, 0.0)
-
-
-def diffuse_scatter_tir(lai, rho, tau, rs, sza, esky, tss, tsh, tls, tlh, vza=0.0, raa=0.0, ala=53.0):
-    epsc, epss = 1.0 - rho - tau, 1.0 - rs
-    ks, ko, bf, sob, sof = _scattering_coefficients(sza, vza, raa, ala)
-    sdb, sdf = 0.5 * (ks + bf), 0.5 * (ks - bf)
-    dob, dof = 0.5 * (ko + bf), 0.5 * (ko - bf)
-    ddb, ddf = 0.5 * (1.0 + bf), 0.5 * (1.0 - bf)
-    sigb, sigf = ddb * rho + ddf * tau, ddf * rho + ddb * tau
-    att = 1.0 - sigf
-    m = math.sqrt(max((att + sigb) * (att - sigb), 0.0))
-    sb, sf = sdb * rho + sdf * tau, sdf * rho + sdb * tau
-    vb, vf = dob * rho + dof * tau, dof * rho + dob * tau
-    e1, e2 = math.exp(-m * lai), math.exp(-2.0 * m * lai)
-    rinf = (att - m) / max(sigb, 1e-12)
-    denom = max(1.0 - rinf * rinf * e2, 1e-12)
-    re = rinf * e1
-    ps = (sf + sb * rinf) * jfunc1(ks, m, lai)
-    qs = (sf * rinf + sb) * jfunc2(ks, m, lai)
-    pv = (vf + vb * rinf) * jfunc1(ko, m, lai)
-    qv = (vf * rinf + vb) * jfunc2(ko, m, lai)
-    tau_dd = (1.0 - rinf * rinf) * e1 / denom
-    tau_sd = (ps - re * qs) / denom
-    rho_dd = rinf * (1.0 - e2) / denom
-    f_hs = (1.0 - rinf * rinf) * (1.0 - rs) / max(1.0 - rinf * rs, 1e-12)
-    f_hc = m * (1.0 - rinf)
-    f_bottom = (rs - rinf) / max(1.0 - rinf * rs, 1e-12)
-    es = 0.5 * (SIGMA * tss**4 + SIGMA * tsh**4)
-    ev = 0.5 * (SIGMA * tls**4 + SIGMA * tlh**4)
-    f11 = esky * (1.0 - f_hc) + ev * f_hc
-    f21 = f_bottom * f11 + es * f_hs
-    emin = (f11 + rinf * f21) / max(1.0 - rinf * rinf, 1e-12)
-    eplu = (f21 + rinf * f11) / max(1.0 - rinf * rinf, 1e-12)
-    return max(emin * epss, 0.0), max((eplu + esky) * epsc, 0.0)
 
 
 def tirt_direct(lai, hspot, sza, saa, vza, vaa):

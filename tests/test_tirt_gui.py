@@ -12,7 +12,6 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
-PYTHON = Path(r"C:\work\miniconda\envs\python311\python.exe")
 
 
 @dataclass
@@ -66,7 +65,7 @@ def run_api_tests(base_url: str) -> list[Result]:
     add(results, "health endpoint", health.get("ok") is True and health.get("engine") == "tirt", str(health))
 
     status, html = request("GET", f"{base_url}/")
-    add(results, "index page", status == 200 and "TiRT Directional Simulator" in str(html), f"HTTP {status}")
+    add(results, "index page", status == 200 and "Directional Simulator" in str(html), f"HTTP {status}")
 
     for asset in ("app.js", "styles.css", "vendor/three.module.js", "vendor/controls/OrbitControls.js"):
         status, body = request("GET", f"{base_url}/{asset}")
@@ -145,9 +144,8 @@ def start_server(mode: str, port: int) -> subprocess.Popen:
     if mode == "exe":
         cmd = [str(ROOT / "dist" / "TiRT-service.exe"), "--server-only", "--port", str(port)]
     else:
-        python = str(PYTHON if PYTHON.exists() else sys.executable)
-        cmd = [python, str(ROOT / "gui" / "server.py"), "--host", "127.0.0.1", "--port", str(port)]
-    return subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        cmd = [sys.executable, str(ROOT / "gui" / "server.py"), "--host", "127.0.0.1", "--port", str(port)]
+    return subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL)
 
 
 def write_report(mode: str, port: int, results: list[Result], report_path: Path) -> None:
@@ -172,13 +170,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Test TiRT GUI HTTP/API behavior")
     parser.add_argument("--mode", choices=("source", "exe"), default="source")
     parser.add_argument("--port", type=int, default=8780)
-    parser.add_argument("--report", type=Path, default=ROOT / "docs" / "gui_test_report.md")
+    parser.add_argument("--report", type=Path, help="optional Markdown report path")
     args = parser.parse_args()
 
     proc = start_server(args.mode, args.port)
     try:
         results = run_api_tests(f"http://127.0.0.1:{args.port}")
-        write_report(args.mode, args.port, results, args.report)
+        if args.report:
+            write_report(args.mode, args.port, results, args.report)
         for item in results:
             print(f"{'PASS' if item.ok else 'FAIL'} {item.name}: {item.detail}")
         if not all(item.ok for item in results):
