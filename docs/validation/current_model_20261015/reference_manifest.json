@@ -1,0 +1,50 @@
+{
+  "github_optical_reference.csv": {
+    "source": "external_archive/cases/github_scenes_compound_retry_20261015/optical_histream_reference.csv",
+    "sha256": "529504f3a521078e83f9099a8025c4c8fa96c87a91a019c398f5d6237cc4bc93"
+  },
+  "01_T1_plane_bare_thermal.csv": {
+    "source": "external_archive/cases/github_scenes_compound_retry_20261015/reference/01_T1_plane_bare.csv",
+    "sha256": "daeca497a571e80ef36a8602f5e5466c4e1e112d53fe862e67d0f7e45c8bfa80"
+  },
+  "02_T2_plane_hom_thermal.csv": {
+    "source": "external_archive/cases/github_scenes_compound_retry_20261015/reference/02_T2_plane_hom.csv",
+    "sha256": "2aae4595d4fbf23979087f54abbaa6ed5b1e0a218ac74ba2a8bc4a2b6b17ab86"
+  },
+  "04_T3_plane_crown_leaf0.15_thermal.csv": {
+    "source": "external_archive/cases/github_scenes_compound_retry_20261015/reference/04_T3_plane_crown_leaf0.15.csv",
+    "sha256": "7c02e802468d4370b1458a9aede6fbba76a386d0775fd8517e72aabd8149ad63"
+  },
+  "05_T5_row_az0_thermal.csv": {
+    "source": "external_archive/cases/github_scenes_compound_retry_20261015/reference/05_T5_row_az0.csv",
+    "sha256": "ee4239d8819e236f920ccd93cd3ac1771cbeac4ca54981aa594307f6652c223d"
+  },
+  "06_T5_row_az90_thermal.csv": {
+    "source": "external_archive/cases/github_scenes_compound_retry_20261015/reference/06_T5_row_az90.csv",
+    "sha256": "52d7638a4d05e28ad6ae36c26ff9d94845bf1047fcc5a48bfb5bf4c62aeb42ef"
+  },
+  "07_S1_slope_hom_thermal.csv": {
+    "source": "external_archive/cases/github_scenes_compound_retry_20261015/reference/07_S1_slope_hom.csv",
+    "sha256": "8cb2d179ec1fd54e2abbd9923040814a41ab945704e2a434d5655f6284ee8b31"
+  },
+  "08_S1_slope_crown_thermal.csv": {
+    "source": "external_archive/cases/github_scenes_compound_retry_20261015/reference/08_S1_slope_crown.csv",
+    "sha256": "b68cd3650d8b628400ebf58d41e448f3d8cbb998f3c7b3926047531f4fe6e3e9"
+  },
+  "09_TV_terrain_crown_optical.csv": {
+    "source": "external_archive/cases/terrain100_crown2_20261015/raytracing/optical/reference.csv",
+    "sha256": "73ec9c1f12256efa1a90cbc00b2672b9ac34767791616f176fb281a1397f4e13"
+  },
+  "09_TV_terrain_crown_thermal.csv": {
+    "source": "external_archive/cases/terrain100_crown2_20261015/raytracing/thermal/reference.csv",
+    "sha256": "40ddf63ea0bbcc2029068544927cd0aa881077b3fbe5cc820cca3ec21733e583"
+  },
+  "10_T4_urban_bare_thermal.csv": {
+    "source": "external_archive/cases/github_scenes_compound_retry_20261015/reference/10_T4_urban_bare.csv",
+    "sha256": "8da89e6e0309c27a8896e6bff065dd4dee260b3cc952d4157b66b4dd1b7d6309"
+  },
+  "11_UV_urban_crown_thermal.csv": {
+    "source": "external_archive/cases/github_scenes_compound_retry_20261015/reference/11_UV_urban_crown.csv",
+    "sha256": "07b34b9fc6abcdaecd98976301d59d932dd95efb7ebc83aa4f2d3477f0fa5ff9"
+  }
+}

@@ -11,6 +11,8 @@ from .scatter import *
 from .proportion import *
 from .radiance import *
 from .emissivity import *
+from .vegetation import vegetation_proportions
+from .thermal_crown import geometry_mode, thermal_emission
 
 class Crown():
 
@@ -20,10 +22,12 @@ class Crown():
     stand_density = 0.05
     hcr = 1.0
     rcr = 1.0
-    hcb = None
     leaf_average_inclination_angle = 53
     hspot = 0.2
     G = 0.5
+    thermal_crown_geometry = "legacy"
+    thermal_hotspot_inner = None
+    thermal_hotspot_outer = None
     wavelength = 10.5
 
     ### optical and thermal variables
@@ -44,13 +48,17 @@ class Crown():
 
 
 
-    def set_structure(self,lai,hspot,stand_density,hcr,rcr,hcb=None):
+    def set_structure(self,lai,hspot,stand_density,hcr,rcr):
         self.leaf_area_index = lai
         self.hspot = hspot
         self.stand_density = stand_density
         self.rcr = rcr
         self.hcr = hcr
-        self.hcb = hcb
+
+    def set_hotspot_geometry(self, mode="legacy", inner=None, outer=None):
+        self.thermal_crown_geometry = geometry_mode({"thermal_crown_geometry": mode})
+        self.thermal_hotspot_inner = inner
+        self.thermal_hotspot_outer = outer
 
     def set_thermal(self,temperature_soil_sunlit,temperature_soil_shaded,temperature_leaf_sunlit,temperature_leaf_shaded):
         self.temperature_soil_shaded = np.asarray(temperature_soil_shaded)
@@ -102,6 +110,17 @@ class Crown():
         hcr = self.hcr
         rcr = self.rcr
 
+        if self.thermal_crown_geometry != "legacy":
+            settings = dict(lai=lai, stand_density=std, height=hcr, width=rcr,
+                            hspot=hspot, soil_emissivity=float(np.asarray(es).item()),
+                            leaf_emissivity=float(np.asarray(el).item()),
+                            thermal_crown_geometry=self.thermal_crown_geometry,
+                            thermal_hotspot_inner=self.thermal_hotspot_inner,
+                            thermal_hotspot_outer=self.thermal_hotspot_outer)
+            self.radiance, temperature, self.Pcom = thermal_emission(
+                settings, [Tss, Tsh, Tls, Tlh], wl, sza, vza, vsa)
+            return self.radiance if ifradiance == 1 else temperature
+
         ### Pleaf 和 Psoil 是植被和土壤组分的可视比例
         ### Ksoil 和 Kleaf 是植被和土壤组分的可视比例的光照比例 K = Psunlitvisible / Pvisible
 
@@ -109,11 +128,16 @@ class Crown():
         Tcom = np.asarray([Tss, Tsh, Tls, Tlh])
         Rcom = planck(wl,Tcom)
 
-        Pcom = proportion_bidirectional_crown_one(lai, std, hspot, hcr,rcr, vza, sza, vsa, hcb=self.hcb)
+        Pcom = vegetation_proportions(
+            "crown", lai, hspot, vza, vsa, sza, 0.0,
+            density=std, crown_height=hcr, crown_radius=rcr)
         Ecom_direct, Ecom_direct_sum = emissivity_direct(Pcom, Ecom)
         Rcom_direct = radiance_direct(Ecom_direct, Rcom)
 
-        Ecom_scatter, Ecom_scatter_sum = emissivity_scatter_analytical(lai, el, es, vza, sza)
+        if lai == 0.0 or std == 0.0:
+            Ecom_scatter = np.zeros_like(Pcom)
+        else:
+            Ecom_scatter, Ecom_scatter_sum = emissivity_scatter_analytical(lai, el, es, vza, sza)
         Rcom_scatter = radiance_scatter(Ecom_scatter, Rcom)
 
         self.radiance = Rcom_direct + Rcom_scatter

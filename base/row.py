@@ -9,8 +9,16 @@ from .scatter import *
 from .proportion import *
 from .emissivity import *
 from .radiance import *
+from .vegetation import vegetation_proportions
+from .thermal_row import conditioned_proportions
 
 class Row():
+    thermal_row_geometry = 'conditioned_corridor'
+
+    def set_geometry(self,method='conditioned_corridor'):
+        if method not in ('legacy','conditioned_corridor'):
+            raise ValueError('Unknown thermal row geometry: '+str(method))
+        self.thermal_row_geometry = method
 
     ### structual variables
     leaf_area_index = 3.0
@@ -22,6 +30,7 @@ class Row():
     row_blank = 1
     row_height = 1
     row_spacing = 2
+    wavelength = 10.5
 
     ### optical and thermal variables
     number_band = 1
@@ -117,11 +126,20 @@ class Row():
         Tcom = np.asarray([Tss,Tsh,Tls,Tlh])
         Rcom = planck(self.wavelength, Tcom)
 
-        Pcom = proportion_bidirectional_row_one(lai,hspot,row_width,row_blank,row_height,vza,vaa,sza,saa,raa)
+        Pcom = vegetation_proportions(
+            "row", lai, hspot, vza, vaa, sza, saa,
+            row_width=row_width, row_blank=row_blank,
+            row_height=row_height, row_azimuth=raa)
+        if self.thermal_row_geometry=='conditioned_corridor':
+            Pcom = conditioned_proportions(lai,hspot,row_width,row_blank,row_height,
+                                          vza,vaa,sza,saa,raa,Pcom)
         Ecom_direct,Ecom_direct_sum = emissivity_direct(Pcom,Ecom)
         Rcom_direct = radiance_direct(Ecom_direct,Rcom)
 
-        Ecom_scatter,Ecom_scatter_sum = emissivity_scatter_analytical(lai, el, es, vza, sza)
+        if lai == 0.0:
+            Ecom_scatter = np.zeros_like(Pcom)
+        else:
+            Ecom_scatter,Ecom_scatter_sum = emissivity_scatter_analytical(lai, el, es, vza, sza)
         Rcom_scatter = radiance_scatter(Ecom_scatter,Rcom)
 
         self.radiance = Rcom_direct + Rcom_scatter

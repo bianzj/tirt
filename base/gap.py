@@ -60,11 +60,10 @@ def gap_probability_crown_analytical(lai, std, hcr, rcr, xza, G=0.5):
     cthetx = np.cos(np.deg2rad(xza))
     ### 计算椭球树冠在地面的投影面积，即需要计算透过率的部分
     areav = np.sqrt(rcr * rcr + np.power(hcr * tgthx, 2)) * np.pi * rcr
-    ### 椭球内平行弦长为 tau_max*sqrt(1-rho^2)，对投影椭圆精确积分树冠透过率（直接 exp(-平均光学厚度) 会低估透过率）
-    tau_max = 1.5 * lai / (areav * std) * G / cthetx
-    safe = np.where(tau_max > 1.0e-4, tau_max, 1.0)
-    bv_in = np.where(tau_max > 1.0e-4, 2.0 * (1.0 - (1.0 + safe) * np.exp(-safe)) / safe ** 2, 1.0 - 2.0 * tau_max / 3.0)
-    ### 树冠位置服从泊松分布：面积*面积的不透过率
+    ### lai /(areav*std) 植被部分的等效LAI
+    bv_in = np.exp(-lai / (areav * std) * G / cthetx)
+    ### 面积*面积的透过率，这里面积就是考虑了几何形状，然后以该几何形状作为个体；而不是通过每个小面元作为个体。
+    ### 原理一样，但是处理的基本单元不同，每个叶片还是叶片的集合*叶片的等效不透过率
     bv = np.exp(-areav * (1 - bv_in) * std)
 
     #### Li Ju Cai et al. 不太推荐使用，有偏差可能

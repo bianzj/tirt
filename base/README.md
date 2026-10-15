@@ -14,3 +14,7 @@
 - `run_tirt_*.py`：历史低层示例和回归入口，供复现实验使用；新代码优先调用根目录的 `run.py` 或 `tirteb_run.py`。
 
 外部代码应从根目录启动，并通过 `from base...` 导入。不要在 `base/` 中写入运行结果、临时文件或 GUI 代码。
+
+## 当前光学、双热点与共享森林输运
+
+新增`optical.py`与光学冠层/行植/山地/城市模块；`thermal_crown.py`提供独立热红外源项的整冠双热点适配；`forest_exchange.py`共享山地4状态几何与求解器；`thermal_row.py`提供行间通道条件化几何。具体选择和边界见[当前模型说明](../docs/current_model.md)。

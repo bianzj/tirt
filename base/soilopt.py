@@ -1,5 +1,4 @@
 import math
-from functools import lru_cache
 
 import numpy as np
 
@@ -32,8 +31,7 @@ def bsm(coeff, soil_optical, soil_moisture):
         tav90_nw = calctav(90.0, nw)
         rbac = 1.0 - (1.0 - rdry) * (rdry * calctav(90.0, 2.0) / tav90_nw + 1.0 - rdry)
         p = 1.0 - tav90_nw / (nw * nw)
-        # Fresnel reflectance of the water film surface (SCOPE BSM: Rw = 1 - tav(40, nw)).
-        rw = 1.0 - calctav(40.0, nw)
+        rw = calctav(40.0, nw)
         radd = (1.0 - rw) * (1.0 - p) * rbac / (1.0 - p * rbac)
         mu = (smc - 0.05) / smcp
         fdry = math.exp(-mu)
@@ -47,7 +45,7 @@ def soil_emissivity(reflectance):
 
 
 def hapke_emissivity(view_zenith, K=1.0, albedo=0.05):
-    """TIRT's simplified Hapke/Thapke directional soil emissivity; ``albedo`` is the single-scattering albedo w."""
+    """TIRT's simplified Hapke/Thapke directional soil emissivity."""
     angle = np.asarray(view_zenith, dtype=float)
     K = max(float(K), 1.0e-8)
     albedo = np.clip(np.asarray(albedo, dtype=float), 0.0, 0.999999)
@@ -56,29 +54,6 @@ def hapke_emissivity(view_zenith, K=1.0, albedo=0.05):
     denominator = 1.0 + term * base_emissivity
     result = base_emissivity * (1.0 + term) / np.maximum(denominator, 1.0e-12)
     return np.clip(result, 0.0, 1.0)
-
-
-def _hapke_hemispherical_emissivity(gamma, K):
-    """Closed-form 2*integral(mu * eps(mu)) over [0, 1] for eps = gamma (1 + a mu) / (1 + a gamma mu), a = 2/K."""
-    b = 2.0 * gamma / K
-    integral = 0.5 - b / 3.0 if b < 1.0e-6 else 1.0 / b - math.log1p(b) / (b * b)
-    return 1.0 + 2.0 * (gamma - 1.0) * integral
-
-
-@lru_cache(maxsize=4096)
-def single_scattering_albedo(hemispherical_emissivity, K=1.0):
-    """Hapke single-scattering albedo w whose directional emissivity integrates to the given hemispherical emissivity."""
-    target = min(max(float(hemispherical_emissivity), 0.0), 1.0)
-    K = max(float(K), 1.0e-8)
-    low, high = 0.0, 1.0
-    for _ in range(60):
-        middle = 0.5 * (low + high)
-        if _hapke_hemispherical_emissivity(middle, K) < target:
-            low = middle
-        else:
-            high = middle
-    gamma = 0.5 * (low + high)
-    return 1.0 - gamma * gamma
 
 
 def hapke_reflectance(view_zenith, K=1.0, albedo=0.05):
@@ -119,10 +94,9 @@ def hapke_thermal_emissivity(
     dry_emissivity=0.955,
     wet_emissivity=0.99,
 ):
-    """Directional Hapke soil emissivity; ``albedo`` is the hemispherical TIR reflectance (1 - emissivity)."""
-    hemispherical_emissivity = 1.0 - float(albedo)
+    """Directional Hapke soil emissivity with an optional water correction."""
     if int(water_enabled) == 1:
-        hemispherical_emissivity = soil_tir_emissivity(
+        water_emissivity = soil_tir_emissivity(
             soil_moisture,
             enabled=1,
             dry_moisture=dry_moisture,
@@ -130,7 +104,10 @@ def hapke_thermal_emissivity(
             dry_emissivity=dry_emissivity,
             wet_emissivity=wet_emissivity,
         )
-    return hapke_emissivity(view_zenith, K, single_scattering_albedo(hemispherical_emissivity, float(K)))
+        # Kirchhoff's relation supplies the current TIR albedo independently
+        # of the optical BSM spectrum.
+        albedo = 1.0 - water_emissivity
+    return hapke_emissivity(view_zenith, K, albedo)
 
 
 __all__ = [

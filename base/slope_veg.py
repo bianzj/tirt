@@ -11,9 +11,11 @@ from .scatter import *
 from .proportion import *
 from .radiance import *
 from .emissivity import *
+from .vegetation import CanopyGeometry
 
 
-class Slope_Veg():
+class Slope_Veg(CanopyGeometry):
+    """Slope-local canopy geometry with the analytical scattering approximation."""
 
     ### structual variables
     rd = np.pi/180.0
@@ -22,13 +24,14 @@ class Slope_Veg():
     stand_density = 0.05
     hcr = 1.0
     rcr = 1.0
-    hcb = None
     leaf_average_inclination_angle = 53
     pza = 0
     paa = 0
     hspot = 0.2
     G = 0.5
     wl = 10.5
+    wavelength = 10.5
+    forestshape = np.asarray([3.0, 0.05, 1.0, 1.0, 0.2])
 
     ### optical and thermal variables
     number_band = 1
@@ -58,13 +61,13 @@ class Slope_Veg():
         self.paa = paa
 
 
-    def set_structure(self,lai,hspot,stand_density,hcr,rcr,hcb=None):
+    def set_structure(self,lai,hspot,stand_density,hcr,rcr):
         self.leaf_area_index = lai
         self.hspot = hspot
         self.stand_density = stand_density
         self.rcr = rcr
         self.hcr = hcr
-        self.hcb = hcb
+        self.forestshape = np.asarray([lai, stand_density, rcr, hcr, hspot])
 
     def set_thermal(self,temperature_soil_sunlit,temperature_soil_shaded,temperature_leaf_sunlit,temperature_leaf_shaded,):
         self.temperature_soil_shaded = np.asarray(temperature_soil_shaded)
@@ -125,100 +128,38 @@ class Slope_Veg():
         # self.solar_zenith_angle_norm,self.solar_azimuth_angle_norm = \
         #     slope1(szanew,self.solar_azimuth_angle,self.pza,self.paa)
 
-    def run(self,ifradiance = 0):
-
-        self.angle_transfer()
-        Tss = self.temperature_soil_sunlit
-        Tsh = self.temperature_soil_shaded
-        Tls = self.temperature_leaf_sunlit
-        Tlh = self.temperature_leaf_shaded
-        el = self.emissivity_leaf
-        es = self.emissivity_soil
-        wl = self.wavelength
-
-        ###----------------
-        ### slope structure
-        ###----------------
-        vza = self.viewing_zenith_angle_norm
-        sza = self.solar_zenith_angle_norm
-        saa = self.solar_azimuth_angle_norm
-        vaa = self.viewing_azimuth_angle_norm
-
-
-
-        sza0 = self.solar_zenith_angle
-        saa0 = self.solar_azimuth_angle
-        vsa = np.abs(vaa - saa)
-
-        pza = self.pza
-        paa = self.paa
+    def run(self, ifradiance=0):
+        vza, vaa = self.viewing_zenith_angle, self.viewing_azimuth_angle
+        sza, saa = self.solar_zenith_angle, self.solar_azimuth_angle
+        pza, paa = self.pza, self.paa
+        local_view_cos = (np.cos(np.deg2rad(pza)) * np.cos(np.deg2rad(vza)) +
+                          np.sin(np.deg2rad(pza)) * np.sin(np.deg2rad(vza)) *
+                          np.cos(np.deg2rad(vaa - paa)))
+        local_sun_cos = (np.cos(np.deg2rad(pza)) * np.cos(np.deg2rad(sza)) +
+                         np.sin(np.deg2rad(pza)) * np.sin(np.deg2rad(sza)) *
+                         np.cos(np.deg2rad(saa - paa)))
+        local_vza = np.clip(np.rad2deg(np.arccos(np.clip(local_view_cos, 0, 1))), 0, 89.999)
+        local_sza = np.clip(np.rad2deg(np.arccos(np.clip(local_sun_cos, 0, 1))), 0, 89.999)
+        proportions = self.local_canopy_proportions(vza, vaa, sza, saa, pza, paa)
+        emissivities = np.asarray([self.emissivity_soil, self.emissivity_soil,
+                                   self.emissivity_leaf, self.emissivity_leaf])
+        temperatures = np.asarray([self.temperature_soil_sunlit, self.temperature_soil_shaded,
+                                   self.temperature_leaf_sunlit, self.temperature_leaf_shaded])
+        component_radiance = planck(self.wavelength, temperatures)
+        direct, _ = emissivity_direct(proportions, emissivities)
         lai = self.leaf_area_index
-        hspot = self.hspot
-        std = self.stand_density
-        hcr = self.hcr
-        rcr = self.rcr
-        rd = self.rd
-
-        ###----------------
-        ### tree crown
-        ###----------------
-        theta = np.arctan(hcr / rcr * np.tan(np.deg2rad(vza)))
-        vzanew = theta / rd
-        theta = np.arctan(hcr / rcr * np.tan(np.deg2rad(sza)))
-        szanew = theta / rd
-
-        rd = np.pi/180.0
-        stdnew = std * np.cos(pza * rd)
-        hcrnew = hcr * np.cos(pza * rd)
-        hspotnew = hspot / np.cos(pza * rd)
-
-        stdnew = std
-        hspotnew = hspot
-        hcrnew = hcr
-        vzanew = vza
-        szanew = sza
-
-        ### Pleaf 和 Psoil 是植被和土壤组分的可视比例
-        ### Ksoil 和 Kleaf 是植被和土壤组分的可视比例的光照比例 K = Psunlitvisible / Pvisible
-
-        Ecom = np.asarray([es, es, el, el])
-        Tcom = np.asarray([Tss, Tsh, Tls, Tlh])
-        Rcom = planck(wl,Tcom)
-
-        Pcom = proportion_bidirectional_crown_one(lai, stdnew, hspotnew, hcrnew,rcr, vzanew, szanew, vsa, hcb=self.hcb)
-        Ecom_direct, Ecom_direct_sum = emissivity_direct(Pcom, Ecom)
-
-        ############---------------------------
-        ### to check if the  slope is all in the shadow
-        ### vector i and vector s under vector p
-        rd = np.pi/180.0
-        uii = np.cos(sza0 * rd)
-        uvv = np.cos(pza * rd)
-        sii = np.sin(sza0 * rd)
-        svv = np.sin(pza * rd)
-        upp = np.cos(np.abs(paa - saa0) * rd)
-        cosang = uvv * uii + svv * sii * upp
-        ang = np.arccos(cosang) / rd
-        ###------------------------------------
-        if np.min(cosang)<0:
-            Ecom_direct_new = np.vstack([np.zeros(self.number_angle),Ecom_direct[0]+Ecom_direct[1],np.zeros(self.number_angle),Ecom_direct[2]+Ecom_direct[3]])
+        empty = lai == 0.0 or (self.vegetation_model == "crown" and self.stand_density == 0.0)
+        if empty:
+            scatter = np.zeros_like(proportions)
         else:
-            Ecom_direct_new = Ecom_direct
-        Rcom_direct = radiance_direct(Ecom_direct_new, Rcom)
-        Ecom_scatter, Ecom_scatter_sum = emissivity_scatter_analytical(lai, el, es, vzanew, szanew)
-
-        if np.min(cosang) < 0:
-            Ecom_scatter_new = np.vstack([np.zeros(self.number_angle), Ecom_scatter[0] + Ecom_scatter[1], np.zeros(self.number_angle),
-                 Ecom_scatter[2] + Ecom_scatter[3]])
-        else:
-            Ecom_scatter_new = Ecom_scatter
-        Rcom_scatter = radiance_scatter(Ecom_scatter_new, Rcom)
-        self.radiance = Rcom_direct + Rcom_scatter
-
-        if ifradiance == 1:
-            return self.radiance
-        else:
-            return inv_planck(wl,self.radiance)
-
-
-
+            scatter, _ = emissivity_scatter_analytical(
+                lai, self.emissivity_leaf, self.emissivity_soil, local_vza, local_sza)
+        shadow = np.asarray(local_sun_cos).reshape(-1) <= 0.0
+        scatter[1, shadow] += scatter[0, shadow]
+        scatter[3, shadow] += scatter[2, shadow]
+        scatter[0, shadow] = scatter[2, shadow] = 0.0
+        self.radiance = (radiance_direct(direct, component_radiance) +
+                         radiance_scatter(scatter, component_radiance))
+        if not np.all(np.isfinite(self.radiance)):
+            raise FloatingPointError(f"Non-finite slope+{self.vegetation_model} radiance")
+        return self.radiance if ifradiance == 1 else inv_planck(self.wavelength, self.radiance)

@@ -25,9 +25,12 @@ if ! conda env list | awk '{print $1}' | grep -qx tirt; then
 fi
 
 conda activate tirt
-export TIRT_PYTHON="$(command -v python)"
+echo "TiRT 正在启动: http://127.0.0.1:8765/"
 
-if [ ! -x "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron" ]; then
-    npm install --no-audit --no-fund
-fi
-npm run desktop
+python gui/server.py --host 127.0.0.1 --port 8765 &
+SERVER_PID=$!
+trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+
+sleep 1
+open "http://127.0.0.1:8765/"
+wait "$SERVER_PID"

@@ -10,6 +10,7 @@ from .gap import *
 from .scatter import *
 from .emissivity import *
 from .radiance import *
+from .vegetation import vegetation_proportions
 
 class Hom():
 
@@ -96,11 +97,14 @@ class Hom():
         Tcom = np.asarray([Tss,Tsh,Tls,Tlh])
         Rcom = planck(self.wavelength, Tcom)
 
-        Pcom = proportion_bidirectional_hom_one(lai,hspot,vza,sza,vsa)
+        Pcom = vegetation_proportions("hom", lai, hspot, vza, vsa, sza, 0.0)
         Ecom_direct,Ecom_direct_sum = emissivity_direct(Pcom,Ecom)
         Rcom_direct = radiance_direct(Ecom_direct,Rcom)
 
-        Ecom_scatter,Ecom_scatter_sum = emissivity_scatter_analytical(lai, el, es, vza, sza)
+        if lai == 0.0:
+            Ecom_scatter = np.zeros_like(Pcom)
+        else:
+            Ecom_scatter,Ecom_scatter_sum = emissivity_scatter_analytical(lai, el, es, vza, sza)
         Rcom_scatter = radiance_scatter(Ecom_scatter,Rcom)
 
         self.radiance = Rcom_direct + Rcom_scatter

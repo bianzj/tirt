@@ -27,6 +27,7 @@ def radiance_direct(Ecom,Rcom):
     # Rcomnew = np.asarray([Ecom[k,:]*Rcom[k] for k in range(number_component)])
     Rcomnew = np.sum(Rcomnew,axis=0)
     return Rcomnew
+
 def radiance_scatter(Ecom,Rcom):
     Ecom =np.asarray(Ecom)
     Rcom = np.asarray(Rcom)

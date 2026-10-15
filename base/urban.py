@@ -1,113 +1,4 @@
-from functools import lru_cache
-
 import numpy as np
-
-from .physicsF import projection_overlap
-from .terrain import _unit, facet_emitter_sunlit_share
-
-
-def urban_wall_self_lit_shares(shapes, vza, vaa, sza, saa):
-    """Self-lit share of wall emitters seen by sensor-visible walls (k_ww) and by streets/roofs (k_ws).
-
-    Faces: normals laa, laa+180 (area alpha*H*L) and waa, waa+180 (area alpha*H*W).
-    """
-    rd = np.pi / 180.0
-    shapes = np.asarray(shapes, float)
-    az = np.concatenate([[laa, laa + 180.0, waa, waa + 180.0] for laa, waa in shapes[:, 4:6]]) * rd
-    normals = _unit(np.full(az.size, np.pi / 2), az)
-    area = np.concatenate([[a * h * l, a * h * l, a * h * w, a * h * w] for l, w, h, a in shapes[:, :4]])
-    v = _unit(np.asarray(vza * rd), np.asarray(vaa * rd))
-    s = _unit(np.asarray(sza * rd), np.asarray(saa * rd))
-    uniform = lambda theta: np.ones_like(theta)
-    recv = area * np.maximum(normals @ v, 0.0)
-    k_ww = facet_emitter_sunlit_share(normals, area, s, normals, recv, uniform) if recv.sum() > 0 else 0.0
-    k_ws = facet_emitter_sunlit_share(normals, area, s, np.array([[0.0, 0.0, 1.0]]), np.ones(1), uniform)
-    return k_ww, k_ws
-
-
-def _build_hemisphere():
-    rd = np.pi / 180.0
-    n_hza0 = 90
-    n_haa0 = 60
-    hza, haa = np.meshgrid(np.linspace(0, 89, n_hza0), np.linspace(0, 360, n_haa0))
-    hza = np.reshape(hza, -1)
-    haa = np.reshape(haa, -1)
-    dangle = np.pi / 2.0 / n_hza0
-    tantemp = np.tan(hza * rd)
-    fweiplus = np.sin(hza * rd) * dangle
-    fweiplusSum = np.sum(1.0 * fweiplus)
-    return tantemp, haa, fweiplus, fweiplusSum
-
-
-_HEMISPHERE = _build_hemisphere()
-
-
-def _add_wall(projStemp, alpha2, dh, length2, width2, laa2, waa2):
-    tantemp, haa = _HEMISPHERE[0], _HEMISPHERE[1]
-    rd = np.pi / 180.0
-    return projStemp + (alpha2 * (dh) * length2) * tantemp * np.abs(np.cos((haa - laa2) * rd)) + \
-        (alpha2 * (dh) * width2) * tantemp * np.abs(np.cos((haa - waa2) * rd))
-
-
-def urban_hemisphere_sums(shapes, n_part, ci):
-    shapes = np.asarray(shapes)
-    return _urban_hemisphere_sums(shapes.tobytes(), shapes.shape, shapes.dtype.str, n_part, float(ci))
-
-
-@lru_cache(maxsize=64)
-def _urban_hemisphere_sums(raw, shape, dtype, n_part, ci):
-    """View-independent hemisphere sums of the wall/street/roof scattering terms."""
-    shapes = np.frombuffer(raw, dtype=dtype).reshape(shape)
-    fweiplus, fweiplusSum = _HEMISPHERE[2], _HEMISPHERE[3]
-    theta = np.arctan(_HEMISPHERE[0])
-    haa = _HEMISPHERE[1]
-    rd = np.pi / 180.0
-    # Lambertian view factors: cos to the surface normal (sin(theta)*|cos(dphi)| for walls, cos(theta) for street/roof)
-    horizontal_weight = fweiplus * np.cos(theta)
-
-    def wall_weight(length1, width1, laa1, waa1):
-        return fweiplus * np.sin(theta) * (length1 * np.abs(np.cos((haa - laa1) * rd)) + width1 * np.abs(np.cos((haa - waa1) * rd)))
-
-    def visible(projStemp, weight):
-        return np.sum(1.0 * np.exp(-(projStemp) * ci) * weight) / np.sum(weight)
-
-    up_sums, down_sums = [], []
-    for shape1 in shapes:
-        dheight = shape1[2] / n_part
-        weight1 = wall_weight(shape1[0], shape1[1], shape1[4], shape1[5])
-        up_row, down_row = [], []
-        for kh in range(n_part):
-            heighttemp = dheight * (kh + 0.5)
-            projStemp = 0
-            for length2, width2, height2, alpha2, laa2, waa2 in shapes[:, :6]:
-                if (height2 - heighttemp > 0):
-                    projStemp = _add_wall(projStemp, alpha2, height2 - heighttemp, length2, width2, laa2, waa2)
-            up_row.append(visible(projStemp, weight1))
-            projStemp = 0
-            for length2, width2, height2, alpha2, laa2, waa2 in shapes[:, :6]:
-                if (height2 - heighttemp < 0):
-                    projStemp = _add_wall(projStemp, alpha2, height2, length2, width2, laa2, waa2)
-                if (height2 - heighttemp > 0):
-                    projStemp = _add_wall(projStemp, alpha2, heighttemp, length2, width2, laa2, waa2)
-            down_row.append(visible(projStemp, weight1))
-        up_sums.append(tuple(up_row))
-        down_sums.append(tuple(down_row))
-
-    projStemp = 0
-    for length2, width2, height2, alpha2, laa2, waa2 in shapes[:, :6]:
-        if (height2 - 0 > 0):
-            projStemp = _add_wall(projStemp, alpha2, height2 - 0, length2, width2, laa2, waa2)
-    street_sum = visible(projStemp, horizontal_weight)
-
-    roof_sums = []
-    for shape1 in shapes:
-        heighttemp = shape1[2]
-        projStemp = 0
-        for length2, width2, height2, alpha2, laa2, waa2 in shapes[:, :6]:
-            if (height2 - heighttemp >= 0):
-                projStemp = _add_wall(projStemp, alpha2, height2 - heighttemp, length2, width2, laa2, waa2)
-        roof_sums.append(visible(projStemp, horizontal_weight))
-    return tuple(up_sums), tuple(down_sums), street_sum, tuple(roof_sums)
 
 ### version 0.1 有错误，但是能跑
 ### version 0.5 有错误，修正了一部分，也能跑，这个版本投了iGARSS
@@ -173,7 +64,7 @@ class Urban:
         sza = self.sza
         saa = self.saa
         ci = self.ci
-        raa = np.asarray(np.abs(vaa - saa) % 360.0)
+        raa = np.asarray(vaa - saa)
 
 
         ind = raa>180
@@ -217,7 +108,7 @@ class Urban:
             projs_temp = projs_wall
             projs = projs + projs_temp
             proof = proof+ proj_roof
-        Overlapping = projection_overlap(tantv, tants, up)
+        Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
         partmax = np.max([projv,projs])
         partmin = np.min([projv,projs])
         # if (raa == 0) | (raa == 180):
@@ -229,7 +120,7 @@ class Urban:
         pStreatS = np.exp(-projs*ci)*(1-proof)
         pStreatV_sunlit = np.exp(-projvs*ci)*(1-proof)
         pStreatV_shaded = pStreatV - pStreatV_sunlit
-        pStreatV_sunlit_fraction = pStreatV_sunlit/pStreatV
+        pStreatV_sunlit_fraction = pStreatV_sunlit / pStreatV if pStreatV > 0.0 else 0.0
 
         ## 计算屋顶的可视比例
         pRoofV = 0
@@ -264,7 +155,7 @@ class Urban:
                                        height2m1 * width2 * tants * np.abs(np.cos((saa - waa2) * rd)))
                 projs_temp = projs_wall
                 projs = projs + projs_temp
-            Overlapping = projection_overlap(tantv, tants, up)
+            Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
             partmax = np.max([projv, projs])
             partmin = np.min([projv, projs])
             # if (raa == 0) | (raa==180):
@@ -284,7 +175,6 @@ class Urban:
 
         pWall_sunlit_fraction = 0
         pWall_sunlit_fraction_Weight = 0
-        wall_terms = []
         wsunlit = 0
         lsunlit = 0
         for kshape1 in range(n_shape):
@@ -326,7 +216,7 @@ class Urban:
                 projs = projs + projs_temp
             projv = projv / n_part
             projs = projs / n_part
-            Overlapping = projection_overlap(tantv, tants, up)
+            Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
             if Overlapping==0:
                 a = 1
             partmax = np.max([projv, projs])
@@ -367,16 +257,12 @@ class Urban:
             lsunlit_ratio = 1.0
             wsunlit_ratio = 1.0
 
-            wall_terms.append((projv*ci, (partmax - projv + partmin * Overlapping)*ci, alpha1 * (
-                        (height1 * length1 * np.abs(np.cos((vaa - laa1) * rd))) * lsunlit * lsunlit_ratio +
-                        (height1 * width1 * np.abs(np.cos((vaa - waa1) * rd)) * wsunlit*wsunlit_ratio)), alpha1 * (
-                        (height1 * length1 * np.abs(np.cos((vaa - laa1) * rd))) +
-                        (height1 * width1 * np.abs(np.cos((vaa - waa1) * rd))))))
-        # tan(vza) and the smallest gap exponent are common factors; removing them keeps the ratio finite as vza -> 90
-        shift = min(term[0] for term in wall_terms)
-        for projv_k, dprojvs_k, sunlit_k, area_k in wall_terms:
-            pWall_sunlit_fraction = pWall_sunlit_fraction + np.exp(-(projv_k - shift) - dprojvs_k) * sunlit_k
-            pWall_sunlit_fraction_Weight = pWall_sunlit_fraction_Weight + np.exp(-(projv_k - shift)) * area_k
+            pWall_sunlit_fraction = pWall_sunlit_fraction + alpha1 * gapvs_wall * (
+                        (height1 * length1 * tantv * np.abs(np.cos((vaa - laa1) * rd))) * lsunlit * lsunlit_ratio +
+                        (height1 * width1 * tantv * np.abs(np.cos((vaa - waa1) * rd)) * wsunlit*wsunlit_ratio))
+            pWall_sunlit_fraction_Weight = pWall_sunlit_fraction_Weight + alpha1 * gapv_wall * (
+                        (height1 * length1 * tantv * np.abs(np.cos((vaa - laa1) * rd))) +
+                        (height1 * width1 * tantv * np.abs(np.cos((vaa - waa1) * rd))))
         if pWall_sunlit_fraction_Weight !=0:
             pWall_sunlit_fraction = pWall_sunlit_fraction / pWall_sunlit_fraction_Weight
         else:
@@ -424,7 +310,7 @@ class Urban:
         sza = self.sza
         saa = self.saa
         ci = self.ci
-        raa = np.asarray(np.abs(vaa - saa) % 360.0)
+        raa = np.asarray(vaa - saa)
 
         ind = raa>180
         if np.sum(ind)>0:
@@ -467,7 +353,7 @@ class Urban:
             projs_temp = projs_wall
             projs = projs + projs_temp
             proof = proof+ proj_roof
-        Overlapping = projection_overlap(tantv, tants, up)
+        Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
         partmax = np.max([projv,projs])
         partmin = np.min([projv,projs])
         # if (raa == 0) | (raa == 180):
@@ -514,7 +400,7 @@ class Urban:
                                        height2m1 * width2 * tants * np.abs(np.cos((saa - waa2) * rd)))
                 projs_temp = projs_wall
                 projs = projs + projs_temp
-            Overlapping = projection_overlap(tantv, tants, up)
+            Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
             partmax = np.max([projv, projs])
             partmin = np.min([projv, projs])
             # if (raa == 0) | (raa==180):
@@ -534,7 +420,6 @@ class Urban:
 
         pWall_sunlit_fraction = 0
         pWall_sunlit_fraction_Weight = 0
-        wall_terms = []
         wsunlit = 0
         lsunlit = 0
         for kshape1 in range(n_shape):
@@ -576,7 +461,7 @@ class Urban:
                 projs = projs + projs_temp
             projv = projv / n_part
             projs = projs / n_part
-            Overlapping = projection_overlap(tantv, tants, up)
+            Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
             if Overlapping==0:
                 a = 1
             partmax = np.max([projv, projs])
@@ -617,16 +502,12 @@ class Urban:
             lsunlit_ratio = 1.0
             wsunlit_ratio = 1.0
 
-            wall_terms.append((projv*ci, (partmax - projv + partmin * Overlapping)*ci, alpha1 * (
-                        (height1 * length1 * np.abs(np.cos((vaa - laa1) * rd))) * lsunlit * lsunlit_ratio +
-                        (height1 * width1 * np.abs(np.cos((vaa - waa1) * rd)) * wsunlit*wsunlit_ratio)), alpha1 * (
-                        (height1 * length1 * np.abs(np.cos((vaa - laa1) * rd))) +
-                        (height1 * width1 * np.abs(np.cos((vaa - waa1) * rd))))))
-        # tan(vza) and the smallest gap exponent are common factors; removing them keeps the ratio finite as vza -> 90
-        shift = min(term[0] for term in wall_terms)
-        for projv_k, dprojvs_k, sunlit_k, area_k in wall_terms:
-            pWall_sunlit_fraction = pWall_sunlit_fraction + np.exp(-(projv_k - shift) - dprojvs_k) * sunlit_k
-            pWall_sunlit_fraction_Weight = pWall_sunlit_fraction_Weight + np.exp(-(projv_k - shift)) * area_k
+            pWall_sunlit_fraction = pWall_sunlit_fraction + alpha1 * gapvs_wall * (
+                        (height1 * length1 * tantv * np.abs(np.cos((vaa - laa1) * rd))) * lsunlit * lsunlit_ratio +
+                        (height1 * width1 * tantv * np.abs(np.cos((vaa - waa1) * rd)) * wsunlit*wsunlit_ratio))
+            pWall_sunlit_fraction_Weight = pWall_sunlit_fraction_Weight + alpha1 * gapv_wall * (
+                        (height1 * length1 * tantv * np.abs(np.cos((vaa - laa1) * rd))) +
+                        (height1 * width1 * tantv * np.abs(np.cos((vaa - waa1) * rd))))
         if pWall_sunlit_fraction_Weight !=0:
             pWall_sunlit_fraction = pWall_sunlit_fraction / pWall_sunlit_fraction_Weight
         else:
@@ -665,7 +546,7 @@ class Urban:
         sza = self.sza
         saa = self.saa
         ci = self.ci
-        raa = np.asarray(np.abs(vaa - saa) % 360.0)
+        raa = np.asarray(vaa - saa)
 
         ind = raa>180
         if np.sum(ind)>0:
@@ -720,7 +601,7 @@ class Urban:
             projs = projs + projs_temp
 
         ### calculate the sunlitfraction, this is the overlappling increatsing part, hotspot O = 0
-        Overlapping = projection_overlap(tantv, tants, up)
+        Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
         partmax = np.max([projv, projs])
         partmin = np.min([projv, projs])
         # if (raa == 0) | (raa==180):
@@ -738,8 +619,23 @@ class Urban:
         ###-------------------------------
         ### 墙壁的计算
         ###-------------------------------
+        ### 半球投影的归一化
         if2 = 1.0
-        up_sums, down_sums, street_sum, roof_sums = urban_hemisphere_sums(shapes, n_part, ci)
+        ### 上半球的方向
+        n_hza0 = 90
+        n_haa0 = 60
+        hza0 = np.linspace(0, 89, n_hza0) # hemisphere space
+        haa0 = np.linspace(0, 360, n_haa0)
+        hza,haa = np.meshgrid(hza0,haa0)
+        hza = np.reshape(hza,-1)  ### to linear
+        haa = np.reshape(haa,-1)  ### to linear
+
+        ### step of hza in rad unit rather zhan degree unit
+        dangle = np.pi/2.0/n_hza0 # 角度的步长
+        tantemp = np.tan(hza * rd)   ### 半球的正切
+        # fweiplus = np.sin(hza*rd)*dangle *np.cos(hza*rd) # 角度的归一化方式, 一般是0.5
+        fweiplus = np.sin(hza * rd) * dangle  ##### 一般是1.0
+        fweiplusSum = np.sum(if2*fweiplus)  ### 权重累计，如果没有meshgrid，应该是0.5，现在总和是0.5*n_haa0
 
         ### 墙壁在观测方向的投影面积
         tempSv = (np.sum(shapes[:, 3] * shapes[:, 2]  * shapes[:, 0] * tantv * np.abs(np.cos((vaa - shapes[:, 4]) * rd))) +
@@ -794,11 +690,42 @@ class Urban:
 
                     if(height2 - heighttemp>0):
                         proj_roof = proj_roof + width2 * length2 * alpha2
+                        projStemp = projStemp + (alpha2 * (height2-heighttemp) *length2)* \
+                                     tantemp * np.abs(np.cos((haa - laa2) * rd)) + \
+                                     (alpha2 * (height2-heighttemp) *width2) * \
+                                     tantemp * np.abs(np.cos((haa - waa2) * rd))
+
                         tempSv = tempSv + (alpha2 * (height2-heighttemp) *length2)* tantv * np.abs(np.cos((vaa - laa2) * rd)) + \
                                 (alpha2 * (height2-heighttemp) *width2)* tantv * np.abs(np.cos((vaa - waa2) * rd))
                 ftempv = np.exp(-(tempSv)*ci)
-                eu = eu + up_sums[kshape1][kh] *tempdS*ftempv
-                ed = ed + down_sums[kshape1][kh] * tempdS * ftempv
+                ftemp = np.exp(-(projStemp)*ci)
+                eu = eu + np.sum(if2 *ftemp*fweiplus/ fweiplusSum) *tempdS*ftempv
+
+                projStemp = 0
+                proj_roof = 0
+                for kshape2 in range(n_shape):
+                    shape2 = shapes[kshape2]
+                    length2 = shape2[0]
+                    width2 = shape2[1]
+                    height2 = shape2[2]
+                    alpha2 = shape2[3]
+                    laa2 = shape2[4]
+                    waa2 = shape2[5]
+
+                    if (height2 - heighttemp < 0):
+                        proj_roof = proj_roof + width2 * length2 * alpha2
+                        projStemp = projStemp  + (alpha2 * (height2) *length2)* \
+                                     tantemp * np.abs(np.cos((haa - laa2) * rd)) + \
+                                     (alpha2 * (height2) *width2) * \
+                                     tantemp * np.abs(np.cos((haa - waa2) * rd))
+                    if (height2 - heighttemp > 0):
+                        proj_roof = proj_roof + width2 * length2 * alpha2
+                        projStemp = projStemp + (alpha2 * (heighttemp) * length2) * \
+                                    tantemp * np.abs(np.cos((haa - laa2) * rd)) + \
+                                    (alpha2 * (heighttemp) * width2) * \
+                                    tantemp * np.abs(np.cos((haa - waa2) * rd))
+                ftemp = np.exp(-(projStemp)*ci)
+                ed = ed + np.sum(if2 * ftemp * fweiplus/ fweiplusSum) * tempdS * ftempv
 
 
         if i0v == 0:
@@ -830,13 +757,18 @@ class Urban:
 
             if (height2 - heighttemp> 0):
                 proj_roof = proj_roof + width2 * length2 * alpha2
+                projStemp = projStemp + (alpha2 * (height2 - heighttemp) * length2) * \
+                            tantemp * np.abs(np.cos((haa - laa2) * rd)) + \
+                            (alpha2 * (height2 - heighttemp) * width2) * \
+                            tantemp * np.abs(np.cos((haa - waa2) * rd))
                 tempSv = tempSv + (alpha2 * (height2 - heighttemp) * length2) * tantv * np.abs(
                         np.cos((vaa - laa2) * rd)) + \
                          (alpha2 * (height2 - heighttemp) * width2) * tantv * np.abs(np.cos((vaa - waa2) * rd))
 
+        ftemp = np.exp(-(projStemp)*ci)
         ftempv = np.exp(-(tempSv)*ci) ### 到达该体元的概率
         tempds = 1-proj_roof
-        ws = (1-street_sum) * ftempv * tempds
+        ws = (1-np.sum(if2*(ftemp) * fweiplus/ fweiplusSum)) * ftempv * tempds
 
 
         ### 从墙壁到达2屋顶，然后从屋顶反射到达天空的概率
@@ -862,14 +794,20 @@ class Urban:
                 if (height2 - heighttemp >= 0):
                     ### 屋顶的总面积，高于所针对的屋顶
                     proj_roof = proj_roof + width2 * length2 * alpha2
+                    ### 墙壁的投影面积，高于所针对的屋顶
+                    projStemp = projStemp + (alpha2 * (height2 - heighttemp) * length2) * \
+                                tantemp * np.abs(np.cos((haa - laa2) * rd)) + \
+                                (alpha2 * (height2 - heighttemp) * width2) * \
+                                tantemp * np.abs(np.cos((haa - waa2) * rd))
                     ### 屋顶的位置被看到的概率
                     tempSv = tempSv + (alpha2 * (height2 - heighttemp) * length2) * tantv * np.abs(
                              np.cos((vaa - laa2) * rd)) + \
                              (alpha2 * (height2 - heighttemp) * width2) * tantv * \
                              np.abs(np.cos((vaa - waa2) * rd))
+            ftemp = np.exp(-(projStemp)*ci)
             tempdS = length1 * width1 * alpha1*1.0/(1-proj_roof)
             ftempv = np.exp(-(tempSv)*ci)*(1-proj_roof)
-            wr = wr + (1-roof_sums[kshape1]) * tempdS * ftempv
+            wr = wr + (1-np.sum(if2 * (ftemp) * fweiplus/fweiplusSum)) * tempdS * ftempv
 
 
 
@@ -905,14 +843,12 @@ class Urban:
             area = area + (alpha1 * (height1) * length1) * tants * np.abs(np.cos((saa - laa1) * rd)) + \
             (alpha1 * (height1) * width1) * tants * np.abs(np.cos((saa - waa1) * rd))
         if area > 0:
-            fts = (1 - np.exp(-area*ci)) / (area*ci)
+            fts = (1 - np.exp(-area)*ci) / (area)
 
         # eww = 0
         # ews = 0
         emw = ews + eww+ewr
-        # path-specific sunlit share of the emitting walls x mean wall sun gap fts (validated against Monte Carlo)
-        k_ww, k_ws = urban_wall_self_lit_shares(shapes, vza, vaa, sza, saa)
-        emws = (eww * k_ww + (ews + ewr) * k_ws) * fts
+        emws = emw * fts*vhraa
         emwh = emw - emws
         ems = esw
         emss = ems * pStreatS

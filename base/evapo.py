@@ -4,12 +4,7 @@ from .eb import CP, MAIR, MH20, RHOA, SIGMASB, latent_heat, saturation_vapor_pre
 
 
 DT_SECONDS = 3600.0
-# Memory of the semi-infinite conduction convolution, in seconds of model time.
-HISTORY_SECONDS = 48 * 3600.0
-
-
-def _history_length(dt):
-    return max(int(math.ceil(HISTORY_SECONDS / max(float(dt), 1.0))), 1)
+HISTORY_LENGTH = 12
 
 
 def _method(value, default="direct"):
@@ -37,16 +32,11 @@ def _component_flux(state, name, temp, ra, rs, incoming, factor, qa, e_to_q, ta,
 
 
 def _thermal_inertia(settings, urban=False):
-    if urban:
-        # urban_cs is a volumetric heat capacity (J m-3 K-1).
-        return math.sqrt(max(
-            float(settings.get("urban_cs", 1000000.0)) * float(settings.get("urban_lambda", 1.5)),
-            0.0,
-        ))
+    prefix = "urban_" if urban else "soil_"
     return math.sqrt(max(
-        float(settings.get("soil_cs", 1180.0))
-        * float(settings.get("soil_rhos", 1100.0))
-        * float(settings.get("soil_lambda", 1.55)),
+        float(settings.get(prefix + "cs", 1180.0 if not urban else 1000000.0))
+        * float(settings.get(prefix + "rhos", 1100.0 if not urban else 1800.0))
+        * float(settings.get(prefix + "lambda", 1.55 if not urban else 1.5)),
         0.0,
     ))
 
@@ -58,7 +48,7 @@ def _surface_differential(settings, state, temp, history_key, urban=False):
     dt = max(float(state.get("dt_seconds", DT_SECONDS)), 1.0)
     current_c = temp - 273.15
     ssum = 0.0
-    for index, previous in enumerate(history):
+    for index, previous in enumerate(history[:HISTORY_LENGTH]):
         previous_c = float(previous) - 273.15
         elapsed = dt * (index + 1.0)
         weight = math.sqrt(elapsed) - math.sqrt(max(elapsed - dt, 0.0))
@@ -73,13 +63,13 @@ def _surface_differential(settings, state, temp, history_key, urban=False):
 
 def _depth_differential(settings, state, temp, profile_key, urban=False):
     profile = list(state.get(profile_key, ()))
-    if not profile:
+    if len(profile) < 2:
         return 0.0
     prefix = "urban_" if urban else "soil_"
     dz = max(float(settings.get(prefix + "depth_step", 0.05)), 1.0e-3)
     conductivity = max(float(settings.get(prefix + "lambda", 1.55 if not urban else 1.5)), 1.0e-8)
-    # profile[0] holds the previous surface temperature; the gradient uses the first subsurface node.
-    return conductivity * (temp - float(profile[1] if len(profile) > 1 else profile[0])) / dz
+    # Node 0 is the surface boundary; node 1 is the first subsurface node.
+    return conductivity * (temp - float(profile[1])) / dz
 
 
 def _envelope_differential(settings, state, temp, profile_key):
@@ -118,10 +108,8 @@ def _envelope_differential(settings, state, temp, profile_key):
     return layer_fluxes[0]
 
 
-def _heat_flux(settings, state, temp, net, method, history_key, profile_key, fraction, urban=False, name=None, emissivity=1.0):
+def _heat_flux(settings, state, temp, net, method, history_key, profile_key, fraction, urban=False):
     method = _method(method)
-    if name:
-        state["dGdT_" + name] = _heat_flux_derivative(settings, state, temp, method, profile_key, fraction, urban, emissivity)
     if method == "direct":
         return float(net) * float(fraction)
     if method == "surface":
@@ -129,22 +117,6 @@ def _heat_flux(settings, state, temp, net, method, history_key, profile_key, fra
     if urban and ("roof" in profile_key or "wall" in profile_key):
         return _envelope_differential(settings, state, temp, profile_key)
     return _depth_differential(settings, state, temp, profile_key, urban=urban)
-
-
-def _heat_flux_derivative(settings, state, temp, method, profile_key, fraction, urban, emissivity):
-    if method == "direct":
-        # G = fraction*N with dN/dT = -4*eps*sigma*T^3, so G lowers the Jacobian.
-        return -float(fraction) * 4.0 * max(float(emissivity), 0.0) * SIGMASB * float(temp) ** 3
-    if method == "surface":
-        dt = max(float(state.get("dt_seconds", DT_SECONDS)), 1.0)
-        return 2.0 * _thermal_inertia(settings, urban=urban) / (math.sqrt(math.pi) * math.sqrt(dt))
-    if urban and ("roof" in profile_key or "wall" in profile_key):
-        layers = max(int(settings.get("urban_wall_layers", 3)), 1)
-        thickness = max(float(settings.get("urban_wall_thickness", 0.5)), 1.0e-3)
-        return max(float(settings.get("urban_lambda", 1.5)), 1.0e-8) * layers / thickness
-    prefix = "urban_" if urban else "soil_"
-    dz = max(float(settings.get(prefix + "depth_step", 0.05)), 1.0e-3)
-    return max(float(settings.get(prefix + "lambda", 1.55 if not urban else 1.5)), 1.0e-8) / dz
 
 
 def _incoming(netrad, component, sunlit):
@@ -322,21 +294,17 @@ def evapotranspiration(settings, meteo, state, netrad):
     for key in ("LE_leafsunlit", "LE_leafshaded", "H_leafsunlit", "H_leafshaded", "N_leafsunlit", "N_leafshaded"):
         state.setdefault(key, 0.0)
     if settings["lai"] > 0.0:
-        leaf_emissivity = settings["leaf_emissivity"]
-        _component_flux(state, "leafsunlit", state["Tls"], state["raa_leaf"], state["rssunlit"], _incoming(netrad, "leaf", True), 2.0, qa, e_to_q, ta, emissivity=leaf_emissivity)
-        _component_flux(state, "leafshaded", state["Tlh"], state["raa_leaf"], state["rsshaded"], _incoming(netrad, "leaf", False), 2.0, qa, e_to_q, ta, emissivity=leaf_emissivity)
-    soil_emissivity = settings["soil_emissivity"]
-    _component_flux(state, "soilsunlit", state["Tss"], state["raa_soil"], state["rss"], _incoming(netrad, "soil", True), 1.0, qa, e_to_q, ta, emissivity=soil_emissivity)
-    _component_flux(state, "soilshaded", state["Tsh"], state["raa_soil"], state["rss"], _incoming(netrad, "soil", False), 1.0, qa, e_to_q, ta, emissivity=soil_emissivity)
+        _component_flux(state, "leafsunlit", state["Tls"], state["raa_leaf"], state["rssunlit"], _incoming(netrad, "leaf", True), 2.0, qa, e_to_q, ta)
+        _component_flux(state, "leafshaded", state["Tlh"], state["raa_leaf"], state["rsshaded"], _incoming(netrad, "leaf", False), 2.0, qa, e_to_q, ta)
+    _component_flux(state, "soilsunlit", state["Tss"], state["raa_soil"], state["rss"], _incoming(netrad, "soil", True), 1.0, qa, e_to_q, ta)
+    _component_flux(state, "soilshaded", state["Tsh"], state["raa_soil"], state["rss"], _incoming(netrad, "soil", False), 1.0, qa, e_to_q, ta)
     state["G_sunlit"] = _heat_flux(
         settings, state, state["Tss"], state["N_soilsunlit"], settings.get("soil_heat_method", "direct"),
         "surface_history_sunlit", "depth_profile_sunlit", settings.get("soil_heat_fraction", 0.25),
-        name="soilsunlit", emissivity=soil_emissivity,
     )
     state["G_shaded"] = _heat_flux(
         settings, state, state["Tsh"], state["N_soilshaded"], settings.get("soil_heat_method", "direct"),
         "surface_history_shaded", "depth_profile_shaded", settings.get("soil_heat_fraction", 0.25),
-        name="soilshaded", emissivity=soil_emissivity,
     )
     return state
 
@@ -380,7 +348,6 @@ def urban_evapotranspiration(settings, meteo, state, netrad):
                     else settings.get("soil_heat_fraction", 0.25)
                 ),
                 urban=component in {"roof", "wall"},
-                name=name, emissivity=emissivity[component],
             )
     for suffix, sunlit in (("sunlit", True), ("shaded", False)):
         state[f"SW_direct_leaf_{suffix}"] = float(netrad.get("directVrad_leaf", 0.0)) if sunlit else 0.0
@@ -416,38 +383,13 @@ def urban_evapotranspiration(settings, meteo, state, netrad):
     return state
 
 
-def _implicit_profile_step(old, surface, factor):
-    """Backward-Euler conduction step with fixed top (surface) and bottom nodes; stable for any factor."""
-    n = len(old)
-    interior = n - 2
-    if interior <= 0:
-        return [surface] + old[1:]
-    lower = [-factor] * interior
-    diag = [1.0 + 2.0 * factor] * interior
-    upper = [-factor] * interior
-    rhs = old[1:-1]
-    rhs[0] += factor * surface
-    rhs[-1] += factor * old[-1]
-    for i in range(1, interior):
-        m = lower[i] / diag[i - 1]
-        diag[i] -= m * upper[i - 1]
-        rhs[i] -= m * rhs[i - 1]
-    solution = [0.0] * interior
-    solution[-1] = rhs[-1] / diag[-1]
-    for i in range(interior - 2, -1, -1):
-        solution[i] = (rhs[i] - upper[i] * solution[i + 1]) / diag[i]
-    return [surface] + solution + [old[-1]]
-
-
 def update_thermal_history(settings, state):
-    dt = max(float(state.get("dt_seconds", DT_SECONDS)), 1.0)
-    keep = _history_length(dt) - 1
     for temp_key, history_key in (("Tss", "surface_history_sunlit"), ("Tsh", "surface_history_shaded")):
-        state[history_key] = [float(state[temp_key])] + list(state.get(history_key, ()))[:keep]
+        state[history_key] = [float(state[temp_key])] + list(state.get(history_key, ()))[:HISTORY_LENGTH - 1]
     for component, temp_sun, temp_shade in (("roof", "Troof_sunlit", "Troof_shaded"), ("wall", "Twall_sunlit", "Twall_shaded"), ("street", "Tss", "Tsh")):
         for suffix, key in (("sunlit", temp_sun), ("shaded", temp_shade)):
             history_key = "surface_history_" + component + "_" + suffix
-            state[history_key] = [float(state[key])] + list(state.get(history_key, ()))[:keep]
+            state[history_key] = [float(state[key])] + list(state.get(history_key, ()))[:HISTORY_LENGTH - 1]
 
     profiles = (
         ("Tss", "depth_profile_sunlit"), ("Tsh", "depth_profile_shaded"),
@@ -455,6 +397,7 @@ def update_thermal_history(settings, state):
         ("Twall_sunlit", "depth_profile_wall_sunlit"), ("Twall_shaded", "depth_profile_wall_shaded"),
         ("Tss", "depth_profile_street_sunlit"), ("Tsh", "depth_profile_street_shaded"),
     )
+    dt = max(float(state.get("dt_seconds", DT_SECONDS)), 1.0)
     for temp_key, profile_key in profiles:
         surface = float(state[temp_key])
         if "roof" in profile_key or "wall" in profile_key:
@@ -474,14 +417,20 @@ def update_thermal_history(settings, state):
             profile[-1] = internal
             state[profile_key] = profile
             continue
-        dz = max(float(settings.get("soil_depth_step", 0.05)), 1.0e-3)
-        # soil_cs is a specific heat (J kg-1 K-1), so diffusivity = lambda / (rho * cs).
-        volumetric = max(float(settings.get("soil_cs", 1180.0)) * float(settings.get("soil_rhos", 1100.0)), 1.0e-6)
-        diffusivity = max(float(settings.get("soil_lambda", 1.55)), 0.0) / volumetric
+        urban = "roof" in profile_key or "wall" in profile_key
+        prefix = "urban_" if urban else "soil_"
+        dz = max(float(settings.get(prefix + "depth_step", 0.05)), 1.0e-3)
+        diffusivity = max(float(settings.get(prefix + "lambda", 1.5 if urban else 1.55)), 0.0) / max(float(settings.get(prefix + "cs", 1000000.0 if urban else 1180.0)), 1.0e-6)
         profile = list(state.get(profile_key, (surface,) * 4))
         if len(profile) < 4:
             profile.extend([profile[-1] if profile else surface] * (4 - len(profile)))
-        state[profile_key] = _implicit_profile_step([float(value) for value in profile], surface, diffusivity * dt / (dz * dz))
+        old = profile[:]
+        profile[0] = surface
+        factor = min(0.45, diffusivity * dt / (dz * dz))
+        for index in range(1, len(profile) - 1):
+            profile[index] = old[index] + factor * (old[index - 1] - 2.0 * old[index] + old[index + 1])
+        profile[-1] = old[-1]
+        state[profile_key] = profile
 
 
 __all__ = ["evapotranspiration", "urban_evapotranspiration", "update_thermal_history"]

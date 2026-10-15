@@ -1,5 +1,3 @@
-from functools import lru_cache
-
 import numpy as np
 import scipy.integrate as sci
 from .gap import *
@@ -55,120 +53,37 @@ def proportion_directional_row_one(lai,row_width, row_blank, row_height, xza, xa
 
 
 
-def _spheroid_interval(p, d, hcr, rcr):
-    """Distances t >= 0 where rays p + t*d are inside the spheroid x^2/rcr^2 + y^2/rcr^2 + z^2/hcr^2 <= 1."""
-    scale = np.array([1.0 / rcr, 1.0 / rcr, 1.0 / hcr])
-    ps, ds = p * scale, d * scale
-    a = ds @ ds
-    b = ps @ ds
-    disc = b * b - a * (np.sum(ps * ps, axis=-1) - 1.0)
-    root = np.sqrt(np.maximum(disc, 0.0))
-    t1 = np.maximum((-b - root) / a, 0.0)
-    t2 = np.maximum((-b + root) / a, t1)
-    hit = disc > 0.0
-    return np.where(hit, t1, 0.0), np.where(hit, t2, 0.0)
-
-
-def _crown_depths(p, view, sun, extinction, kappa, hcr, rcr):
-    """Optical depths through one crown of the view ray, the sun ray and both together, rays leaving offsets p."""
-    (dv, cv), (ds, cs) = view, sun
-    t1v, t2v = _spheroid_interval(p, dv, hcr, rcr)
-    t1s, t2s = _spheroid_interval(p, ds, hcr, rcr)
-    tau_v, tau_s = extinction * (t2v - t1v), extinction * (t2s - t1s)
-    # Leaf-scale (Kuusk) correlation where both rays are inside the crown, decaying with height above the ray origin.
-    low = np.maximum(t1v * cv, t1s * cs)
-    high = np.maximum(np.minimum(t2v * cv, t2s * cs), low)
-    shared = (np.exp(-kappa * low) - np.exp(-kappa * high)) / kappa if kappa > 1.0e-12 else high - low
-    overlap = np.minimum(extinction / np.sqrt(cv * cs) * shared, np.minimum(tau_v, tau_s))
-    return tau_v, tau_s, tau_v + tau_s - overlap
-
-
-def _crown_offsets(z, centre_height, hcr, rcr, tan_x, direction, n_cross=24, n_max=96):
-    """Per height z: crown-centre offsets (as p = ray origin - crown centre) that can intersect a ray leaving z, and the cell area."""
-    h_low, h_high = np.maximum(centre_height - hcr - z, 0.0), centre_height + hcr - z
-    s_low, span = h_low * tan_x - rcr, (h_high - h_low) * tan_x + 2.0 * rcr
-    n_long = int(np.clip(round(n_cross * span.max() / (2.0 * rcr)), n_cross, n_max))
-    S = (s_low[:, None] + (np.arange(n_long) + 0.5) / n_long * span[:, None])[:, :, None]
-    N = rcr * ((np.arange(n_cross) + 0.5) * 2.0 / n_cross - 1.0)[None, None, :]
-    S, N = np.broadcast_arrays(S, N)
-    Z = np.broadcast_to((z - centre_height)[:, None, None], S.shape)
-    p = np.stack([-(S * direction[0] - N * direction[1]), -(S * direction[1] + N * direction[0]), Z], axis=-1)
-    return p, span / n_long * 2.0 * rcr / n_cross
-
-
-_CROWN_LEVELS, _CROWN_LEVEL_WEIGHTS = np.polynomial.legendre.leggauss(8)
-_CROWN_RINGS = np.sqrt((np.arange(5) + 0.5) / 5)
-_CROWN_PHI = (np.arange(12) + 0.5) * 2.0 * np.pi / 12
-
-
-@lru_cache(maxsize=8192)
-def _crown_fractions(lai, std, hspot, hcr, rcr, hcb, vza, sza, vsa, G):
-    if lai <= 0.0 or std <= 0.0:
-        return 1.0, 0.0, 0.0, 0.0
-    rd = np.pi / 180.0
-    centre = hcb + hcr
-    extinction = G * lai / (std * 4.0 / 3.0 * np.pi * rcr * rcr * hcr)
-    cv, cs = np.cos(vza * rd), np.cos(sza * rd)
-    tan_v, tan_s = np.tan(vza * rd), np.tan(sza * rd)
-    ev, es = np.array([np.cos(vsa * rd), np.sin(vsa * rd)]), np.array([1.0, 0.0])
-    view = (np.array([np.sin(vza * rd) * ev[0], np.sin(vza * rd) * ev[1], cv]), cv)
-    sun = (np.array([np.sin(sza * rd), 0.0, cs]), cs)
-    # hspot = leaf size / crown depth; SAIL scaling of the correlation length, as in hotspot_layer
-    kappa = np.hypot(*(tan_v * ev - tan_s * es)) * 2.0 / (G / cv + G / cs) / max(hspot * 2.0 * hcr, 1.0e-9)
-
-    # Integrals over Poisson crown positions of (1 - transmittance), for the view ray and the view+sun pair leaving each height:
-    # the ground first, then the Gauss levels of a crown.
-    heights = np.concatenate([[0.0], centre + _CROWN_LEVELS * hcr])
-    pv, area_v = _crown_offsets(heights, centre, hcr, rcr, tan_v, ev)
-    ps, area_s = _crown_offsets(heights, centre, hcr, rcr, tan_s, es)
-    # 1 - Tv - Ts + Tvs is non-zero only for crowns hit by both rays, so it is summed over the shorter strip only
-    if tan_v <= tan_s:
-        tau_v, tau_s, tau_vs = _crown_depths(pv, view, sun, extinction, kappa, hcr, rcr)
-        j_v = np.sum(-np.expm1(-tau_v), axis=(1, 2)) * area_v
-        t1, t2 = _spheroid_interval(ps, sun[0], hcr, rcr)
-        j_s = np.sum(-np.expm1(-extinction * (t2 - t1)), axis=(1, 2)) * area_s
-        area = area_v
-    else:
-        tau_v, tau_s, tau_vs = _crown_depths(ps, view, sun, extinction, kappa, hcr, rcr)
-        j_s = np.sum(-np.expm1(-tau_s), axis=(1, 2)) * area_s
-        t1, t2 = _spheroid_interval(pv, view[0], hcr, rcr)
-        j_v = np.sum(-np.expm1(-extinction * (t2 - t1)), axis=(1, 2)) * area_v
-        area = area_s
-    j_vs = j_v + j_s - np.sum(-np.expm1(-tau_v) - np.expm1(-tau_s) + np.expm1(-tau_vs), axis=(1, 2)) * area
-
-    soil = float(gap_probability_crown_analytical(lai, std, hcr, rcr, vza, G))
-    soil_sunlit = soil * float(np.exp(-std * (j_vs[0] - j_v[0])))
-
-    # Leaves: own crown transmittance times the Poisson gap of the other crowns, integrated over the crown volume.
-    radius = rcr * np.sqrt(np.maximum(1.0 - _CROWN_LEVELS ** 2, 0.0))
-    ring = radius[:, None] * _CROWN_RINGS[None, :]
-    x = (ring[:, :, None] * np.cos(_CROWN_PHI)).reshape(radius.size, -1)
-    y = (ring[:, :, None] * np.sin(_CROWN_PHI)).reshape(radius.size, -1)
-    own = np.stack([x, y, np.broadcast_to((_CROWN_LEVELS * hcr)[:, None], x.shape)], axis=-1)
-    own_v, _, own_vs = _crown_depths(own, view, sun, extinction, kappa, hcr, rcr)
-    volume = np.pi * radius ** 2 * _CROWN_LEVEL_WEIGHTS * hcr
-    with np.errstate(divide="ignore"):
-        log_v = np.log(volume * np.mean(np.exp(-own_v), axis=1)) - std * j_v[1:]
-        log_vs = np.log(volume * np.mean(np.exp(-own_vs), axis=1)) - std * j_vs[1:]
-    shift = np.max(log_v)
-    sunlit_share = min(float(np.sum(np.exp(log_vs - shift)) / np.sum(np.exp(log_v - shift))), 1.0)
-    leaf = 1.0 - soil
-    return soil_sunlit, soil - soil_sunlit, leaf * sunlit_share, leaf * (1.0 - sunlit_share)
-
-
-def proportion_bidirectional_crown_one(lai, std, hspot, hcr, rcr, vza, sza, vsa, G = 0.5, hcb = None):
+def proportion_bidirectional_crown_one(lai, std, hspot, hcr, rcr, vza, sza, vsa, G = 0.5):
     '''
-    离散树冠四组分比例：树冠为泊松分布的椭球（冠底高度 hcb，默认 hcr），冠内为浑浊介质。
-    土壤和叶片的观测/太阳双向透过率对树冠位置精确积分，包含树冠尺度的阴影重叠和叶片尺度的热点。
+    参数化方法，计算森林冠层四组分的可视比例
+    :param lai:
+    :param std:
+    :param hspot:
+    :param hcr:
+    :param rcr:
+    :param vza:
+    :param sza:
+    :param vsa:
+    :param G:
+    :return:
     '''
-    hcb = hcr if hcb is None else max(float(hcb), 0.0)
-    vza, sza, vsa = np.broadcast_arrays(*(np.asarray(value, dtype=float) for value in (vza, sza, vsa)))
-    results = np.zeros((4,) + vza.shape)
-    for index in np.ndindex(vza.shape):
-        relative = abs((float(vsa[index]) + 180.0) % 360.0 - 180.0)
-        results[(slice(None),) + index] = _crown_fractions(float(lai), float(std), float(hspot), float(hcr), float(rcr), hcb,
-                                                           float(vza[index]), float(sza[index]), relative, float(G))
-    return results[0], results[1], results[2], results[3]
+
+    # The logarithmic effective-clumping calculation needs finite optical
+    # depth even when a horizon gap underflows to zero.
+    bv = np.clip(gap_probability_crown_analytical(lai, std, hcr, rcr, vza), np.finfo(float).tiny, 1.0)
+    bi = np.clip(gap_probability_crown_analytical(lai, std, hcr, rcr, sza), np.finfo(float).tiny, 1.0)
+    Psoil = bv
+    Pleaf = 1 - Psoil
+    uv = np.cos(np.deg2rad(vza))
+    ui = np.cos(np.deg2rad(sza))
+    CIv = -np.log(bv) * uv / (lai * G)
+    CIi = -np.log(bi) * ui / (lai * G)
+    Psoil_sunlit = hotspot_layer(lai, hspot, vza, sza, vsa, CIi, CIv)
+    Pleaf_sunlit = hotspot_analytical(lai, hspot, vza, sza, vsa, CIi, CIv)
+    Psoil_shaded = Psoil - Psoil_sunlit
+    Pleaf_shaded = Pleaf - Pleaf_sunlit
+
+    return Psoil_sunlit,Psoil_shaded,Pleaf_sunlit,Pleaf_shaded
 
 def proportion_bidirectional_hom_one(lai,hspot,vza,sza,vsa):
     Psoil = gap_probability_hom_analytical(lai, vza)
@@ -179,67 +94,64 @@ def proportion_bidirectional_hom_one(lai,hspot,vza,sza,vsa):
     Pleaf_shaded = Pleaf - Pleaf_sunlit
     return Psoil_sunlit,Psoil_shaded,Pleaf_sunlit,Pleaf_shaded
 
-def _row_inside(x, period, width):
-    """Cumulative length inside the rows, C(x) = integral of 1[(t mod period) < width] over [0, x]."""
-    return np.floor(x / period) * width + np.minimum(np.mod(x, period), width)
-
-
-def _row_path_inside(x, slope, rise, period, width):
-    """Height extent inside the rows of a ray that rises `rise` while moving `slope` per unit height from cross-row x."""
-    moving = np.abs(slope) > 1.0e-12
-    safe = np.where(moving, np.abs(slope), 1.0)
-    along = np.abs(_row_inside(x + slope * rise, period, width) - _row_inside(x, period, width)) / safe
-    return np.where(moving, along, rise * (np.mod(x, period) < width))
-
-
 def proportion_bidirectional_row_one(lai,hspot,row_width,row_blank,row_height,vza,vaa,sza,saa,raa,G = 0.5):
-    '''
-    垄行四组分比例：在垂直垄向的周期横截面内，对观测和太阳视线穿过垄带的光学厚度做精确积分。
-    垄内按浑浊介质处理（消光系数 G*LAI*(w+b)/(w*H)）；叶片尺度的热点重叠按 hotspot_layer 的重叠权重叠加在两条路径的共享部分上。
-    '''
-    vza, vaa, sza, saa, raa = (np.atleast_1d(np.asarray(value, dtype=float)) for value in (vza, vaa, sza, saa, raa))
-    period = row_width + row_blank
-    if 1.0 * row_blank / period < 0.03:
-        vsa = np.abs(saa - vaa)
-        vsa = np.where(vsa > 180, 360 - vsa, vsa)
-        return proportion_bidirectional_hom_one(lai, hspot, vza, sza, vsa)
 
-    rd = np.pi / 180.0
-    extinction = G * lai * period / row_width / row_height
-    x0 = (np.arange(96) + 0.5) / 96 * period
-    z = (np.arange(48) + 0.5) / 48 * row_height
-    dz = row_height / 48
-    X0, Z = np.meshgrid(x0, z, indexing="ij")
+    vsa = np.abs(saa - vaa)
+    sra = np.abs(saa - raa) % 180
+    vra = np.abs(vaa - raa) % 180
+    vsa[vsa > 180] = 360 - vsa[vsa > 180]
 
-    results = np.zeros((4, vza.size))
-    for index in range(vza.size):
-        cv, cs = np.cos(vza[index] * rd), np.cos(sza[index] * rd)
-        tan_v, tan_s = np.tan(vza[index] * rd), np.tan(sza[index] * rd)
-        slope_v = tan_v * np.sin((vaa[index] - raa[index]) * rd)
-        slope_s = tan_s * np.sin((saa[index] - raa[index]) * rd)
+    bv = np.clip(gap_probability_row_analytical(lai, row_width, row_blank, row_height, vza, vra), 1.0e-12, 1.0)
+    bi = np.clip(gap_probability_row_analytical(lai, row_width, row_blank, row_height, sza, sra), 1.0e-12, 1.0)
+    Psoil = bv
+    Pleaf = 1 - Psoil
+    cthetv = np.cos(np.deg2rad(vza))
+    cthets = np.cos(np.deg2rad(sza))
+    CIv = -np.log(bv) * cthetv / (lai * G)
+    CIi = -np.log(bi) * cthets / (lai * G)
+    Psoil_sunlit = hotspot_layer(lai, hspot, vza, sza, vsa, CIi, CIv)
+    Pleaf_sunlit = hotspot_analytical(lai, hspot, vza, sza, vsa, CIi, CIv)
+    ####################################################################
+    ##### '''Interesting !!!'''
+    ####################################################################
 
-        # leaf-scale hotspot weight, same as hotspot_layer (relative azimuth view-sun)
-        delta = tan_s ** 2 + tan_v ** 2 - 2 * tan_s * tan_v * np.cos((saa[index] - vaa[index]) * rd)
-        correction = 2.0 / (G / cv + G / cs)
-        alpha = np.sqrt(max(delta, 0.0)) * correction / hspot
-        w = float(np.where(alpha > 1.0e-12, -np.expm1(-alpha) / np.where(alpha > 1.0e-12, alpha, 1.0), 1.0))
+    saa_ = saa - raa
+    vaa_ = vaa - raa
+    saa_[saa_ < 0] = 360 + saa_[saa_ < 0]
+    vaa_[vaa_ < 0] = 360 + vaa_[vaa_ < 0]
+    saa_[saa_ > 360] = saa_[saa_ > 360] - 360
+    vaa_[vaa_ > 360] = vaa_[vaa_ > 360] - 360
+    shadow_s = row_height * np.tan(np.deg2rad(sza)) * np.sin(np.deg2rad(sra))
+    shadow_v = row_height * np.tan(np.deg2rad(vza)) * np.sin(np.deg2rad(vra))
+    shadow_v[shadow_v > row_blank] = row_blank
+    shadow_s[shadow_s > row_blank] = row_blank
+    '''同向'''
+    ind = (row_blank > shadow_v) * (row_blank > shadow_s) * ((saa_ - 180) * (vaa_ - 180) > 0)
+    correction = np.ones(np.size(vza))
+    if np.sum(ind) > 0:
+        shadow = shadow_v * 1.0
+        shadow[shadow < shadow_s] = shadow_s[shadow < shadow_s]
+        correction[ind] = (row_width + row_blank) / (shadow[ind] + row_width)
+    '''不同向'''
+    ind = ((saa_ - 180) * (vaa_ - 180) < 0) * ((shadow_s + shadow_v) < row_blank)
+    if np.sum(ind) > 0:
+        shadow = shadow_s + shadow_v
+        correction[ind] = (row_width + row_blank) / (shadow[ind] + row_width)
+    '''顺垄'''
+    ind = (shadow_s * shadow_v == 0) * (row_blank > shadow_v) * (row_blank > shadow_s)
+    if np.sum(ind) > 0:
+        shadow = shadow_v * 1.0
+        shadow[shadow < shadow_s] = shadow_s[shadow < shadow_s]
+        correction[ind] = (row_width + row_blank) / (shadow[ind] + row_width)
+    testi = (shadow_s + row_width) / (row_blank + row_width)
+    testv = (shadow_v + row_width) / (row_width + row_blank)
+    Ksoil_sunlit = Psoil_sunlit / Psoil
+    Ksoil_sunlit = Ksoil_sunlit / correction + (1 - 1.0 / correction)
+    Psoil_sunlit = Psoil * Ksoil_sunlit
 
-        tau_v0 = extinction / cv * _row_path_inside(x0, slope_v, row_height, period, row_width)
-        tau_s0 = extinction / cs * _row_path_inside(x0, slope_s, row_height, period, row_width)
-        soil_visible = float(np.mean(np.exp(-tau_v0)))
-        soil_sunlit = float(np.mean(np.exp(-tau_v0 - tau_s0 + np.sqrt(tau_v0 * tau_s0) * w)))
-
-        position = X0 + slope_v * Z
-        inside = np.mod(position, period) < row_width
-        rise = row_height - Z
-        tau_v = extinction / cv * _row_path_inside(position, slope_v, rise, period, row_width)
-        tau_s = extinction / cs * _row_path_inside(position, slope_s, rise, period, row_width)
-        leaf_sunlit = float(np.mean(np.sum(extinction / cv * inside * np.exp(-tau_v - tau_s + np.sqrt(tau_v * tau_s) * w) * dz, axis=1)))
-
-        leaf_visible = 1.0 - soil_visible
-        leaf_sunlit = min(max(leaf_sunlit, 0.0), leaf_visible)
-        results[:, index] = (soil_sunlit, soil_visible - soil_sunlit, leaf_sunlit, leaf_visible - leaf_sunlit)
-    return results[0], results[1], results[2], results[3]
+    Psoil_shaded = Psoil - Psoil_sunlit
+    Pleaf_shaded = Pleaf - Pleaf_sunlit
+    return Psoil_sunlit,Psoil_shaded,Pleaf_sunlit,Pleaf_shaded
 
 
 ####################################################################
@@ -996,6 +908,7 @@ def proportion_bidirectional_crown_voxel_layer(
 
     return Psoil_sunlit, Psoil_shaded, Pleaf_sunlit_layer, Pleaf_shaded_layer
 
+
 def proportion_bidirectional_hom_voxel_layer(lai0, hspot, vza0, sza0, vsa0, number_layer=5, CI=1.0, G=0.5):
     '''
     组分比例的分层结果，通过垂直高度数值计算
@@ -1026,6 +939,8 @@ def proportion_bidirectional_hom_voxel_layer(lai0, hspot, vza0, sza0, vsa0, numb
             Pleaf_sunlit_layer[klayer, :] = np.sum(Pleaf_sunlit_voxel[ind, :], axis=0)
 
     return Psoil_sunlit, Psoil_shaded, Pleaf_sunlit_layer, Pleaf_shaded_layer
+
+
 def proportion_bidirectional_row_voxel_layer(lai, hspot, row_width, row_blank, row_height, vza0, vaa0, sza0, saa0, raa0,
                                              number_layer=5, nvw=5, nvh=10, nvb=5, G=0.5):
     '''

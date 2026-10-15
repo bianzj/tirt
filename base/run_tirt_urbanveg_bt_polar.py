@@ -57,7 +57,7 @@ if __name__ == '__main__':
     Broof_shaded = planck(wl,Troof_shaded)
     Bveg = planck(wl,Tveg)
     B_uv = np.asarray([Bwall_sunlit,Bwall_shaded,Bstreet_sunlit,
-                     Bstreet_shaded,Broof_sunlit,Broof_shaded,Bveg])
+                     Bstreet_shaded,Broof_sunlit,Broof_shaded,Bveg,Bveg])
     B_u = np.asarray([Bwall_sunlit,Bwall_shaded,Bstreet_sunlit,
                      Bstreet_shaded,Broof_sunlit,Broof_shaded])
 
@@ -70,7 +70,7 @@ if __name__ == '__main__':
     #                      [10, 10, 30, density*0.333,0,90],
     #                      [10, 10, 40, density*0.333,0,90]])
     shapes = np.asarray([[10, 10, 30, density,  0,90]])
-    forestshape = np.asarray([3.0, 0.01, 3, 3, 0.2, 3])
+    forestshape = np.asarray([3.0, 0.01, 3, 3, 0.2])
 
 
     urban.set_angular_input(np.abs(vza_),vaa_,sza,saa)

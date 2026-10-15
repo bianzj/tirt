@@ -23,21 +23,34 @@ const HALF_SCENE = SCENE_SIZE / 2;
 const NORTH_AZIMUTH = 0;
 
 function numberList(value) {
-  return String(value || "").split(/[;,\s]+/).map(Number).filter(Number.isFinite);
+  return String(value || "").trim().split(/[;,\s]+/).filter(Boolean).map(Number);
 }
 
 function firstNumber(raw, fallback = 0) {
-  const values = numberList(raw);
+  const values = numberList(raw).filter(Number.isFinite);
   return values.length ? values[0] : fallback;
+}
+
+function parseWavelengthFile(text) {
+  return String(text).replace(/^\uFEFF/, "").split(/\r?\n/)
+    .map((line) => line.trim()).filter((line) => line && !line.startsWith("#"))
+    .map((line) => Number(line.split(/[;,\s]+/)[0])).filter(Number.isFinite);
+}
+
+// Y is vertical; zenith angles are measured from the vertical axis.
+function zenithDirection(zenithDegrees, azimuthDegrees, distance = 1, originY = 0) {
+  const zenith = zenithDegrees * Math.PI / 180;
+  const azimuth = azimuthDegrees * Math.PI / 180;
+  return [Math.sin(azimuth) * Math.sin(zenith) * distance,
+    originY + Math.cos(zenith) * distance, Math.cos(azimuth) * Math.sin(zenith) * distance];
 }
 
 function value(id) { return $(id).value; }
 function selectedAdditionalSource() { return document.querySelector('input[name="additional-source"]:checked')?.value || "file"; }
 function manualGeometryPairs() {
-  return String($("manual-geometry")?.value || "").split(/[;\n]+/).map((entry) => {
-    const pair = entry.trim().split(/\s*\/\s*/).map(Number);
-    return [pair[0], pair[1]];
-  }).filter((pair) => Number.isFinite(pair[0]) && Number.isFinite(pair[1]));
+  return String($("manual-geometry")?.value || "").split(/[;\n]+/)
+    .map((entry) => entry.trim()).filter(Boolean)
+    .map((entry) => entry.split(/\s*\/\s*/).map((part) => part.trim() ? Number(part) : NaN));
 }
 function setStatus(text, kind = "idle") {
   const pill = $("status-pill");
@@ -57,12 +70,10 @@ function currentOverrides() {
   const wavelengths = numberList(value("wavelengths"));
   const bandValues = (id, fallback) => {
     const values = numberList(value(id));
-    if (!wavelengths.length) return value(id);
-    if (values.length === wavelengths.length) return value(id);
-    if (values.length === 1) return wavelengths.map(() => values[0]).join(";");
-    if (wavelengths.length === 1 && values.length) return String(values[0]);
-    if (values.length) return wavelengths.map((_, index) => values[index % values.length]).join(";");
-    return fallback;
+    if ($(id).closest(".is-hidden") && values.length !== wavelengths.length) {
+      return wavelengths.map(() => Number(fallback)).join(";");
+    }
+    return value(id);
   };
   const overrides = {
     surface_model: value("surface-model"),
@@ -119,11 +130,10 @@ function currentOverrides() {
   overrides.principal_vza_step = value("principal-vza-step");
   overrides.principal_vza_max = value("principal-vza-max");
   const includeHemisphere = $("include-hemisphere").checked;
+  if (includeHemisphere) overrides.hemisphere_geometry_file = "data/directions/hemisphere_directions.txt";
   overrides.additional_geometry_source = additionalSource;
   if (additionalSource === "file") {
-    if (includeHemisphere) {
-      overrides.additional_geometry_file = "data/directions/hemisphere_directions.txt";
-    } else if (uploadedGeometryText) {
+    if (uploadedGeometryText) {
       overrides.additional_geometry_file = "";
     } else {
       overrides.additional_geometry_source = "none";
@@ -134,6 +144,11 @@ function currentOverrides() {
     overrides.observation_vaa = pairs.map(([, vaa]) => vaa).join(";");
   }
   return overrides;
+}
+
+function currentPayload() {
+  return { overrides: currentOverrides(),
+    geometry_text: selectedAdditionalSource() === "file" ? uploadedGeometryText : "", files: { ...uploadedFiles } };
 }
 
 function updateGeometryFields() {
@@ -201,28 +216,35 @@ function validateInputs() {
   }
 
   const wavelengths = numberList(value("wavelengths"));
-  if (!wavelengths.length || wavelengths.some((item) => item <= 0)) {
+  if (!wavelengths.length || wavelengths.some((item) => !Number.isFinite(item) || item <= 0)) {
     return { input: $("wavelengths"), message: "Wavelengths must contain positive numbers" };
   }
 
   const spectrumIds = [
-    ["emissivity-soil", "Soil emissivity"],
-    ["emissivity-leaf", "Leaf emissivity"],
-    ["emissivity-terrain", "Terrain emissivity"],
-    ["emissivity-roof", "Roof emissivity"],
-    ["emissivity-wall", "Wall emissivity"],
-    ["emissivity-street", "Street emissivity"],
+    ["emissivity-soil", "Soil emissivity", "soil_spectrum"],
+    ["emissivity-leaf", "Leaf emissivity", "leaf_spectrum"],
+    ["emissivity-terrain", "Terrain emissivity", "terrain_spectrum"],
+    ["emissivity-roof", "Roof emissivity", "roof_spectrum"],
+    ["emissivity-wall", "Wall emissivity", "wall_spectrum"],
+    ["emissivity-street", "Street emissivity", "street_spectrum"],
   ];
-  for (const [id, label] of spectrumIds) {
+  for (const [id, label, fileKey] of spectrumIds) {
     const input = $(id);
-    if (!input || input.closest(".is-hidden")) continue;
+    if (!input || input.closest(".is-hidden") || uploadedFiles[fileKey]) continue;
     const numbers = numberList(input.value);
-    if (!numbers.length || numbers.some((item) => item < 0 || item > 1)) {
+    if (!numbers.length || numbers.some((item) => !Number.isFinite(item) || item < 0 || item > 1)) {
       return { input, message: `${label} must be between 0 and 1` };
+    }
+    if (numbers.length !== wavelengths.length) {
+      return { input, message: `${label}: enter ${wavelengths.length} values, one per wavelength` };
     }
   }
 
   const source = selectedAdditionalSource();
+  if (source === "manual" && manualGeometryPairs().some((pair) => pair.length !== 2 ||
+      !pair.every(Number.isFinite) || pair[0] < 0 || pair[0] > 90 || pair[1] < 0 || pair[1] > 360)) {
+    return { input: $("manual-geometry"), message: "Manual angles must be VZA/VAA pairs with VZA 0–90° and VAA 0–360°" };
+  }
   const hasAdditional = source === "manual" ? manualGeometryPairs().length > 0 : Boolean(uploadedGeometryText);
   if (!$("include-principal").checked && !$("include-hemisphere").checked && !hasAdditional) {
     const input = source === "manual" ? $("manual-geometry") : $("geometry-upload");
@@ -254,7 +276,7 @@ async function runSimulation() {
     const response = await fetch("/api/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ overrides: currentOverrides(), geometry_text: uploadedGeometryText, files: uploadedFiles }),
+      body: JSON.stringify(currentPayload()),
     });
     const payload = await response.json();
     if (!response.ok || !payload.ok) throw new Error(payload.error || "Simulation failed");
@@ -695,10 +717,10 @@ function updateScene() {
   }
   const originY = surfaceHeightAt(0, 0) + 1;
   addNorthMarker(surfaceHeightAt(0, 0));
-  const sza = firstNumber(value("sza"), 30) * Math.PI / 180; const saa = firstNumber(value("saa"), 0) * Math.PI / 180; const sunDistance = 45; const sun = [Math.sin(saa) * Math.cos(sza) * sunDistance, originY + Math.sin(sza) * sunDistance, Math.cos(saa) * Math.cos(sza) * sunDistance];
+  const sun = zenithDirection(firstNumber(value("sza"), 30), firstNumber(value("saa"), 0), 45, originY);
   addMesh(new THREE.SphereGeometry(.35, 16, 12), makeMaterial(0xedb866, .45), sun); addLine([0, originY, 0], sun, 0xedb866, .55);
   const rows = simulationRows.length ? selectedRows().slice(0, 28) : [];
-  rows.forEach((row) => { const vza = Number(row.vza) * Math.PI / 180; const vaa = Number(row.vaa) * Math.PI / 180; const viewDistance = 30; const end = [Math.sin(vaa) * Math.cos(vza) * viewDistance, originY + Math.sin(vza) * viewDistance, Math.cos(vaa) * Math.cos(vza) * viewDistance]; addLine([0, originY, 0], end, 0xed8e7d, .32); });
+  rows.forEach((row) => { const end = zenithDirection(Number(row.vza), Number(row.vaa), 30, originY); addLine([0, originY, 0], end, 0xed8e7d, .32); });
   fitSceneView();
   $("scene-loading").classList.add("is-hidden");
 }
@@ -716,35 +738,35 @@ function initScene() {
   const animate = () => { requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); }; animate();
 }
 
-function csvCell(value) { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text; }
-function csvRow(section, key, val, description = "") { return [section, key, val, description].map(csvCell).join(","); }
-function buildInputCsv() {
-  const o = currentOverrides();
-  const rows = [
-    "# TiRT GUI exported input", ",,,", "[case],,,",
-    csvRow("case", "case_name", "gui_case", "case name"),
-    csvRow("case", "result_dir", "cases/gui_case", "result directory"),
-    ",,,", "[surface],,,",
-    csvRow("surface", "surface_model", o.surface_model), csvRow("surface", "vegetation_model", o.vegetation_model),
-    ",,,", "[vegetation_structure],,,",
-    csvRow("vegetation_structure", "lai", o.lai), csvRow("vegetation_structure", "hspot", o.hspot),
-    csvRow("row_structure", "row_width", o.row_width), csvRow("row_structure", "row_blank", o.row_blank), csvRow("row_structure", "row_height", o.row_height), csvRow("row_structure", "row_azimuth", o.row_azimuth),
-    csvRow("crown_structure", "crown_rad_a", o.crown_rad_a), csvRow("crown_structure", "crown_rad_b", o.crown_rad_b), csvRow("crown_structure", "crown_height", o.crown_height), csvRow("crown_structure", "crown_density", o.crown_density),
-    ",,,", "[slope],,,", csvRow("slope", "slope_angle", o.slope_angle), csvRow("slope", "slope_aspect", o.slope_aspect),
-    ",,,", "[terrain],,,", csvRow("terrain", "terrain_height", o.terrain_height), csvRow("terrain", "terrain_radius", o.terrain_radius), csvRow("terrain", "terrain_density", o.terrain_density),
-    ",,,", "[urban],,,", csvRow("urban", "building_density", o.building_density), csvRow("urban", "building_height", o.building_height), csvRow("urban", "building_length", o.building_length), csvRow("urban", "building_width", o.building_width), csvRow("urban", "building_azimuth", o.building_azimuth),
-    ",,,", "[spectral],,,", csvRow("spectral", "wavelengths", o.wavelengths), csvRow("spectral", "emissivity_leaf", o.emissivity_leaf), csvRow("spectral", "emissivity_soil", o.emissivity_soil), csvRow("spectral", "emissivity_terrain", o.emissivity_terrain),
-    ",,,", "[soil_anisotropy],,,", csvRow("soil_anisotropy", "hapke_enable", o.hapke_enable), csvRow("soil_anisotropy", "hapke_K", o.hapke_K),
-    csvRow("urban_spectrum", "emissivity_roof", o.emissivity_roof), csvRow("urban_spectrum", "emissivity_wall", o.emissivity_wall), csvRow("urban_spectrum", "emissivity_street", o.emissivity_street),
-    ",,,", "[thermal],,,", csvRow("thermal", "leaf_sunlit_c", o.leaf_sunlit_c), csvRow("thermal", "leaf_shaded_c", o.leaf_shaded_c), csvRow("thermal", "soil_sunlit_c", o.soil_sunlit_c), csvRow("thermal", "soil_shaded_c", o.soil_shaded_c), csvRow("thermal", "terrain_sunlit_c", o.terrain_sunlit_c), csvRow("thermal", "terrain_shaded_c", o.terrain_shaded_c), csvRow("thermal", "roof_sunlit_c", o.roof_sunlit_c), csvRow("thermal", "roof_shaded_c", o.roof_shaded_c), csvRow("thermal", "wall_sunlit_c", o.wall_sunlit_c), csvRow("thermal", "wall_shaded_c", o.wall_shaded_c), csvRow("thermal", "street_sunlit_c", o.street_sunlit_c), csvRow("thermal", "street_shaded_c", o.street_shaded_c),
-    ",,,", "[geometry],,,", csvRow("geometry", "geometry_mode", o.geometry_mode), csvRow("geometry", "geometry_view", o.geometry_view), csvRow("geometry", "include_principal", o.include_principal), csvRow("geometry", "include_hemisphere", o.include_hemisphere), csvRow("geometry", "sza", o.sza), csvRow("geometry", "saa", o.saa),
-  ];
-  rows.push(csvRow("geometry", "principal_vza_step", o.principal_vza_step), csvRow("geometry", "principal_vza_max", o.principal_vza_max), csvRow("geometry", "additional_geometry_source", o.additional_geometry_source));
-  if (o.additional_geometry_source === "file") rows.push(csvRow("geometry", "additional_geometry_file", o.additional_geometry_file));
-  if (o.additional_geometry_source === "manual") rows.push(csvRow("geometry", "observation_vza", o.observation_vza), csvRow("geometry", "observation_vaa", o.observation_vaa));
-  return `${rows.join("\n")}\n`;
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url; link.download = filename; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-function exportInput() { const blob = new Blob([buildInputCsv()], { type: "text/csv;charset=utf-8" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "input.csv"; link.click(); URL.revokeObjectURL(link.href); notify("Saved input.csv"); }
+
+async function exportInput() {
+  const validation = validateInputs();
+  if (validation) {
+    notify(validation.message, true); validation.input?.focus(); return;
+  }
+  const button = $("export-button");
+  button.disabled = true;
+  try {
+    const response = await fetch("/api/export", { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(currentPayload()) });
+    if (!response.ok) {
+      const payload = await response.json();
+      throw new Error(payload.error || "Input export failed");
+    }
+    downloadBlob(await response.blob(), "tirt_input.zip");
+    notify("Saved input ZIP with spectra and observation files");
+  } catch (error) {
+    notify(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
 
 async function shutdownTiRT() {
   const button = document.getElementById('exit-button');
@@ -777,7 +799,9 @@ function bindEvents() {
       uploadedGeometryText = "";
       return;
     }
-    uploadedGeometryText = await file.text();
+    const contents = await file.text();
+    if (event.target.files[0] !== file) return;
+    uploadedGeometryText = contents;
     status.textContent = "✓";
     status.className = "file-status has-file";
     status.setAttribute("aria-label", `Selected ${file.name}`);
@@ -787,18 +811,40 @@ function bindEvents() {
     $(id)?.addEventListener("change", async (event) => {
       const file = event.target.files[0];
       const status = $(`${id}-status`);
-      if (!file) return;
-      uploadedFiles[key] = await file.text();
+      if (!file) {
+        uploadedFiles[key] = "";
+        if (status) {
+          status.textContent = "•"; status.className = "file-status no-file";
+          status.setAttribute("aria-label", "No file selected");
+        }
+        return;
+      }
+      const contents = await file.text();
+      if (event.target.files[0] !== file) return;
+      uploadedFiles[key] = contents;
       if (status) {
         status.textContent = "✓";
         status.className = "file-status has-file";
         status.setAttribute("aria-label", `Selected ${file.name}`);
       }
       if (key === "wavelengths") {
-        const fileWavelengths = uploadedFiles[key].split(/\r?\n/).map((line) => Number(line.trim().split(/[;,\s]+/)[0])).filter(Number.isFinite);
-        if (fileWavelengths.length) $("wavelengths").value = fileWavelengths.join(";");
+        $("wavelengths").value = parseWavelengthFile(contents).join(";");
       }
       notify(`Loaded ${file.name}`);
+    });
+  });
+  [["wavelengths", "wavelength-file", "wavelengths"],
+    ["emissivity-leaf", "leaf-spectrum-file", "leaf_spectrum"],
+    ["emissivity-soil", "soil-spectrum-file", "soil_spectrum"],
+    ["emissivity-terrain", "terrain-spectrum-file", "terrain_spectrum"],
+    ["emissivity-roof", "roof-spectrum-file", "roof_spectrum"],
+    ["emissivity-wall", "wall-spectrum-file", "wall_spectrum"],
+    ["emissivity-street", "street-spectrum-file", "street_spectrum"]].forEach(([textId, fileId, key]) => {
+    $(textId).addEventListener("input", () => {
+      uploadedFiles[key] = ""; $(fileId).value = "";
+      const status = $(`${fileId}-status`);
+      status.textContent = "•"; status.className = "file-status no-file";
+      status.setAttribute("aria-label", "Using entered values");
     });
   });
 }

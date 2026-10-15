@@ -1,7 +1,4 @@
-"""Shared request handler for the TiRT local service (energy-balance and multi-angle endpoints).
-
-`gui/server.py` subclasses this handler and is the entry point that serves all pages.
-"""
+"""Local GUI server for the TIRTEB temporal and directional simulators."""
 
 from __future__ import annotations
 
@@ -12,9 +9,9 @@ import shutil
 import sys
 import tempfile
 import threading
-from http.server import SimpleHTTPRequestHandler
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 
 
 _BUNDLE_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
@@ -28,33 +25,14 @@ from tirteb_run import run  # noqa: E402
 TIRTEB_INPUT = PROJECT_ROOT / "input_tirteb.csv"
 
 
-_PATH_KEYS = {"meteo"}
-_CLIENT_FORBIDDEN_KEYS = {"result_dir", "cases_dir", "case_name", "input_path", "output_path", "model"}
-_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
-MAX_REQUEST_BYTES = 64 * 1024 * 1024
-
-# upload key -> (source key, source value, path key, file name)
-ANGLE_UPLOADS = {
-    "wavelengths": ("spectral_source", "file", "spectrals_file", "wavelengths.txt"),
-    "leaf_spectrum": ("vegetation_spectrum_source", "file", "vegetation_spectrum_file", "leaf_spectrum.txt"),
-    "soil_spectrum": ("soil_spectrum_source", "file", "soil_spectrum_file", "soil_spectrum.txt"),
-    "terrain_spectrum": ("terrain_spectrum_source", "file", "terrain_spectrum_file", "terrain_spectrum.txt"),
-    "roof_spectrum": ("roof_spectrum_source", "file", "roof_spectrum_file", "roof_spectrum.txt"),
-    "wall_spectrum": ("wall_spectrum_source", "file", "wall_spectrum_file", "wall_spectrum.txt"),
-    "street_spectrum": ("street_spectrum_source", "file", "street_spectrum_file", "street_spectrum.txt"),
+_PATH_KEYS = {
+    "meteo", "esun_file", "esky_file", "optical_coefficients_file",
+    "directions_file", "spectrals_file", "vegetation_spectrum_file",
+    "soil_spectrum_file", "urban_spectrum_file", "urban_roof_spectrum_file",
+    "urban_wall_spectrum_file", "urban_street_spectrum_file", "geometry_file",
+    "terrain_spectrum_file", "roof_spectrum_file", "wall_spectrum_file",
+    "street_spectrum_file", "additional_geometry_file", "observation_geometry_file",
 }
-TIME_UPLOADS = {
-    "directions": ("geometry_mode", "2", "geometry_file", "observation_directions.txt"),
-    "wavelengths": ("spectral_source", "file", "spectrals_file", "observation_spectrals.txt"),
-    "leaf_optics": ("leaf_optics_source", "file", "leaf_optics_file", "leaf_optics.txt"),
-    "soil_optics": ("soil_optics_source", "file", "soil_optics_file", "soil_optics.txt"),
-    "urban_spectrum": ("urban_spectrum_source", "file", "urban_spectrum_file", "urban_spectrum.txt"),
-}
-
-
-def _is_path_key(key: str) -> bool:
-    return key in _PATH_KEYS or key.endswith("_file")
-
 
 def _json_safe(value):
     if isinstance(value, float) and not math.isfinite(value):
@@ -66,27 +44,9 @@ def _json_safe(value):
     return value
 
 
-def client_overrides(payload: dict) -> dict[str, object]:
-    """Return browser-supplied overrides with file paths confined to the project."""
-    root = PROJECT_ROOT.resolve()
-    overrides: dict[str, object] = {}
-    for key, value in (payload.get("overrides") or {}).items():
-        key = str(key)
-        lowered = key.lower()
-        if lowered in _CLIENT_FORBIDDEN_KEYS:
-            continue
-        if _is_path_key(lowered) and value not in (None, ""):
-            path = (root / str(value)).resolve()
-            if not path.is_relative_to(root):
-                raise ValueError(f"{key} 必须位于项目目录内")
-            value = str(path)
-        overrides[key] = value
-    return overrides
-
 
 def _write_run_input(source: Path, target: Path, overrides: dict[str, object]) -> None:
-    with source.open(newline="", encoding="utf-8-sig") as file:
-        rows = list(csv.reader(file))
+    rows = list(csv.reader(source.open(newline="", encoding="utf-8-sig")))
     values = {str(key).lower(): value for key, value in overrides.items() if not str(key).startswith("_")}
     for row in rows:
         if len(row) < 3:
@@ -94,15 +54,15 @@ def _write_run_input(source: Path, target: Path, overrides: dict[str, object]) -
         key = row[1].strip().lower()
         changed = key in values
         value = values.pop(key) if changed else row[2]
-        if _is_path_key(key) and value not in (None, ""):
+        if key in _PATH_KEYS and value not in (None, ""):
             file_path = Path(str(value))
             if not file_path.is_absolute():
                 value = str((PROJECT_ROOT / file_path).resolve())
-        if changed or _is_path_key(key):
+        if changed or key in _PATH_KEYS:
             row[2] = str(value)
     for key, value in values.items():
         if value not in (None, ""):
-            if _is_path_key(key):
+            if key in _PATH_KEYS:
                 path = Path(str(value))
                 if not path.is_absolute():
                     value = str((PROJECT_ROOT / path).resolve())
@@ -127,24 +87,9 @@ def _read_csv(path: Path) -> list[dict[str, float | str]]:
         return rows
 
 
-def apply_uploads(uploaded: dict, table: dict, work_dir: Path, overrides: dict[str, object]) -> list[str]:
-    """Write uploaded text files into work_dir and point the overrides at them."""
-    applied = []
-    for key, (source_key, source_value, path_key, filename) in table.items():
-        contents = uploaded.get(key)
-        if not contents:
-            continue
-        file_path = work_dir / filename
-        file_path.write_text(str(contents), encoding="utf-8")
-        overrides[source_key] = source_value
-        overrides[path_key] = str(file_path)
-        applied.append(key)
-    return applied
-
-
 def _angle_request(payload: dict, work_dir: Path) -> dict:
     """Build a temporary angle input and run the directional simulator."""
-    overrides = client_overrides(payload)
+    overrides = {str(key): value for key, value in payload.get("overrides", {}).items()}
     overrides["spectral_source"] = "direct"
 
     geometry_text = payload.get("geometry_text")
@@ -155,7 +100,25 @@ def _angle_request(payload: dict, work_dir: Path) -> dict:
         overrides["geometry_file"] = str(geometry_path)
         overrides["additional_geometry_source"] = "file"
 
-    apply_uploads(payload.get("files") or {}, ANGLE_UPLOADS, work_dir, overrides)
+    uploaded_files = payload.get("files", {}) or {}
+    file_overrides = {
+        "wavelengths": ("spectral_source", "file", "spectrals_file", "wavelengths.txt"),
+        "leaf_spectrum": ("vegetation_spectrum_source", "file", "vegetation_spectrum_file", "leaf_spectrum.txt"),
+        "soil_spectrum": ("soil_spectrum_source", "file", "soil_spectrum_file", "soil_spectrum.txt"),
+        "terrain_spectrum": ("terrain_spectrum_source", "file", "terrain_spectrum_file", "terrain_spectrum.txt"),
+        "roof_spectrum": ("roof_spectrum_source", "file", "roof_spectrum_file", "roof_spectrum.txt"),
+        "wall_spectrum": ("wall_spectrum_source", "file", "wall_spectrum_file", "wall_spectrum.txt"),
+        "street_spectrum": ("street_spectrum_source", "file", "street_spectrum_file", "street_spectrum.txt"),
+    }
+    for key, (source_key, source_value, path_key, filename) in file_overrides.items():
+        contents = uploaded_files.get(key)
+        if not contents:
+            continue
+        file_path = work_dir / filename
+        file_path.write_text(str(contents), encoding="utf-8")
+        overrides[source_key] = source_value
+        overrides[path_key] = str(file_path)
+
     input_path = work_dir / "input.csv"
     _write_run_input(TIRTEB_INPUT, input_path, overrides)
     output_path = work_dir / "output.csv"
@@ -164,38 +127,8 @@ def _angle_request(payload: dict, work_dir: Path) -> dict:
     return {"ok": True, "rows": rows, "count": len(rows)}
 
 
-def _time_request(payload: dict, work_dir: Path) -> dict:
-    """Build a temporary energy-balance input and run the time series."""
-    overrides = client_overrides(payload)
-    meteo_text = payload.get("meteo_text")
-    if meteo_text:
-        meteo_path = work_dir / "meteo.txt"
-        meteo_path.write_text(str(meteo_text), encoding="utf-8")
-        overrides["meteo"] = str(meteo_path)
-
-    apply_uploads(payload.get("files") or {}, TIME_UPLOADS, work_dir, overrides)
-
-    input_path = work_dir / "input.csv"
-    _write_run_input(TIRTEB_INPUT, input_path, overrides)
-    output = run(input_path, work_dir / "output.csv")
-    series = _read_csv(output)
-    observations_path = output.with_name("observations.csv")
-    observations = _read_csv(observations_path) if observations_path.exists() else []
-    intermediate_path = output.with_name("intermediate.csv")
-    intermediate = _read_csv(intermediate_path) if intermediate_path.exists() else []
-    return {
-        "ok": True,
-        "series": series,
-        "observations": observations,
-        "intermediate": intermediate,
-        "count": len(series),
-        "observation_count": len(observations),
-        "intermediate_count": len(intermediate),
-    }
-
-
 class Handler(SimpleHTTPRequestHandler):
-    """Serve the GUI pages plus the energy-balance and multi-angle endpoints."""
+    """Serve both TIRTEB UIs and their local simulation endpoints."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(GUI_ROOT), **kwargs)
@@ -218,53 +151,109 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
         super().end_headers()
 
-    def request_rejected(self) -> bool:
-        """Reject DNS-rebinding hosts and cross-origin (CSRF) requests to the local service."""
-        host = self.headers.get("Host", "")
-        bound_host, port = self.server.server_address[:2]
-        allowed = True
-        if bound_host in _LOOPBACK_HOSTS:
-            allowed = host in {f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"}
-        origin = self.headers.get("Origin")
-        if origin is not None and origin != f"http://{host}":
-            allowed = False
-        if not allowed:
-            self._json(403, {"ok": False, "error": "Request rejected"})
-        return not allowed
-
-    def read_json_body(self) -> dict:
-        length = int(self.headers.get("Content-Length", "0"))
-        if length < 0 or length > MAX_REQUEST_BYTES:
-            raise ValueError("Invalid request size")
-        payload = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
-        if not isinstance(payload, dict):
-            raise ValueError("Request body must be a JSON object")
-        return payload
-
     def do_GET(self):  # noqa: N802
-        if self.request_rejected():
+        path = urlparse(self.path).path
+        if path == "/api/health":
+            self._json(200, {"ok": True, "project": str(PROJECT_ROOT), "engine": "tirteb"})
             return
-        if Path(unquote(urlparse(self.path).path)).suffix.lower() in {".py", ".pyc"}:
-            self._json(404, {"error": "Not found"})
+        if path == "/":
+            self.send_response(302)
+            self.send_header("Location", "/time.html")
+            self.end_headers()
             return
         super().do_GET()
 
     def do_POST(self):  # noqa: N802
-        if self.request_rejected():
-            return
         path = urlparse(self.path).path
+        if path not in {"/api/run_time", "/api/run_angle", "/api/shutdown"}:
+            self._json(404, {"error": "Not found"})
+            return
+
         if path == "/api/shutdown":
             self._json(200, {"ok": True})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
-        handlers = {"/api/run_time": _time_request, "/api/run_angle": _angle_request}
-        if path not in handlers:
-            self._json(404, {"error": "Not found"})
-            return
-        work_dir = Path(tempfile.mkdtemp(prefix="tirt-gui-"))
+
+        work_dir = None
         try:
-            self._json(200, handlers[path](self.read_json_body(), work_dir))
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            overrides = {str(key): value for key, value in payload.get("overrides", {}).items()}
+            work_dir = Path(tempfile.mkdtemp(prefix="tirteb-gui-"))
+
+            if path == "/api/run_angle":
+                self._json(200, _angle_request(payload, work_dir))
+                return
+
+            meteo_text = payload.get("meteo_text")
+            if meteo_text:
+                meteo_path = work_dir / "meteo.txt"
+                meteo_path.write_text(str(meteo_text), encoding="utf-8")
+                overrides["meteo"] = str(meteo_path)
+
+            uploaded_files = payload.get("files", {}) or {}
+            file_overrides = {
+                "directions": ("observation_direction_mode", "file", "directions_file", "observation_directions.txt"),
+                "wavelengths": ("observation_spectral_mode", "file", "spectrals_file", "observation_spectrals.txt"),
+                "vegetation_spectrum": ("vegetation_spectrum_source", "measured", "vegetation_spectrum_file", "leaf_spectrum.txt"),
+                "soil_spectrum": ("soil_spectrum_source", "measured", "soil_spectrum_file", "soil_spectrum.txt"),
+                "urban_spectrum": ("urban_spectrum_source", "measured", "urban_spectrum_file", "urban_spectrum.txt"),
+            }
+            for key, (source_key, source_value, path_key, filename) in file_overrides.items():
+                contents = uploaded_files.get(key)
+                if not contents:
+                    continue
+                file_path = work_dir / filename
+                file_path.write_text(str(contents), encoding="utf-8")
+                overrides[source_key] = source_value
+                overrides[path_key] = str(file_path)
+                if key == "directions":
+                    overrides["direction_source"] = "file"
+                if key == "wavelengths":
+                    overrides["spectral_source"] = "file"
+                    overrides["observation_spectral_mode"] = "file"
+
+            input_path = work_dir / "input.csv"
+            _write_run_input(TIRTEB_INPUT, input_path, overrides)
+            output_path = work_dir / "output.csv"
+            output = run(input_path, output_path)
+            series = _read_csv(output)
+            observations_path = output.with_name("observations.csv")
+            observations = _read_csv(observations_path) if observations_path.exists() else []
+            intermediate_path = output.with_name("intermediate.csv")
+            intermediate = _read_csv(intermediate_path) if intermediate_path.exists() else []
+            self._json(200, {
+                "ok": True,
+                "series": series,
+                "observations": observations,
+                "intermediate": intermediate,
+                "count": len(series),
+                "observation_count": len(observations),
+                "intermediate_count": len(intermediate),
+            })
         except Exception as exc:
             self._json(400, {"ok": False, "error": str(exc)})
         finally:
-            shutil.rmtree(work_dir, ignore_errors=True)
+            if work_dir is not None:
+                shutil.rmtree(work_dir, ignore_errors=True)
+
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run the TIRTEB temporal GUI")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8901)
+    args = parser.parse_args()
+    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    print(f"TIRTEB GUI: http://{args.host}:{args.port}/time.html")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nStopping TIRTEB GUI")
+    finally:
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()

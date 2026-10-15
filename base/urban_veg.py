@@ -1,22 +1,59 @@
 import numpy as np
 from .crown import *
-from .physicsF import projection_overlap
-from .urban import urban_hemisphere_sums, urban_wall_self_lit_shares
+from .vegetation import CanopyGeometry
 ### version 0.1 有错误，但是能跑
 ### version 0.5 有错误，修正了一部分，也能跑，这个版本投了iGARSS
 ### version 1.0 修正了一大部分，但是不能改变建筑的方位角，或者是说所有的建筑的方位角是固定的，同时来说，这么跑会快一点
 ### version 1.1 能改变建筑的方位角，同时来说，这么跑慢很多
 
 
-class Urban_Veg:
+class Urban_Veg(CanopyGeometry):
+    """Building occlusion plus canopy geometry and approximate interreflection.
+
+    The scattering kernel uses a hemisphere-averaged canopy/street mixture;
+    this approximation does not resolve each tree/row/building interaction.
+    """
+
+    thermal_crown_geometry = 'legacy'
+    thermal_hotspot_inner = None
+    thermal_hotspot_outer = None
+
+    def set_hotspot_geometry(self, mode='legacy', inner=None, outer=None):
+        if mode not in ('legacy', 'clumping_dual'):
+            raise ValueError('Urban forest geometry supports legacy or clumping_dual.')
+        for width in (inner, outer):
+            if width not in (None, '') and (not np.isfinite(float(width)) or float(width) < 0):
+                raise ValueError('Urban forest hotspot widths must be finite and nonnegative.')
+        self.thermal_crown_geometry = mode
+        self.thermal_hotspot_inner = inner
+        self.thermal_hotspot_outer = outer
+
+    def canopy_proportions(self, vza, vaa, sza, saa, density=None,
+                           crown_height=None, row_azimuth=None):
+        if self.vegetation_model != 'crown' or self.thermal_crown_geometry == 'legacy':
+            return super().canopy_proportions(vza, vaa, sza, saa, density,
+                                               crown_height, row_azimuth)
+        # Reuse whole-crown two-scale geometry only. Thermal source terms and
+        # building sun/view overlap remain in the urban emission calculation.
+        from .thermal_crown import component_fractions
+        lai, std, radius, height, hspot = self.forestshape
+        settings = dict(lai=lai, stand_density=std if density is None else density,
+                        height=height if crown_height is None else crown_height,
+                        width=radius, hspot=hspot, thermal_crown_geometry='clumping_dual',
+                        thermal_hotspot_inner=self.thermal_hotspot_inner,
+                        thermal_hotspot_outer=self.thermal_hotspot_outer)
+        view, view_azimuth, solar, solar_azimuth = np.broadcast_arrays(
+            np.asarray(vza, float), np.asarray(vaa, float),
+            np.asarray(sza, float), np.asarray(saa, float))
+        relative = np.abs((view_azimuth - solar_azimuth + 180.) % 360. - 180.)
+        return component_fractions(settings, solar, view, relative)
 
 
     shapes = np.asarray([[10,10,10,0.001,0,90],
                          [10,10,30,0.0005,0,90]])
     n_shape,n_dim = np.shape(shapes)
 
-    ### lai, stand, radi_horizontal, radi_vertical, hspot, trunk height (crown base)
-    forestshape = np.asarray([5.0,0.01,3,3,0.2,3])
+    forestshape = np.asarray([5.0,0.01,3,3,0.2])
     crown = Crown()
 
     ci = 1.0
@@ -75,7 +112,7 @@ class Urban_Veg:
         vaa = self.vaa_[kangle]
         sza = self.sza
         saa = self.saa
-        raa = np.asarray(np.abs(vaa - saa) % 360.0)
+        raa = np.asarray(vaa - saa)
 
         ind = raa>180
         if np.sum(ind)>0:
@@ -118,7 +155,7 @@ class Urban_Veg:
             projs_temp = projs_wall
             projs = projs + projs_temp
             proof = proof+ proj_roof
-        Overlapping = projection_overlap(tantv, tants, up)
+        Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
         partmax = np.max([projv,projs])
         partmin = np.min([projv,projs])
         # if (raa == 0) | (raa == 180):
@@ -130,7 +167,7 @@ class Urban_Veg:
         pStreatS = np.exp(-projs)*(1-proof)
         pStreatV_sunlit = np.exp(-projvs)*(1-proof)
         pStreatV_shaded = pStreatV - pStreatV_sunlit
-        pStreatV_sunlit_fraction = pStreatV_sunlit/pStreatV
+        pStreatV_sunlit_fraction = pStreatV_sunlit / pStreatV if pStreatV > 0.0 else 0.0
 
 
         ###-------------------------------------------------
@@ -140,15 +177,13 @@ class Urban_Veg:
         hspot = forestshape[4]
         hcr = forestshape[3]
         rcr = forestshape[2]
-        Pcomtemp = proportion_bidirectional_crown_one(lai, std, hspot, hcr, rcr, np.asarray([vza]),
-                                                      np.asarray([sza]), np.asarray([raa]), hcb=forestshape[5])
+        Pcomtemp = self.canopy_proportions(vza, vaa, sza, saa)
 
         pStreatV_veg = pStreatV_sunlit*( Pcomtemp[2][0]+Pcomtemp[3][0]) +pStreatV_shaded*( Pcomtemp[2][0]+Pcomtemp[3][0])
         pStreatV_veg_sunlit = pStreatV_sunlit*Pcomtemp[0][0]
         pStreatV_veg_shaded = pStreatV_sunlit*Pcomtemp[1][0] + pStreatV_shaded*(Pcomtemp[0][0] + Pcomtemp[1][0])
-        ### 森林与街道背景之间的散射（同平地树冠模型）；植被为单一温度组分，光照/阴影两部分合并
-        scat = np.asarray(emissivity_scatter_analytical(lai, Eveg, Estreat, np.asarray([vza]), np.asarray([sza]))[0], dtype=float).reshape(4, -1)[:, 0]
-        pStreatV_veg_scat = pStreatV * (scat[2] + scat[3])
+        pStreatV_leaf_sunlit = pStreatV_sunlit * Pcomtemp[2][0]
+        pStreatV_leaf_shaded = pStreatV * (Pcomtemp[2][0] + Pcomtemp[3][0]) - pStreatV_leaf_sunlit
 
         ###-------------------------------------------------
 
@@ -187,7 +222,7 @@ class Urban_Veg:
                                        height2m1 * width2 * tants * np.abs(np.cos((saa - waa2) * rd)))
                 projs_temp = projs_wall
                 projs = projs + projs_temp
-            Overlapping = projection_overlap(tantv, tants, up)
+            Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
             partmax = np.max([projv, projs])
             partmin = np.min([projv, projs])
             # if (raa == 0) | (raa==180):
@@ -207,7 +242,6 @@ class Urban_Veg:
 
         pWall_sunlit_fraction = 0
         pWall_sunlit_fraction_Weight = 0
-        wall_terms = []
         wsunlit = 0
         lsunlit = 0
         for kshape1 in range(n_shape):
@@ -249,7 +283,7 @@ class Urban_Veg:
                 projs = projs + projs_temp
             projv = projv / n_part
             projs = projs / n_part
-            Overlapping = projection_overlap(tantv, tants, up)
+            Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
             if Overlapping==0:
                 a = 1
             partmax = np.max([projv, projs])
@@ -290,16 +324,12 @@ class Urban_Veg:
             lsunlit_ratio = 1.0
             wsunlit_ratio = 1.0
 
-            wall_terms.append((projv, partmax - projv + partmin * Overlapping, alpha1 * (
-                        (height1 * length1 * np.abs(np.cos((vaa - laa1) * rd))) * lsunlit * lsunlit_ratio +
-                        (height1 * width1 * np.abs(np.cos((vaa - waa1) * rd)) * wsunlit*wsunlit_ratio)), alpha1 * (
-                        (height1 * length1 * np.abs(np.cos((vaa - laa1) * rd))) +
-                        (height1 * width1 * np.abs(np.cos((vaa - waa1) * rd))))))
-        # tan(vza) and the smallest gap exponent are common factors; removing them keeps the ratio finite as vza -> 90
-        shift = min(term[0] for term in wall_terms)
-        for projv_k, dprojvs_k, sunlit_k, area_k in wall_terms:
-            pWall_sunlit_fraction = pWall_sunlit_fraction + np.exp(-(projv_k - shift) - dprojvs_k) * sunlit_k
-            pWall_sunlit_fraction_Weight = pWall_sunlit_fraction_Weight + np.exp(-(projv_k - shift)) * area_k
+            pWall_sunlit_fraction = pWall_sunlit_fraction + alpha1 * gapvs_wall * (
+                        (height1 * length1 * tantv * np.abs(np.cos((vaa - laa1) * rd))) * lsunlit * lsunlit_ratio +
+                        (height1 * width1 * tantv * np.abs(np.cos((vaa - waa1) * rd)) * wsunlit*wsunlit_ratio))
+            pWall_sunlit_fraction_Weight = pWall_sunlit_fraction_Weight + alpha1 * gapv_wall * (
+                        (height1 * length1 * tantv * np.abs(np.cos((vaa - laa1) * rd))) +
+                        (height1 * width1 * tantv * np.abs(np.cos((vaa - waa1) * rd))))
         if pWall_sunlit_fraction_Weight !=0:
             pWall_sunlit_fraction = pWall_sunlit_fraction / pWall_sunlit_fraction_Weight
         else:
@@ -323,7 +353,8 @@ class Urban_Veg:
         elif ifP ==2:
             return pWallV_sunlit * Ewall, pWallV_shaded * Ewall,\
                    pStreatV_veg_sunlit * Estreat, pStreatV_veg_shaded * Estreat,\
-                   pRoof_sunlit*Eroof,pRoof_shaded*Eroof,pStreatV_veg*Eveg + pStreatV_veg_scat
+                   pRoof_sunlit*Eroof,pRoof_shaded*Eroof,\
+                   pStreatV_leaf_sunlit*Eveg,pStreatV_leaf_shaded*Eveg
             # return wsunlit, wsunlit,\
             #        wsunlit, wsunlit, \
             #        wsunlit, wsunlit
@@ -346,7 +377,7 @@ class Urban_Veg:
         vaa = self.vaa_[kangle]
         sza = self.sza
         saa = self.saa
-        raa = np.asarray(np.abs(vaa - saa) % 360.0)
+        raa = np.asarray(vaa - saa)
 
         ind = raa>180
         if np.sum(ind)>0:
@@ -389,7 +420,7 @@ class Urban_Veg:
             projs_temp = projs_wall
             projs = projs + projs_temp
             proof = proof+ proj_roof
-        Overlapping = projection_overlap(tantv, tants, up)
+        Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
         partmax = np.max([projv,projs])
         partmin = np.min([projv,projs])
         # if (raa == 0) | (raa == 180):
@@ -436,7 +467,7 @@ class Urban_Veg:
                                        height2m1 * width2 * tants * np.abs(np.cos((saa - waa2) * rd)))
                 projs_temp = projs_wall
                 projs = projs + projs_temp
-            Overlapping = projection_overlap(tantv, tants, up)
+            Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
             partmax = np.max([projv, projs])
             partmin = np.min([projv, projs])
             # if (raa == 0) | (raa==180):
@@ -456,7 +487,6 @@ class Urban_Veg:
 
         pWall_sunlit_fraction = 0
         pWall_sunlit_fraction_Weight = 0
-        wall_terms = []
         wsunlit = 0
         lsunlit = 0
         for kshape1 in range(n_shape):
@@ -498,7 +528,7 @@ class Urban_Veg:
                 projs = projs + projs_temp
             projv = projv / n_part
             projs = projs / n_part
-            Overlapping = projection_overlap(tantv, tants, up)
+            Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
             if Overlapping==0:
                 a = 1
             partmax = np.max([projv, projs])
@@ -539,16 +569,12 @@ class Urban_Veg:
             lsunlit_ratio = 1.0
             wsunlit_ratio = 1.0
 
-            wall_terms.append((projv, partmax - projv + partmin * Overlapping, alpha1 * (
-                        (height1 * length1 * np.abs(np.cos((vaa - laa1) * rd))) * lsunlit * lsunlit_ratio +
-                        (height1 * width1 * np.abs(np.cos((vaa - waa1) * rd)) * wsunlit*wsunlit_ratio)), alpha1 * (
-                        (height1 * length1 * np.abs(np.cos((vaa - laa1) * rd))) +
-                        (height1 * width1 * np.abs(np.cos((vaa - waa1) * rd))))))
-        # tan(vza) and the smallest gap exponent are common factors; removing them keeps the ratio finite as vza -> 90
-        shift = min(term[0] for term in wall_terms)
-        for projv_k, dprojvs_k, sunlit_k, area_k in wall_terms:
-            pWall_sunlit_fraction = pWall_sunlit_fraction + np.exp(-(projv_k - shift) - dprojvs_k) * sunlit_k
-            pWall_sunlit_fraction_Weight = pWall_sunlit_fraction_Weight + np.exp(-(projv_k - shift)) * area_k
+            pWall_sunlit_fraction = pWall_sunlit_fraction + alpha1 * gapvs_wall * (
+                        (height1 * length1 * tantv * np.abs(np.cos((vaa - laa1) * rd))) * lsunlit * lsunlit_ratio +
+                        (height1 * width1 * tantv * np.abs(np.cos((vaa - waa1) * rd)) * wsunlit*wsunlit_ratio))
+            pWall_sunlit_fraction_Weight = pWall_sunlit_fraction_Weight + alpha1 * gapv_wall * (
+                        (height1 * length1 * tantv * np.abs(np.cos((vaa - laa1) * rd))) +
+                        (height1 * width1 * tantv * np.abs(np.cos((vaa - waa1) * rd))))
         if pWall_sunlit_fraction_Weight !=0:
             pWall_sunlit_fraction = pWall_sunlit_fraction / pWall_sunlit_fraction_Weight
         else:
@@ -588,7 +614,12 @@ class Urban_Veg:
         hcr = forestshape[3]
         rcr = forestshape[2]
 
-        Pveg_in_streat = (rcr * rcr * np.pi * std ) *(1-np.exp(-lai*0.5))
+        # Flux-weighted hemisphere canopy coverage drives the existing
+        # street/wall interreflection approximation for every canopy kind.
+        hz, ha = np.meshgrid(np.arange(5.0, 90.0, 10.0), np.arange(0.0, 360.0, 30.0))
+        weights = np.cos(np.deg2rad(hz)).ravel() * np.sin(np.deg2rad(hz)).ravel()
+        coverage = self.canopy_proportions(hz.ravel(), ha.ravel(), self.sza, self.saa)
+        Pveg_in_streat = float(np.average(coverage[2] + coverage[3], weights=weights))
         Estreat_ee = Estreat*(1-Pveg_in_streat)+Eveg*Pveg_in_streat
 
         n_shape = self.n_shape
@@ -598,7 +629,7 @@ class Urban_Veg:
         vaa = self.vaa_[hza0]
         sza = self.sza
         saa = self.saa
-        raa = np.asarray(np.abs(vaa - saa) % 360.0)
+        raa = np.asarray(vaa - saa)
 
         ind = raa>180
         if np.sum(ind)>0:
@@ -653,7 +684,7 @@ class Urban_Veg:
             projs = projs + projs_temp
 
         ### calculate the sunlitfraction, this is the overlappling increatsing part, hotspot O = 0
-        Overlapping = projection_overlap(tantv, tants, up)
+        Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
         partmax = np.max([projv, projs])
         partmin = np.min([projv, projs])
         # if (raa == 0) | (raa==180):
@@ -671,8 +702,23 @@ class Urban_Veg:
         ###-------------------------------
         ### 墙壁的计算
         ###-------------------------------
+        ### 半球投影的归一化
         if2 = 1.0
-        up_sums, down_sums, street_sum, roof_sums = urban_hemisphere_sums(shapes, n_part, 1.0)
+        ### 上半球的方向
+        n_hza0 = 90
+        n_haa0 = 60
+        hza0 = np.linspace(0, 89, n_hza0) # hemisphere space
+        haa0 = np.linspace(0, 360, n_haa0)
+        hza,haa = np.meshgrid(hza0,haa0)
+        hza = np.reshape(hza,-1)  ### to linear
+        haa = np.reshape(haa,-1)  ### to linear
+
+        ### step of hza in rad unit rather zhan degree unit
+        dangle = np.pi/2.0/n_hza0 # 角度的步长
+        tantemp = np.tan(hza * rd)   ### 半球的正切
+        # fweiplus = np.sin(hza*rd)*dangle *np.cos(hza*rd) # 角度的归一化方式, 一般是0.5
+        fweiplus = np.sin(hza * rd) * dangle  ##### 一般是1.0
+        fweiplusSum = np.sum(if2*fweiplus)  ### 权重累计，如果没有meshgrid，应该是0.5，现在总和是0.5*n_haa0
 
         ### 墙壁在观测方向的投影面积
         tempSv = (np.sum(shapes[:, 3] * shapes[:, 2]  * shapes[:, 0] * tantv * np.abs(np.cos((vaa - shapes[:, 4]) * rd))) +
@@ -727,11 +773,42 @@ class Urban_Veg:
 
                     if(height2 - heighttemp>0):
                         proj_roof = proj_roof + width2 * length2 * alpha2
+                        projStemp = projStemp + (alpha2 * (height2-heighttemp) *length2)* \
+                                     tantemp * np.abs(np.cos((haa - laa2) * rd)) + \
+                                     (alpha2 * (height2-heighttemp) *width2) * \
+                                     tantemp * np.abs(np.cos((haa - waa2) * rd))
+
                         tempSv = tempSv + (alpha2 * (height2-heighttemp) *length2)* tantv * np.abs(np.cos((vaa - laa2) * rd)) + \
                                 (alpha2 * (height2-heighttemp) *width2)* tantv * np.abs(np.cos((vaa - waa2) * rd))
                 ftempv = np.exp(-(tempSv))
-                eu = eu + up_sums[kshape1][kh] *tempdS*ftempv
-                ed = ed + down_sums[kshape1][kh] * tempdS * ftempv
+                ftemp = np.exp(-(projStemp))
+                eu = eu + np.sum(if2 *ftemp*fweiplus/ fweiplusSum) *tempdS*ftempv
+
+                projStemp = 0
+                proj_roof = 0
+                for kshape2 in range(n_shape):
+                    shape2 = shapes[kshape2]
+                    length2 = shape2[0]
+                    width2 = shape2[1]
+                    height2 = shape2[2]
+                    alpha2 = shape2[3]
+                    laa2 = shape2[4]
+                    waa2 = shape2[5]
+
+                    if (height2 - heighttemp < 0):
+                        proj_roof = proj_roof + width2 * length2 * alpha2
+                        projStemp = projStemp  + (alpha2 * (height2) *length2)* \
+                                     tantemp * np.abs(np.cos((haa - laa2) * rd)) + \
+                                     (alpha2 * (height2) *width2) * \
+                                     tantemp * np.abs(np.cos((haa - waa2) * rd))
+                    if (height2 - heighttemp > 0):
+                        proj_roof = proj_roof + width2 * length2 * alpha2
+                        projStemp = projStemp + (alpha2 * (heighttemp) * length2) * \
+                                    tantemp * np.abs(np.cos((haa - laa2) * rd)) + \
+                                    (alpha2 * (heighttemp) * width2) * \
+                                    tantemp * np.abs(np.cos((haa - waa2) * rd))
+                ftemp = np.exp(-(projStemp))
+                ed = ed + np.sum(if2 * ftemp * fweiplus/ fweiplusSum) * tempdS * ftempv
 
         if i0v == 0:
             p = 0
@@ -763,13 +840,18 @@ class Urban_Veg:
 
             if (height2 - heighttemp> 0):
                 proj_roof = proj_roof + width2 * length2 * alpha2
+                projStemp = projStemp + (alpha2 * (height2 - heighttemp) * length2) * \
+                            tantemp * np.abs(np.cos((haa - laa2) * rd)) + \
+                            (alpha2 * (height2 - heighttemp) * width2) * \
+                            tantemp * np.abs(np.cos((haa - waa2) * rd))
                 tempSv = tempSv + (alpha2 * (height2 - heighttemp) * length2) * tantv * np.abs(
                         np.cos((vaa - laa2) * rd)) + \
                          (alpha2 * (height2 - heighttemp) * width2) * tantv * np.abs(np.cos((vaa - waa2) * rd))
 
+        ftemp = np.exp(-(projStemp))
         ftempv = np.exp(-(tempSv)) ### 到达该体元的概率
         tempds = 1-proj_roof
-        ws = (1-street_sum) * ftempv * tempds
+        ws = (1-np.sum(if2*(ftemp) * fweiplus/ fweiplusSum)) * ftempv * tempds
 
 
         ### 从墙壁到达2屋顶，然后从屋顶反射到达天空的概率
@@ -795,14 +877,20 @@ class Urban_Veg:
                 if (height2 - heighttemp >= 0):
                     ### 屋顶的总面积，高于所针对的屋顶
                     proj_roof = proj_roof + width2 * length2 * alpha2
+                    ### 墙壁的投影面积，高于所针对的屋顶
+                    projStemp = projStemp + (alpha2 * (height2 - heighttemp) * length2) * \
+                                tantemp * np.abs(np.cos((haa - laa2) * rd)) + \
+                                (alpha2 * (height2 - heighttemp) * width2) * \
+                                tantemp * np.abs(np.cos((haa - waa2) * rd))
                     ### 屋顶的位置被看到的概率
                     tempSv = tempSv + (alpha2 * (height2 - heighttemp) * length2) * tantv * np.abs(
                              np.cos((vaa - laa2) * rd)) + \
                              (alpha2 * (height2 - heighttemp) * width2) * tantv * \
                              np.abs(np.cos((vaa - waa2) * rd))
+            ftemp = np.exp(-(projStemp))
             tempdS = length1 * width1 * alpha1*1.0/(1-proj_roof)
             ftempv = np.exp(-(tempSv))*(1-proj_roof)
-            wr = wr + (1-roof_sums[kshape1]) * tempdS * ftempv
+            wr = wr + (1-np.sum(if2 * (ftemp) * fweiplus/fweiplusSum)) * tempdS * ftempv
 
 
 
@@ -843,23 +931,27 @@ class Urban_Veg:
         # eww = 0
         # ews = 0
         emw = ews + eww+ewr
-        # path-specific sunlit share of the emitting walls x mean wall sun gap fts (validated against Monte Carlo)
-        k_ww, k_ws = urban_wall_self_lit_shares(shapes, vza, vaa, sza, saa)
-        emws = (eww * k_ww + (ews + ewr) * k_ws) * fts
+        emws = emw * fts*vhraa
         emwh = emw - emws
         ems = esw
         emss = ems * pStreatS
         emsh = ems - emss
 
-        emss = emss * (1-Pveg_in_streat)
-        emsh = emsh * (1-Pveg_in_streat)
-        emv = ems * Pveg_in_streat
+        street_to_wall = (1 - Ewall) * ed * i0v
+        emss = street_to_wall * Estreat * (1 - Pveg_in_streat) * pStreatS
+        emsh = street_to_wall * Estreat * (1 - Pveg_in_streat) * (1 - pStreatS)
+        emv = street_to_wall * Eveg * Pveg_in_streat
+        leaf_coverage = float(np.average(coverage[2] + coverage[3], weights=weights))
+        leaf_sun_fraction = (float(np.average(coverage[2], weights=weights)) /
+                             leaf_coverage if leaf_coverage > 0.0 else 0.0)
+        emvs = emv * pStreatS * leaf_sun_fraction
+        emvh = emv - emvs
 
         # print(vza,vaa,wr)
         if ifP == 1:
             return emw,ems,0
         elif ifP == 2:
-            return emws, emwh, emss, emsh, 0, 0,emv
+            return emws, emwh, emss, emsh, 0, 0, emvs, emvh
         elif ifP == 3:
             return 0, 0, 0, 0, 0, 0
         else:

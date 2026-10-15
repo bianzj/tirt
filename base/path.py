@@ -283,6 +283,7 @@ def oblique_ellipsoid(zk,rk, za, hc, hcr, rcr):
 
 
 	return np.abs(upArea), np.abs(upVol)
+
 def crosscutting_ellipsoid(zk, xza, hc, hcr, rcr):
 	'''
 	冠层表面以上部分的体积和投影面积
