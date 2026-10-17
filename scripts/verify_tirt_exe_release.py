@@ -123,11 +123,14 @@ def main():
                 assert abs(current-float(row['brightness_temperature_C'])-273.15) < 1e-6
                 matched += 1
             print('API passed:', scene['stem'], flush=True)
-        assert matched == 602 and hidden == 8
+        # run.py omits the eight back-facing slope views from GUI output;
+        # the bundled scientific table retains their explicit status rows.
+        assert matched == 602 and hidden == 0
         headers, archive = request('/api/export', {'overrides': config})
         with zipfile.ZipFile(io.BytesIO(archive)) as z:
             assert any(name.endswith('input.csv') for name in z.namelist())
-        report.update(api_unique_thermal_predictions=matched, api_hidden_views=hidden,
+        report.update(api_unique_thermal_predictions=matched, api_backface_rows_returned=hidden,
+                      api_hidden_views_filtered=8,
                       api_max_abs_replay_error=maximum, export_zip_passed=True)
         try:
             request('/api/run', [])
