@@ -45,7 +45,10 @@ run('bindEvents()');
   for (const [file, identity, cls] of [['index.html', 'TIRT-Static', 'model-static'],
       ['time.html', 'TIRT-Dynamic', 'model-dynamic'], ['angle/index.html', 'TIRT-Static', 'model-static']]) {
     const page = fs.readFileSync(path.join(root, 'gui', file), 'utf8');
-    assert(page.includes(`aria-label="${identity}"`));
+    assert(page.includes('aria-label="STREAM TIRT"'));
+    assert(page.includes('<span class="logo-stream">STREAM</span>'));
+    assert(page.includes('<span class="logo-tirt">TIRT</span>'));
+    assert(page.includes(`<h1>${identity}`));
     assert(page.includes(cls));
     assert(page.includes('model_identity.css'));
   }

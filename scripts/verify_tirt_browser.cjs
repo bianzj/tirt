@@ -60,13 +60,13 @@ async function main() {
   await send('Runtime.enable'); await send('Page.enable');
   await send('Emulation.setDeviceMetricsOverride', { width: 1680, height: 1050, deviceScaleFactor: 1, mobile: false });
   await until(`document.querySelector('.model-static') && document.querySelector('#run-button')`);
-  const staticColor = await evaluate(`getComputedStyle(document.querySelector('.model-static')).backgroundColor`);
+  const staticColor = await evaluate(`getComputedStyle(document.querySelector('.logo-stream')).backgroundColor`);
   assert.equal(staticColor, 'rgb(15, 114, 199)');
   await until(`document.querySelector('#scene-container canvas')`);
   fs.writeFileSync(path.join(folder, 'static.png'), Buffer.from((await send('Page.captureScreenshot')).data, 'base64'));
   await evaluate(`document.querySelector('a.dynamic-link').click()`);
   await until(`document.querySelector('.model-dynamic') && typeof currentOverrides === 'function'`);
-  const dynamicColor = await evaluate(`getComputedStyle(document.querySelector('.model-dynamic')).backgroundColor`);
+  const dynamicColor = await evaluate(`getComputedStyle(document.querySelector('.logo-tirt')).backgroundColor`);
   assert.equal(dynamicColor, 'rgb(213, 59, 54)');
   // Run the untouched default day before testing edited angles and bands.
   await evaluate(`document.getElementById('run-button').click()`);

@@ -51,7 +51,7 @@ def main():
     args = parser.parse_args()
     repository, folder = args.repository.resolve(), args.assets.resolve()
     info = json.loads((folder/'build_info.json').read_text(encoding='utf-8'))
-    assert info['version'] == '1.1.1'
+    assert info['version'] == '1.1.2'
     verification = json.loads((folder/'exe_verification.json').read_text(encoding='utf-8'))
     assert verification['dynamic_verification']['uploads_passed']
     assert len(verification['dynamic_verification']['cases']) == 6
@@ -74,26 +74,26 @@ def main():
     session.headers.update({'Authorization': 'Bearer '+token, 'Accept': 'application/vnd.github+json',
                             'X-GitHub-Api-Version': '2022-11-28'})
     api = 'https://api.github.com/repos/bianzj/tirt'
-    response = session.get(api+'/releases/tags/v1.1.1', timeout=30)
+    response = session.get(api+'/releases/tags/v1.1.2', timeout=30)
     if response.status_code == 404:
         notes = (folder/'RELEASE_NOTES.md').read_text(encoding='utf-8')
-        response = session.post(api+'/releases', json=dict(tag_name='v1.1.1', target_commitish=head,
-            name='TiRT 1.1.1', body=notes, draft=True, prerelease=False), timeout=30)
+        response = session.post(api+'/releases', json=dict(tag_name='v1.1.2', target_commitish=head,
+            name='TiRT 1.1.2', body=notes, draft=True, prerelease=False), timeout=30)
         response.raise_for_status()
         release = response.json()
     else:
         response.raise_for_status()
         release = response.json()
         if not release['draft']:
-            raise SystemExit('v1.1.1 is already published; refusing to replace a published release.')
+            raise SystemExit('v1.1.2 is already published; refusing to replace a published release.')
     receipt = folder/'github_release_receipt.json'
     receipt.write_text(json.dumps({'release_id': release['id'], 'draft': True,
-        'tag': 'v1.1.1', 'source_commit': built_from, 'release_commit': head}, indent=2), encoding='utf-8')
+        'tag': 'v1.1.2', 'source_commit': built_from, 'release_commit': head}, indent=2), encoding='utf-8')
     upload = release['upload_url'].split('{', 1)[0]
     assert urlsplit(upload).hostname == 'uploads.github.com'
     uploaded = {a['name']: a for a in release['assets']}
     assets = [folder/name for name in ('TiRT.exe', 'build_info.json', 'exe_verification.json',
-                                       'TiRT-1.1.1-verification.zip', 'SHA256SUMS.txt')]
+                                       'TiRT-1.1.2-verification.zip', 'SHA256SUMS.txt')]
     verified = []
     for path in assets:
         expected = sha(path)
@@ -122,12 +122,12 @@ def main():
                              json={'draft': False, 'prerelease': False, 'make_latest': 'true'}, timeout=30)
     response.raise_for_status()
     result = response.json()
-    assert not result['draft'] and result['tag_name'] == 'v1.1.1'
+    assert not result['draft'] and result['tag_name'] == 'v1.1.2'
     latest = session.get(api+'/releases/latest', timeout=30)
     latest.raise_for_status()
     assert latest.json()['id'] == result['id']
     receipt.write_text(json.dumps(dict(release_id=result['id'], release_url=result['html_url'],
-        tag='v1.1.1', source_commit=built_from, release_commit=head, published=True, latest=True, assets=verified),
+        tag='v1.1.2', source_commit=built_from, release_commit=head, published=True, latest=True, assets=verified),
         ensure_ascii=False, indent=2), encoding='utf-8')
     print('PUBLISHED', result['html_url'], flush=True)
 

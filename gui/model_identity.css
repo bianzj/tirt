@@ -1,12 +1,14 @@
-/* One model identity per page; navigation retains the destination's color. */
+/* Shared STREAM/TIRT brand; model names belong to titles and navigation. */
 :root { --static-color: #0f72c7; --dynamic-color: #d53b36; }
 .brand-logo.model-static, .brand-logo.model-dynamic {
-  display: inline-flex; align-items: center; gap: 9px; padding: 8px 11px;
+  display: inline-grid; grid-template-columns: auto 10px auto auto;
+  align-items: stretch; gap: 0; padding: 0; background: transparent;
   color: #fff; flex-shrink: 0;
 }
-.brand-logo.model-static { background: var(--static-color); }
-.brand-logo.model-dynamic { background: var(--dynamic-color); }
-.brand-logo .app-version { color: #fff; opacity: .9; font-size: 11px; }
+.brand-logo .app-version {
+  display: grid; place-items: center; padding: 0 8px;
+  color: #5b7083; background: #fff; font-size: 11px;
+}
 .model-link.static-link { color: var(--static-color); border-color: var(--static-color); }
 .model-link.dynamic-link { color: var(--dynamic-color); border-color: var(--dynamic-color); }
 body:has(.model-static) { --cyan: var(--static-color); }
