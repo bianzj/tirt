@@ -28,6 +28,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from run import run  # noqa: E402
 from base.inputio import read_input  # noqa: E402
 from base.version import __version__  # noqa: E402
+from gui.tirteb_server import _angle_request, _time_request, _json_safe  # noqa: E402
 
 
 FILE_INPUTS = {
@@ -128,7 +129,7 @@ class Handler(SimpleHTTPRequestHandler):
         return
 
     def _json(self, status: int, payload: dict) -> None:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        body = json.dumps(_json_safe(payload), ensure_ascii=False, allow_nan=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -158,7 +159,7 @@ class Handler(SimpleHTTPRequestHandler):
             self._json(200, {"ok": True, "message": "TiRT is shutting down"})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
-        if path not in {"/api/run", "/api/export"}:
+        if path not in {"/api/run", "/api/export", "/api/run_time", "/api/run_angle"}:
             self._json(404, {"error": "Not found"})
             return
         work_dir = None
@@ -168,6 +169,10 @@ class Handler(SimpleHTTPRequestHandler):
             if not isinstance(payload, dict):
                 raise ValueError("Request body must be an object")
             work_dir = Path(tempfile.mkdtemp(prefix="tirt-gui-"))
+            if path in {"/api/run_time", "/api/run_angle"}:
+                simulate = _time_request if path == "/api/run_time" else _angle_request
+                self._json(200, simulate(payload, work_dir))
+                return
             overrides = _prepare_overrides(payload, work_dir)
             if path == "/api/export":
                 body = _export_inputs(overrides, work_dir)

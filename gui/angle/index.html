@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>STREAM TIRT Directional Simulator</title>
+  <title>TIRT-Static 1.1.1 — 静态场景</title>
   <link rel="stylesheet" href="styles.css?v=streamsim-scene-2">
+  <link rel="stylesheet" href="../model_identity.css?v=1.1.1">
   <script type="importmap">
     {
       "imports": {
@@ -18,19 +19,17 @@
   <div class="app-shell">
     <header class="topbar">
       <div class="brand-lockup">
-        <div class="brand-logo" aria-label="STREAM TIRT">
-          <span class="logo-stream">STREAM</span>
-          <span class="logo-slash" aria-hidden="true"></span>
-            <span class="logo-tirt">TIRT</span>
+        <div class="brand-logo model-static" aria-label="TIRT-Static">
+          <span class="model-name">TIRT-Static</span><span class="app-version">v1.1.1</span>
         </div>
         <div>
           <div class="eyebrow">THERMAL INFRARED RADIATIVE TRANSFER</div>
-          <h1>Directional Simulator</h1>
+          <h1>Static scene</h1>
         </div>
       </div>
       <div class="topbar-actions">
         <button id="language-toggle" class="button button-secondary language-toggle" type="button" title="Switch to Chinese" aria-label="Switch to Chinese"><span data-language-label>中文</span></button>
-        <a class="button button-secondary version-switch" href="../time.html" title="Open energy-balance model"><span class="button-icon">&#8594;</span>Energy balance</a>
+        <a class="button button-secondary version-switch model-link dynamic-link" href="../time.html" title="TIRT-Dynamic"><span class="button-icon">&#8594;</span><span>TIRT-Dynamic</span></a>
         <span id="status-pill" class="status-pill idle"><i></i><span>Ready</span></span>
         <button id="run-button" class="button button-primary" aria-busy="false"><span class="button-icon run-icon" aria-hidden="true">&#9654;</span><span class="button-label">Run simulation</span></button>
         <button id="export-button" class="button button-secondary"><span class="button-icon">&#8595;</span>Save input.csv</button>

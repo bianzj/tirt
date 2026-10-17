@@ -23,6 +23,19 @@ from tirteb_run import _write_input_snapshot, run
 
 
 class SpectralAndConductionTests(unittest.TestCase):
+    def test_urban_dynamic_observation_uses_resolved_sky_partition(self):
+        from tirteb_run import _band_observation
+        settings = {"surface_model": "urban", "shortwave_diffuse_fraction": -1}
+        state = {"sza": 30, "saa": 0, "shortwave_diffuse_fraction": .32}
+        with patch('tirteb_run._spectral_values', return_value=(.1, .2, .3)), \
+             patch('tirteb_run.urban_directional_reflectance', return_value=.2) as urban, \
+             patch('tirteb_run.component_proportions', return_value=np.array([1, 0, 0, 0])), \
+             patch('tirteb_run.urban_component_fractions', return_value=np.ones(6)/6), \
+             patch('tirteb_run.urban_canopy_fraction', return_value=.3):
+            _band_observation(settings, {'shortwave': 700}, state, 'urban', .86, 20, 90)
+        self.assertEqual(urban.call_args.args[0]['shortwave_diffuse_fraction'], .32)
+        self.assertEqual(settings['shortwave_diffuse_fraction'], -1)
+
     def test_urban_query_converts_um_to_nm_for_optical_and_thermal_bands(self):
         settings = {
             "wavelengths": [400.0, 550.0, 860.0, 10500.0],

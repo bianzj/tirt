@@ -141,8 +141,14 @@ def _band_observation(settings, meteo, state, name, wavelength, vza, vaa):
     sunlit = state.get("sunlit_surface", True)
     leaf_rho, leaf_tau, soil_rho = _spectral_values(settings, wavelength, name)
     if name == "urban" and float(wavelength) < 2.5:
+        # The state holds the meteorology-derived diffuse fraction; settings
+        # may still contain -1 (automatic partition), which is not a fraction.
+        from base.radiation import _shortwave_diffuse_fraction
+        diffuse = state.get("shortwave_diffuse_fraction")
+        if diffuse is None:
+            diffuse = _shortwave_diffuse_fraction(settings, meteo["shortwave"], state["sza"])
         reflectance = urban_directional_reflectance(
-            settings,
+            dict(settings, shortwave_diffuse_fraction=diffuse),
             wavelength,
             local_vza,
             local_vaa,

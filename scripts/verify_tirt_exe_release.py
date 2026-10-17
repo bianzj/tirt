@@ -14,6 +14,11 @@ import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from base.version import __version__
+from scripts.check_dynamic_api import check_dynamic_api
 
 
 def main():
@@ -69,7 +74,7 @@ def main():
         else:
             query = urllib.request.Request(url+path, data=json.dumps(body).encode('utf-8'),
                                            headers={'Content-Type': 'application/json'})
-        with opener.open(query, timeout=60) as response:
+        with opener.open(query, timeout=180) as response:
             return response.headers, response.read()
 
     process = subprocess.Popen([str(exe), '--no-browser', '--port', str(port)], **startup)
@@ -85,14 +90,22 @@ def main():
         else:
             raise AssertionError('Exe GUI did not become ready')
         version = json.loads(request('/api/version')[1])
-        assert health['ok'] and version['version'] == '1.1.0' and version['frozen']
+        assert health['ok'] and version['version'] == __version__ and version['frozen']
         report['version'] = version
         static = ['/', '/app.js', '/styles.css', '/language.js', '/vendor/three.module.js',
-                  '/vendor/controls/OrbitControls.js']
+                  '/vendor/controls/OrbitControls.js', '/time.html', '/time.js', '/time.css',
+                  '/time_scene.js', '/model_identity.css', '/angle/']
         for path in static:
             assert len(request(path)[1]) > 50
         assert 'v1.1' in request('/')[1].decode('utf-8')
+        assert 'TIRT-Static' in request('/')[1].decode('utf-8')
+        assert 'TIRT-Dynamic' in request('/time.html')[1].decode('utf-8')
         report['static_resources_passed'] = static
+        report['dynamic_verification'] = check_dynamic_api(request)
+        directional = json.loads(request('/api/run_angle', {'overrides': dict(surface_model='plane',
+            vegetation_model='bare', geometry_mode=0, vza=0, vaa=0, wavelengths='10.5')})[1])
+        assert directional['ok'] and directional['count'] > 0
+        report['legacy_angle_endpoint_passed'] = True
         expected = {}
         with (bundle/'all_results.csv').open(encoding='utf-8', newline='') as f:
             for row in csv.DictReader(f):

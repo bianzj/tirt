@@ -1,0 +1,13 @@
+/* One model identity per page; navigation retains the destination's color. */
+:root { --static-color: #0f72c7; --dynamic-color: #d53b36; }
+.brand-logo.model-static, .brand-logo.model-dynamic {
+  display: inline-flex; align-items: center; gap: 9px; padding: 8px 11px;
+  color: #fff; flex-shrink: 0;
+}
+.brand-logo.model-static { background: var(--static-color); }
+.brand-logo.model-dynamic { background: var(--dynamic-color); }
+.brand-logo .app-version { color: #fff; opacity: .9; font-size: 11px; }
+.model-link.static-link { color: var(--static-color); border-color: var(--static-color); }
+.model-link.dynamic-link { color: var(--dynamic-color); border-color: var(--dynamic-color); }
+body:has(.model-static) { --cyan: var(--static-color); }
+body:has(.model-dynamic) { --cyan: var(--dynamic-color); }

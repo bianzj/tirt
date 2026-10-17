@@ -4,6 +4,8 @@ const sourceText = new WeakMap();
 const sourceAttributes = new WeakMap();
 
 const ZH = Object.freeze({
+  "Static scene": "静态场景",
+  "Dynamic scene": "动态场景",
   "THERMAL INFRARED RADIATIVE TRANSFER": "热红外辐射传输",
   "THERMAL INFRARED ENERGY BALANCE": "热红外能量平衡",
   "Directional Simulator": "方向性模拟器",

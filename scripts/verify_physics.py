@@ -11,6 +11,7 @@ PATTERNS = (
     "test_tirt_physics.py",
     "test_tirt_input_snapshot.py",
     "test_tirt_gui_inputs.py",
+    "test_tirt_dynamic_gui.py",
     "test_tirteb_physics.py",
     "test_urban_wall_radiation.py",
     "test_optical.py",

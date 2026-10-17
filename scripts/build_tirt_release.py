@@ -16,7 +16,7 @@ from base.version import __version__
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--dist', type=Path, default=ROOT / 'release/v1.1')
+    parser.add_argument('--dist', type=Path, default=ROOT / f'release/v{__version__}')
     args = parser.parse_args()
     if sys.platform != 'win32':
         raise SystemExit('Build the Windows executable on Windows.')
@@ -47,7 +47,7 @@ def main():
     version = f'''VSVersionInfo(ffi=FixedFileInfo(filevers={parts!r}, prodvers={parts!r},
 mask=0x3f, flags=0, OS=0x40004, fileType=0x1, subtype=0, date=(0,0)),
 kids=[StringFileInfo([StringTable('040904B0',[
-StringStruct('CompanyName','TIRTLab'), StringStruct('FileDescription','TiRT 1.1'),
+StringStruct('CompanyName','TIRTLab'), StringStruct('FileDescription','TiRT {__version__}'),
 StringStruct('FileVersion','{__version__}'), StringStruct('InternalName','TiRT'),
 StringStruct('OriginalFilename','TiRT.exe'), StringStruct('ProductName','TiRT'),
 StringStruct('ProductVersion','{__version__}')])]), VarFileInfo([VarStruct('Translation',[1033,1200])])])'''
@@ -57,6 +57,7 @@ StringStruct('ProductVersion','{__version__}')])]), VarFileInfo([VarStruct('Tran
                                   str(python_root/'Scripts'), env.get('PATH', '')])
     bundle = ROOT / 'docs/validation/current_model_20261015'
     data = [(str(ROOT/'gui'), 'gui'), (str(ROOT/'data'), 'data'), (str(ROOT/'input.csv'), '.'),
+            (str(ROOT/'input_tirteb.csv'), '.'),
             (str(metadata/'build_info.json'), '.'),
             (str(bundle/'inputs'), 'docs/validation/current_model_20261015/inputs')]
     for name in ('all_results.csv', 'histream_reference.csv', 'accuracy.csv', 'manifest.json'):

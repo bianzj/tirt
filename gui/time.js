@@ -8,7 +8,7 @@ let diagnosticRows = [];
 let toastTimer;
 window.temporalState = { get seriesRows() { return seriesRows; }, get observationRows() { return observationRows; } };
 
-const COLORS = { cyan: "#1683a3", amber: "#d38a24", coral: "#d53b36", soft: "#35566b", muted: "#5d7383", grid: "#c9dae4" };
+const COLORS = { cyan: "#d53b36", amber: "#d38a24", coral: "#d53b36", soft: "#35566b", muted: "#5d7383", grid: "#c9dae4" };
 const quantityLabels = {
   Tv_C: "Brightness temperature", Tss_C: "Sunlit soil temperature", Tsh_C: "Shaded soil temperature",
   Tls_C: "Sunlit leaf temperature", Tlh_C: "Shaded leaf temperature", Ta_C: "Air temperature",
@@ -30,6 +30,7 @@ const urbanQuantities = [
 const urbanLeafQuantities = ["Tleaf_sunlit_C", "Tleaf_shaded_C"];
 
 function diagnosticValue(row, key) {
+  if (row?.[key] == null || row[key] === "") return null;
   const value = Number(row?.[key]);
   return Number.isFinite(value) ? value : null;
 }
@@ -142,7 +143,7 @@ function currentOverrides() {
     building_density: value("building-density"), building_length: value("building-length"), building_width: value("building-width"), building_height: value("building-height"), building_azimuth: value("building-azimuth"),
     urban_roughness_length: value("urban-roughness-length"), urban_canyon_roughness_ratio: value("urban-canyon-roughness-ratio"), urban_canyon_min_ratio: value("urban-canyon-min-ratio"), urban_leaf_wind_decay: value("urban-leaf-wind-decay"), urban_leaf_boundary_factor: value("urban-leaf-boundary-factor"),
     latitude: value("latitude"), longitude: value("longitude"), utc_offset_hours: value("utc-offset"), start_time: startTime, end_time: endTime,
-    geometry_mode: directionsFromFile ? "2" : "0", geometry_pair_mode: "zip", vza: observationVza, vaa: observationVaa,
+    geometry_mode: directionsFromFile ? "2" : "0", geometry_pair_mode: "zip", direction_source: directionsFromFile ? "file" : "direct", vza: observationVza, vaa: observationVaa,
     spectral_source: "direct", wavelengths: wavelengths.join(";"),
     leaf_optics_source: "prospect", soil_optics_source: "bsm", urban_spectrum_source: "direct",
     cab: value("cab"), cw: value("cw"), cdm: value("cdm"), cs: value("cs"), n: value("leaf-n"),
@@ -179,7 +180,7 @@ function updateObservationTimeFields() {
 }
 
 function timeValue(row) { return Number(row.time); }
-function finiteRows(rows, key) { return rows.map((row) => ({ x: timeValue(row), y: Number(row[key]) })).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y)); }
+function finiteRows(rows, key) { return rows.filter(row => row[key] != null && row[key] !== "").map((row) => ({ x: timeValue(row), y: Number(row[key]) })).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y)); }
 function xLabel(x, first) { return `${((x - first) * 24).toFixed(1)} h`; }
 
 function canvasContext(canvas) {
@@ -223,7 +224,7 @@ function updateMetrics() {
 }
 
 function csvCell(value) { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text; }
-function outputValue(value) { const number = Number(value); return Number.isFinite(number) ? number.toFixed(3) : value; }
+function outputValue(value) { if (value == null || value === "") return ""; const number = Number(value); return Number.isFinite(number) ? number.toFixed(3) : value; }
 function saveRowsCsv(rows, filename) { if (!rows.length) return; const fields = [...new Set(rows.flatMap((row) => Object.keys(row)))]; const body = [fields.map(csvCell).join(","), ...rows.map((row) => fields.map((field) => csvCell(outputValue(row[field]))).join(","))].join("\n"); const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([body], { type: "text/csv;charset=utf-8" })); link.download = filename; link.click(); URL.revokeObjectURL(link.href); notify(`Saved ${filename}`); }
 function saveCsv() { saveRowsCsv(seriesRows, "processes.csv"); }
 function saveText(filename, text) { const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" })); link.download = filename; link.click(); URL.revokeObjectURL(link.href); notify(`Saved ${filename}`); }
@@ -248,6 +249,9 @@ async function runSimulation() {
     seriesRows = payload.series || [];
     observationRows = payload.observations || [];
     diagnosticRows = payload.intermediate || [];
+    const unclosed = seriesRows.filter(row => row.closed === false || String(row.closed).toLowerCase() === "false");
+    const maxResidual = Math.max(0, ...seriesRows.map(row => Number(row.energy_balance_residual_W_m2)).filter(Number.isFinite));
+    $("convergence-summary").textContent = `Energy balance: ${seriesRows.length - unclosed.length}/${seriesRows.length} closed · max residual ${maxResidual.toFixed(3)} W/m²`;
     $("save-button").disabled = !seriesRows.length;
     $("save-observations-button").disabled = !observationRows.length;
     $("empty-state").classList.toggle("is-hidden", Boolean(seriesRows.length));
@@ -259,6 +263,7 @@ async function runSimulation() {
     });
     setStatus("Complete", "idle");
     if (displayErrors.length) notify(`Simulation completed; display warning: ${displayErrors.join("; ")}`, true);
+    else if (unclosed.length) notify(`Time series complete · ${unclosed.length} unclosed time steps; see energy balance residuals`, true);
     else notify(`Time series complete · ${payload.count} time steps`);
   } catch (error) {
     console.error("TiRT energy-balance run failed", error);
@@ -288,7 +293,7 @@ function bindEvents() {
   document.getElementById("exit-button").addEventListener("click", shutdownTiRT);
   $("run-button").addEventListener("click", runSimulation); $("save-button").addEventListener("click", saveCsv); $("save-observations-button").addEventListener("click", saveObservations); $("save-input-button").addEventListener("click", saveInput); $("reset-button").addEventListener("click", () => window.location.reload()); $("quantity").addEventListener("change", () => { updateMetrics(); drawTimeCharts(); }); $("surface-model").addEventListener("change", () => { updateConditionalFields(); updateQuantityOptions(); updateDiagnostics(); window.refreshTemporalScene?.(); }); $("vegetation-model").addEventListener("change", () => { updateConditionalFields(); updateQuantityOptions(); updateDiagnostics(); window.refreshTemporalScene?.(); });
   $("meteo-upload").addEventListener("change", async (event) => { const file = event.target.files[0]; if (!file) return; meteoText = await file.text(); $("meteo-status").textContent = "✓"; $("meteo-status").className = "file-status has-file"; $("meteo-status").setAttribute("aria-label", `Selected ${file.name}`); notify(`Loaded ${file.name}`); });
-  [["angle-upload", "directions", "angle-status"], ["wavelength-upload", "wavelengths", "wavelength-status"], ["vegetation-spectrum-upload", "leaf_optics", "vegetation-spectrum-status"], ["soil-spectrum-upload", "soil_optics", "soil-spectrum-status"], ["urban-spectrum-upload", "urban_spectrum", "urban-spectrum-status"]].forEach(([id, key, statusId]) => {
+  [["angle-upload", "directions", "angle-status"], ["wavelength-upload", "wavelengths", "wavelength-status"], ["vegetation-spectrum-upload", "vegetation_spectrum", "vegetation-spectrum-status"], ["soil-spectrum-upload", "soil_spectrum", "soil-spectrum-status"], ["urban-spectrum-upload", "urban_spectrum", "urban-spectrum-status"]].forEach(([id, key, statusId]) => {
     $(id).addEventListener("change", async (event) => {
       const file = event.target.files[0]; if (!file) return;
       spectrumFiles[key] = await file.text(); const status = $(statusId); status.textContent = "✓"; status.className = "file-status has-file"; status.setAttribute("aria-label", `Selected ${file.name}`);

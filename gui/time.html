@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TiRT · Energy Balance</title>
+  <title>TIRT-Dynamic 1.1.1 — 动态场景</title>
   <link rel="stylesheet" href="time.css?v=streamsim-scene-2">
+  <link rel="stylesheet" href="model_identity.css?v=1.1.1">
   <script type="importmap">
     {"imports":{"three":"./vendor/three.module.js","three/addons/":"./vendor/"}}
   </script>
@@ -13,12 +14,12 @@
   <div class="app-shell">
     <header class="topbar">
       <div class="brand-lockup">
-        <div class="brand-logo" aria-label="TiRT"><span class="logo-stream">TiRT</span><span class="logo-slash" aria-hidden="true"></span><span class="logo-tirt">EB</span></div>
-        <div><div class="eyebrow">THERMAL INFRARED ENERGY BALANCE</div><h1>Temporal Simulator</h1></div>
+        <div class="brand-logo model-dynamic" aria-label="TIRT-Dynamic"><span class="model-name">TIRT-Dynamic</span><span class="app-version">v1.1.1</span></div>
+        <div><div class="eyebrow">THERMAL INFRARED ENERGY BALANCE</div><h1>Dynamic scene</h1></div>
       </div>
       <div class="topbar-actions">
         <button id="language-toggle" class="button button-secondary language-toggle" type="button" title="Switch to Chinese" aria-label="Switch to Chinese"><span data-language-label>中文</span></button>
-        <a class="button button-secondary version-switch" href="angle/" title="Open directional model"><span class="button-icon">&#8594;</span>Directional model</a>
+        <a class="button button-secondary version-switch model-link static-link" href="index.html" title="TIRT-Static"><span class="button-icon">&#8594;</span><span>TIRT-Static</span></a>
         <span id="status-pill" class="status-pill idle"><i></i><span>Ready</span></span>
         <button id="run-button" class="button button-primary"><span class="button-icon">&#9654;</span>Run time series</button>
         <button id="save-input-button" class="button button-secondary"><span class="button-icon">&#8595;</span>Save input.csv</button>
@@ -122,7 +123,8 @@
           <div class="overview">
             <div class="panel-toolbar"><div><span class="section-kicker">TEMPORAL OUTPUT</span><h2>Time evolution</h2></div><div class="output-toolbar"><label>Time output<select id="quantity"><option value="Tv_C" selected>Brightness temperature</option><option value="Tss_C">Sunlit soil temperature</option><option value="Tsh_C">Shaded soil temperature</option><option value="Tls_C">Sunlit leaf temperature</option><option value="Tlh_C">Shaded leaf temperature</option><option value="Troof_sunlit_C">Sunlit roof temperature</option><option value="Troof_shaded_C">Shaded roof temperature</option><option value="Twall_sunlit_C">Sunlit wall temperature</option><option value="Twall_shaded_C">Shaded wall temperature</option><option value="Tstreet_sunlit_C">Sunlit street temperature</option><option value="Tstreet_shaded_C">Shaded street temperature</option><option value="Tleaf_sunlit_C">Sunlit leaf temperature</option><option value="Tleaf_shaded_C">Shaded leaf temperature</option><option value="Ta_C">Air temperature</option><option value="LE">Latent heat flux</option><option value="H">Sensible heat flux</option><option value="G">Ground heat flux</option></select></label><span id="series-count" class="record-count">No time series</span></div></div>
             <div class="metric-strip"><div class="metric"><span>Selected quantity</span><strong id="metric-label">Brightness temperature</strong><small>time series</small></div><div class="metric"><span>Minimum</span><strong id="metric-min">--</strong><small id="metric-min-time">--</small></div><div class="metric"><span>Maximum</span><strong id="metric-max">--</strong><small id="metric-max-time">--</small></div><div class="metric"><span>Time steps</span><strong id="metric-count">--</strong><small>selected interval</small></div></div>
-            <article class="chart-card"><div class="chart-heading"><div><span class="chart-kicker">STREAM TIRT ENERGY BALANCE</span><h3 id="chart-title">Brightness temperature over time</h3></div><span class="chart-badge cyan">TIME</span></div><canvas id="time-chart"></canvas></article>
+            <p id="convergence-summary" class="field-note" aria-live="polite"></p>
+            <article class="chart-card"><div class="chart-heading"><div><span class="chart-kicker">TIRT-Dynamic</span><h3 id="chart-title">Brightness temperature over time</h3></div><span class="chart-badge cyan">TIME</span></div><canvas id="time-chart"></canvas></article>
             <article id="diagnostics-card" class="diagnostics-card is-hidden"><div class="chart-heading"><div><span class="chart-kicker">URBAN COMPONENTS</span><h3>Resistance and energy diagnostics</h3></div><span class="chart-badge amber">LATEST STEP</span></div><div id="diagnostics-meta" class="diagnostics-meta">--</div><div class="diagnostics-table-wrap"><table class="diagnostics-table"><thead><tr><th>Component</th><th>State</th><th>SW direct</th><th>SW diffuse</th><th>LW input</th><th>LW out</th><th>H</th><th>LE</th><th>G</th><th>raa</th><th>rss</th></tr></thead><tbody id="diagnostics-body"></tbody></table></div></article>
           </div>
           <div id="empty-state" class="empty-state"><div class="empty-icon">◌</div><h3>Run a time series to inspect the temporal response</h3><p>Use a meteorological file or the default driver.</p></div>
@@ -134,6 +136,6 @@
   </div>
   <script type="module" src="language.js?v=1"></script>
   <script type="module" src="time_scene.js?v=streamsim-scene-2"></script>
-  <script src="time.js?v=9"></script>
+  <script src="time.js?v=1.1.1"></script>
 </body>
 </html>

@@ -46,7 +46,8 @@ def _json_safe(value):
 
 
 def _write_run_input(source: Path, target: Path, overrides: dict[str, object]) -> None:
-    rows = list(csv.reader(source.open(newline="", encoding="utf-8-sig")))
+    with source.open(newline="", encoding="utf-8-sig") as file:
+        rows = list(csv.reader(file))
     values = {str(key).lower(): value for key, value in overrides.items() if not str(key).startswith("_")}
     for row in rows:
         if len(row) < 3:
@@ -127,6 +128,107 @@ def _angle_request(payload: dict, work_dir: Path) -> dict:
     return {"ok": True, "rows": rows, "count": len(rows)}
 
 
+def _time_overrides(payload: dict) -> dict:
+    """Translate GUI geometry/material names to the temporal solver contract."""
+    if not isinstance(payload, dict):
+        raise ValueError("Request body must be an object")
+    raw, files = payload.get("overrides", {}), payload.get("files") or {}
+    if not isinstance(raw, dict) or not isinstance(files, dict):
+        raise ValueError("overrides and files must be objects")
+    overrides = {str(key): value for key, value in raw.items()}
+    for gui_key, solver_key in {
+        "canopy_height": "height", "slope_angle": "terrain_slope",
+        "slope_aspect": "terrain_aspect", "crown_rad_a": "crown_width",
+        "emissivity_roof": "urban_emissivity_roof", "emissivity_wall": "urban_emissivity_wall",
+        "emissivity_street": "urban_emissivity_street",
+    }.items():
+        if gui_key in overrides:
+            overrides[solver_key] = overrides[gui_key]
+    # Crown height in TIRTEB is the ellipsoid vertical semi-axis, not trunk height.
+    if "crown_rad_b" in overrides:
+        overrides["crown_height"] = overrides["crown_rad_b"]
+    if "crown_rad_a" in overrides:
+        overrides["crown_radius"] = overrides["crown_rad_a"]
+    for component in ("leaf", "soil"):
+        key = f"emissivity_{component}"
+        if key in overrides:
+            values = [float(item) for item in str(overrides[key]).replace(",", ";").split(";")]
+            if not values or any(not math.isfinite(e) or not 0 <= e <= 1 for e in values):
+                raise ValueError(f"{key} must be between 0 and 1")
+            overrides[f"{component}_reflectance"] = ";".join(str(1 - e) for e in values)
+            if component == "leaf":
+                overrides["leaf_transmittance"] = "0"
+    if any(key in overrides for key in ("vza", "vaa", "geometry_mode")):
+        overrides["direction_source"] = "direct"
+    return overrides
+
+
+def _time_request(payload: dict, work_dir: Path) -> dict:
+    overrides = _time_overrides(payload)
+    meteo_text = payload.get("meteo_text")
+    if meteo_text:
+        meteo_path = work_dir / "meteo.txt"
+        meteo_path.write_text(str(meteo_text), encoding="utf-8")
+        overrides["meteo"] = str(meteo_path)
+
+    uploaded_files = dict(payload.get("files", {}) or {})
+    # Accept cached clients using the earlier upload names.
+    for old, current in (("leaf_optics", "vegetation_spectrum"), ("soil_optics", "soil_spectrum")):
+        if uploaded_files.get(old) and not uploaded_files.get(current):
+            uploaded_files[current] = uploaded_files[old]
+    # The UI supplies pairs; the temporal runner's direct lists are a cross product.
+    # Write pairs as a local direction file so no unintended views are generated.
+    if not uploaded_files.get("directions") and str(overrides.get("geometry_pair_mode", "")) == "zip":
+        def angles(key):
+            return [float(x) for x in str(overrides.get(key, "0")).replace(",", ";").split(";")]
+        zenith, azimuth = angles("vza"), angles("vaa")
+        if len(zenith) != len(azimuth):
+            raise ValueError("Each observation zenith must have a matching azimuth")
+        if any(not math.isfinite(v) or not 0 <= v < 90 for v in zenith) or any(
+                not math.isfinite(v) for v in azimuth):
+            raise ValueError("Observation angles require finite azimuths and 0 <= zenith < 90")
+        uploaded_files["directions"] = "\n".join(f"{z} {a}" for z, a in zip(zenith, azimuth))
+    file_overrides = {
+        "directions": ("observation_direction_mode", "file", "directions_file", "observation_directions.txt"),
+        "wavelengths": ("observation_spectral_mode", "file", "spectrals_file", "observation_spectrals.txt"),
+        "vegetation_spectrum": ("vegetation_spectrum_source", "measured", "vegetation_spectrum_file", "leaf_spectrum.txt"),
+        "soil_spectrum": ("soil_spectrum_source", "measured", "soil_spectrum_file", "soil_spectrum.txt"),
+        "urban_spectrum": ("urban_spectrum_source", "measured", "urban_spectrum_file", "urban_spectrum.txt"),
+    }
+    for key, (source_key, source_value, path_key, filename) in file_overrides.items():
+        contents = uploaded_files.get(key)
+        if not contents:
+            continue
+        file_path = work_dir / filename
+        file_path.write_text(str(contents), encoding="utf-8")
+        overrides[source_key] = source_value
+        overrides[path_key] = str(file_path)
+        if key == "directions":
+            overrides["direction_source"] = "file"
+        if key == "wavelengths":
+            overrides["spectral_source"] = "file"
+            overrides["observation_spectral_mode"] = "file"
+
+    input_path = work_dir / "input.csv"
+    _write_run_input(TIRTEB_INPUT, input_path, overrides)
+    output_path = work_dir / "output.csv"
+    output = run(input_path, output_path)
+    series = _read_csv(output)
+    observations_path = output.with_name("observations.csv")
+    observations = _read_csv(observations_path) if observations_path.exists() else []
+    intermediate_path = output.with_name("intermediate.csv")
+    intermediate = _read_csv(intermediate_path) if intermediate_path.exists() else []
+    return {
+        "ok": True,
+        "series": series,
+        "observations": observations,
+        "intermediate": intermediate,
+        "count": len(series),
+        "observation_count": len(observations),
+        "intermediate_count": len(intermediate),
+    }
+
+
 class Handler(SimpleHTTPRequestHandler):
     """Serve both TIRTEB UIs and their local simulation endpoints."""
 
@@ -185,52 +287,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json(200, _angle_request(payload, work_dir))
                 return
 
-            meteo_text = payload.get("meteo_text")
-            if meteo_text:
-                meteo_path = work_dir / "meteo.txt"
-                meteo_path.write_text(str(meteo_text), encoding="utf-8")
-                overrides["meteo"] = str(meteo_path)
-
-            uploaded_files = payload.get("files", {}) or {}
-            file_overrides = {
-                "directions": ("observation_direction_mode", "file", "directions_file", "observation_directions.txt"),
-                "wavelengths": ("observation_spectral_mode", "file", "spectrals_file", "observation_spectrals.txt"),
-                "vegetation_spectrum": ("vegetation_spectrum_source", "measured", "vegetation_spectrum_file", "leaf_spectrum.txt"),
-                "soil_spectrum": ("soil_spectrum_source", "measured", "soil_spectrum_file", "soil_spectrum.txt"),
-                "urban_spectrum": ("urban_spectrum_source", "measured", "urban_spectrum_file", "urban_spectrum.txt"),
-            }
-            for key, (source_key, source_value, path_key, filename) in file_overrides.items():
-                contents = uploaded_files.get(key)
-                if not contents:
-                    continue
-                file_path = work_dir / filename
-                file_path.write_text(str(contents), encoding="utf-8")
-                overrides[source_key] = source_value
-                overrides[path_key] = str(file_path)
-                if key == "directions":
-                    overrides["direction_source"] = "file"
-                if key == "wavelengths":
-                    overrides["spectral_source"] = "file"
-                    overrides["observation_spectral_mode"] = "file"
-
-            input_path = work_dir / "input.csv"
-            _write_run_input(TIRTEB_INPUT, input_path, overrides)
-            output_path = work_dir / "output.csv"
-            output = run(input_path, output_path)
-            series = _read_csv(output)
-            observations_path = output.with_name("observations.csv")
-            observations = _read_csv(observations_path) if observations_path.exists() else []
-            intermediate_path = output.with_name("intermediate.csv")
-            intermediate = _read_csv(intermediate_path) if intermediate_path.exists() else []
-            self._json(200, {
-                "ok": True,
-                "series": series,
-                "observations": observations,
-                "intermediate": intermediate,
-                "count": len(series),
-                "observation_count": len(observations),
-                "intermediate_count": len(intermediate),
-            })
+            self._json(200, _time_request(payload, work_dir))
         except Exception as exc:
             self._json(400, {"ok": False, "error": str(exc)})
         finally:

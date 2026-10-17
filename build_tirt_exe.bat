@@ -17,5 +17,5 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Built: %CD%\release\v1.1\TiRT.exe
+echo Built: %CD%\release\v1.1.1\TiRT.exe
 pause
