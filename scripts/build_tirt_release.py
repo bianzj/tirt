@@ -28,6 +28,20 @@ def main():
     info = dict(version=__version__, source_commit=commit,
                 python=sys.version.split()[0], architecture=platform.machine(),
                 built_at=datetime.now(timezone.utc).isoformat())
+    import numpy
+    import scipy
+    import pandas
+    info['numeric_versions'] = dict(numpy=numpy.__version__, scipy=scipy.__version__, pandas=pandas.__version__)
+    python_root = Path(sys.executable).parent
+    libdir = python_root/'Library/bin'
+    # oneMKL loads CPU/threading kernels at runtime; static PE dependency scans
+    # otherwise collect only mkl_rt, producing an exe that fails on clean PCs.
+    binaries = [p for p in libdir.glob('mkl*.dll')
+                if not any(name in p.name for name in ('blacs', 'scalapack', 'cdft'))]
+    for name in ('libiomp5md.dll', 'ffi.dll'):
+        if (libdir/name).exists():
+            binaries.append(libdir/name)
+    info['extra_runtime_libraries'] = [p.name for p in binaries]
     (metadata / 'build_info.json').write_text(json.dumps(info, indent=2), encoding='utf-8')
     parts = tuple(int(x) for x in __version__.split('.')) + (0,)
     version = f'''VSVersionInfo(ffi=FixedFileInfo(filevers={parts!r}, prodvers={parts!r},
@@ -39,7 +53,6 @@ StringStruct('OriginalFilename','TiRT.exe'), StringStruct('ProductName','TiRT'),
 StringStruct('ProductVersion','{__version__}')])]), VarFileInfo([VarStruct('Translation',[1033,1200])])])'''
     (metadata / 'windows_version.txt').write_text(version, encoding='utf-8')
     env = dict(os.environ, MPLBACKEND='Agg')
-    python_root = Path(sys.executable).parent
     env['PATH'] = os.pathsep.join([str(python_root), str(python_root/'Library/bin'),
                                   str(python_root/'Scripts'), env.get('PATH', '')])
     bundle = ROOT / 'docs/validation/current_model_20261015'
@@ -48,6 +61,11 @@ StringStruct('ProductVersion','{__version__}')])]), VarFileInfo([VarStruct('Tran
             (str(bundle/'inputs'), 'docs/validation/current_model_20261015/inputs')]
     for name in ('all_results.csv', 'histream_reference.csv', 'accuracy.csv', 'manifest.json'):
         data.append((str(bundle/name), 'docs/validation/current_model_20261015'))
+    # The numerical replay records checksums of the actual model source files.
+    # Include these alongside the PYZ modules so that check also works frozen.
+    model_manifest = json.loads((bundle/'manifest.json').read_text(encoding='utf-8'))
+    for name in model_manifest['model_source_sha256']:
+        data.append((str(ROOT/name), Path(name).parent.as_posix()))
     command = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile', '--windowed',
                '--name', 'TiRT', '--icon', str(ROOT/'tirt.ico'), '--version-file', str(metadata/'windows_version.txt'),
                '--paths', str(ROOT), '--paths', str(ROOT/'benchmark/streamsim'),
@@ -58,6 +76,8 @@ StringStruct('ProductVersion','{__version__}')])]), VarFileInfo([VarStruct('Tran
         command.extend(['--exclude-module', name])
     for source, target in data:
         command.extend(['--add-data', f'{source}{os.pathsep}{target}'])
+    for source in binaries:
+        command.extend(['--add-binary', f'{source}{os.pathsep}.'])
     command.append(str(ROOT/'gui/launcher.py'))
     subprocess.run(command, cwd=ROOT, env=env, check=True)
     exe = dist/'TiRT.exe'
