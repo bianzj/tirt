@@ -9,6 +9,19 @@ Thermal infrared radiative transfer model for vegetation, terrain, urban surface
 3. [TiRT 时间验证](#三tirt-时间验证tirteb-与-scope-对比)：能量平衡时间序列 TIRTEB 与 SCOPE 对比。
 4. [界面介绍](#四界面介绍)：桌面窗口、本地页面和打包发布。
 
+## TiRT 1.1 Windows 版本
+
+原生单文件exe见[GitHub Releases](https://github.com/bianzj/tirt/releases/tag/v1.1)，双击启动，无需安装Python。界面与Windows文件属性显示1.1版本。程序包含当前光学/热红外模型及可直接复算的10组场景验证。
+
+```powershell
+# 从源码构建（需要PyInstaller）
+python scripts/build_tirt_release.py
+# 使用exe复算内置模型验证，结果写入指定目录
+.\TiRT.exe --verify-model .\verification
+```
+
+Windows构建、检查和发布说明见[版本说明](docs/releases/v1.1.md)。
+
 ## 当前光学与热红外模型验证（2026-10-15）
 
 新增红光/近红外、整冠双热点、山地共享交换、垄行通道修正和城市森林热红外双热点。当前10组场景、30张三波段图及同场景HiSTREAM参考见[当前模型验证](docs/validation/current_model_20261015/README.md)。完整输入、逐方向结果和参考统计随仓库提供。分支、配置和公式见[当前模型说明](docs/current_model.md)。

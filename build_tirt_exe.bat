@@ -9,21 +9,7 @@ if not exist "%PYTHON_EXE%" set "PYTHON_EXE=python"
 if exist "%CONDA_ROOT%" set "PATH=%CONDA_ROOT%\envs\python311;%CONDA_ROOT%\envs\python311\Library\bin;%CONDA_ROOT%\envs\python311\Scripts;%PATH%"
 set "MPLBACKEND=Agg"
 
-"%PYTHON_EXE%" -m PyInstaller ^
-  --noconfirm ^
-  --clean ^
-  --onefile ^
-  --windowed ^
-  --icon "tirt.ico" ^
-  --name TiRT ^
-  --exclude-module matplotlib ^
-  --exclude-module PIL ^
-  --exclude-module PyQt6 ^
-  --exclude-module PySide6 ^
-  --add-data "gui;gui" ^
-  --add-data "data;data" ^
-  --add-data "input.csv;." ^
-  gui\launcher.py
+"%PYTHON_EXE%" scripts\build_tirt_release.py
 
 if errorlevel 1 (
     echo Build failed.
@@ -31,5 +17,5 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Built: %CD%\dist\TiRT.exe
+echo Built: %CD%\release\v1.1\TiRT.exe
 pause

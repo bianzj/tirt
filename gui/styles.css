@@ -326,3 +326,4 @@ input:invalid {
   .result-tools label { flex-direction: column; align-items: flex-start; gap: 3px; }
   .result-view-controls .check-label { flex-direction: row; align-items: center; }
 }
+.app-version { font-size: 13px; font-weight: 600; color: #5b7083; white-space: nowrap; }

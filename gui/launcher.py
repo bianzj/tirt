@@ -5,15 +5,19 @@ from __future__ import annotations
 import argparse
 import ctypes
 import errno
+import json
 import sys
 import threading
+import traceback
 import webbrowser
+from pathlib import Path
 from http.server import ThreadingHTTPServer
 
 try:
-    from .server import Handler
+    from .server import Handler, PROJECT_ROOT
 except ImportError:
-    from server import Handler
+    from server import Handler, PROJECT_ROOT
+from base.version import __version__
 
 
 PORT_SEARCH_COUNT = 20
@@ -45,7 +49,26 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--version", action="version", version=f"TiRT {__version__}")
+    parser.add_argument("--verify-model", type=Path,
+                        help="Recompute bundled model validation and save results to this directory.")
     args = parser.parse_args()
+
+    if args.verify_model:
+        # This runs the same numerical replay used for the published source.
+        output = args.verify_model.resolve()
+        output.mkdir(parents=True, exist_ok=True)
+        try:
+            from scripts.validate_current_model import main as verify_model
+            sys.argv = [sys.argv[0], '--bundle', str(PROJECT_ROOT / 'docs/validation/current_model_20261015'),
+                        '--output', str(output)]
+            verify_model()
+        except Exception:
+            (output / 'error.json').write_text(json.dumps(
+                {'ok': False, 'version': __version__, 'traceback': traceback.format_exc()},
+                ensure_ascii=False, indent=2), encoding='utf-8')
+            raise SystemExit(1)
+        return
 
     server = None
     try:

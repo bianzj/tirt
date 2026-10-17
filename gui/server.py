@@ -27,6 +27,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from run import run  # noqa: E402
 from base.inputio import read_input  # noqa: E402
+from base.version import __version__  # noqa: E402
 
 
 FILE_INPUTS = {
@@ -141,8 +142,13 @@ class Handler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_GET(self):  # noqa: N802
+        if urlparse(self.path).path == "/api/version":
+            info_path = PROJECT_ROOT / 'build_info.json'
+            info = json.loads(info_path.read_text(encoding='utf-8')) if info_path.exists() else {}
+            self._json(200, dict(info, version=__version__, frozen=bool(getattr(sys, 'frozen', False))))
+            return
         if urlparse(self.path).path == "/api/health":
-            self._json(200, {"ok": True, "project": str(PROJECT_ROOT), "engine": "tirt"})
+            self._json(200, {"ok": True, "project": str(PROJECT_ROOT), "engine": "tirt", "version": __version__})
             return
         super().do_GET()
 
