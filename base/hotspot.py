@@ -45,21 +45,12 @@ def hotspot_layer(lai, hspot, vza, sza, vsa, CIs=1, CIv = 1, G = 0.5):
     correction = 2.0 / (kv + ks)
 
     H = 1.0
-    d = H * hspot / correction
-    delta = _angular_separation_squared(vza, sza, vsa)
-    # delta = 1.0 * np.sqrt(delta)
-    if type(delta) == numpy.float64:
-        alpha = H * np.sqrt(delta) / d
-        w = (1 - np.exp(- alpha)) / alpha
-    else:
-        w = delta*1.0
-        ind0 = np.where(delta < 0.0001)
-        ind1 = np.where(delta > 0.0001)
-        if np.size(ind0)>0:
-            w[ind0] = 1
-        if np.size(ind1)>0:
-            alpha = H * np.sqrt(delta[ind1]) / d[ind1]
-            w[ind1] = (1 - np.exp(- alpha)) / alpha
+    d = np.asarray(H * hspot / correction, dtype=float)
+    delta = np.asarray(_angular_separation_squared(vza, sza, vsa), dtype=float)
+    alpha = H * np.sqrt(np.maximum(delta, 0.0)) / np.maximum(d, 1.0e-300)
+    # (1 - exp(-a)) / a -> 1 - a/2 as a -> 0, continuous through the exact hotspot.
+    w = np.where(alpha < 1.0e-6, 1.0 - 0.5 * alpha,
+                 (1.0 - np.exp(-alpha)) / np.maximum(alpha, 1.0e-300))
 
     pls = CIs * G / cthets
     plv = CIv * G / cthetv
@@ -89,8 +80,8 @@ def hotspot_analytical(lai, hspot, vza, sza, vsa, CIi = 1, CIv = 1, G = 0.5):
     bv = np.exp(-G * lai * CIv / cthetv)
     bi = np.exp(-G * lai * CIi / cthets)
 
-    ### 经验系数
-    index = 0.82 - 0.04 * np.floor(lai / 0.5)
+    ### 经验系数：与原 0.82-0.04*floor(LAI/0.5) 在 LAI 为 0.5 的整数倍处相同，但连续且不为负
+    index = np.maximum(0.82 - 0.08 * lai, 0.02)
 
     kv = G / cthetv
     ki = G / cthets
@@ -311,11 +302,14 @@ def hotspot_vegetation_volume(lai, sza, CI = 1.0, G = 0.5):
     :param G:  投影系数
     :return:  光照比例
     '''
-    sthets = np.cos(np.deg2rad(sza))
+    sthets = np.cos(np.deg2rad(np.asarray(sza, dtype=float)))
+    if np.ndim(lai) > 0:
+        # Voxel matrices share one solar direction.
+        sthets = sthets.reshape(-1)[0]
     ### 植被层的透过率
-    gap_probability_illuminate = np.exp(-G * lai * CI / sthets[0])
+    gap_probability_illuminate = np.exp(-G * lai * CI / sthets)
     ### 1-透过率：植被阻挡概率； 植被的叶面积指数情况，计算的只是光照比例
-    sunlit_fraction_volume = (1 - gap_probability_illuminate) / (G * lai * CI) * sthets[0]
+    sunlit_fraction_volume = (1 - gap_probability_illuminate) / (G * lai * CI) * sthets
     return sunlit_fraction_volume
 
 def hotspot_hom_voxel(lai, hspot, vza, sza, vsa,CIv = 1,CIs = 1, G = 0.5):

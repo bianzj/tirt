@@ -1,6 +1,7 @@
 import argparse
 import csv
 import itertools
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -21,11 +22,16 @@ from base.inputio import (
 )
 from base.physicsF import inv_planck, planck, slope1
 from base.row import Row
-from base.soilopt import hapke_thermal_emissivity
+from base.soilopt import hapke_directional_emissivity
 
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_INPUT = ROOT / "input.csv"
+
+
+class BackfaceOmittedWarning(UserWarning):
+    """Some requested directions look at the back of the slope and were left out."""
+
 OUTPUT_FIELDS = (
     "index", "scenario_id", "scenario_label", "surface_model", "vegetation_model", "model", "wavelength_um",
     "vza", "vaa", "sza", "saa", "raa", "emissivity_leaf", "emissivity_soil",
@@ -45,7 +51,7 @@ SCENARIO_PARAMETERS = (
     ("row_height", ("row_height",), "Row height"),
     ("row_azimuth", ("row_azimuth",), "Row azimuth"),
     ("crown_rad_a", ("crown_rad_a", "crown_radius"), "Crown rad-a"),
-    ("crown_rad_b", ("crown_rad_b", "crown_width"), "Crown rad-b"),
+    ("crown_rad_b", ("crown_rad_b",), "Crown rad-b"),
     ("crown_height", ("crown_height",), "Crown height"),
     ("crown_density", ("crown_density",), "Crown density"),
 )
@@ -307,12 +313,13 @@ def _vegetation_temperatures(config):
 
 
 def _soil_emissivity(config, view_zenith, base_emissivity):
+    """Directional soil emissivity; Hapke keeps the hemispherical value equal to the input."""
     enabled = str(value(config, "hapke_enable", "soil_hapke_enable", default="0")).strip().lower()
     if enabled in {"0", "false", "no", "off"}:
         return float(base_emissivity)
-    albedo = _float(config, "soil_reflectance", "soil_albedo", default=1.0 - float(base_emissivity))
-    K = _float(config, "hapke_K", "soil_hapke_K", default=1.0)
-    result = hapke_thermal_emissivity(view_zenith, K, albedo)
+    reflectance = _float(config, "soil_reflectance", "soil_albedo", default=1.0 - float(base_emissivity))
+    K = _float(config, "hapke_k", "soil_hapke_k", "hapke_K", default=1.0)
+    result = hapke_directional_emissivity(min(abs(float(view_zenith)), 89.999), K, 1.0 - reflectance)
     return float(np.asarray(result).reshape(-1)[0])
 
 
@@ -339,12 +346,18 @@ def _urban_shapes(config):
     densities = _shape_values(config, "building_density", 0.0015)
     azimuths = _shape_values(config, "building_azimuth", 0.0)
     size = max(map(len, (lengths, widths, heights, densities, azimuths)))
-    azimuths = repeat_to(azimuths, size, "building_azimuth")
-    return np.column_stack([
+    azimuths = repeat_to(azimuths, size, "building_azimuth") % 360.0
+    shapes = np.column_stack([
         repeat_to(lengths, size, "building_length"), repeat_to(widths, size, "building_width"),
         repeat_to(heights, size, "building_height"), repeat_to(densities, size, "building_density"),
-        azimuths, azimuths + 90.0,
+        azimuths, (azimuths + 90.0) % 360.0,
     ])
+    if np.any(shapes[:, :4] < 0.0):
+        raise ValueError("building_length、building_width、building_height 和 building_density 不能为负")
+    footprint = float(np.sum(shapes[:, 0] * shapes[:, 1] * shapes[:, 3]))
+    if footprint >= 1.0:
+        raise ValueError(f"建筑占地比例 building_density * building_length * building_width 之和必须小于 1，当前为 {footprint:.4g}")
+    return shapes
 
 
 def _urban_model_geometry(geometry):
@@ -387,7 +400,23 @@ def _set_canopy_geometry(model, config, vegetation):
         vegetation, _float(config, "row_width", default=0.5),
         _float(config, "row_blank", default=0.5),
         _float(config, "row_height", default=1.0),
-        _float(config, "row_azimuth", default=0.0))
+        _float(config, "row_azimuth", default=0.0),
+        str(value(config, "thermal_row_geometry", default="parametric")).strip().lower())
+
+
+def _crown_semiaxes(config):
+    """Horizontal radius crown_rad_a and vertical semiaxis crown_rad_b (m)."""
+    return (max(_float(config, "crown_rad_a", "crown_radius", default=3.0), 1.0e-6),
+            max(_float(config, "crown_rad_b", default=3.0), 1.0e-6))
+
+
+def _forest_options(config):
+    """Crown geometry, inner/outer hotspot widths and terrain transport, defaulting to the validated branch."""
+    mode = str(value(config, "thermal_crown_geometry", default="parametric")).strip().lower()
+    inner = value(config, "thermal_hotspot_inner")
+    outer = value(config, "thermal_hotspot_outer")
+    transport = str(value(config, "forest_transport", "thermal_forest_transport", default="legacy")).strip().lower()
+    return mode, inner, outer, transport
 
 
 def _vegetation_result(config, vegetation, wavelength, geometry, spectra):
@@ -412,18 +441,18 @@ def _vegetation_result(config, vegetation, wavelength, geometry, spectra):
         model.set_angle(np.asarray([model_vza]), np.asarray([model_sza]), np.asarray([abs(vaa - saa) % 360.0]))
     elif vegetation == "row":
         model = Row()
-        model.set_geometry(config.get('thermal_row_geometry','conditioned_corridor'))
+        model.set_geometry(str(value(config, "thermal_row_geometry", default="parametric")).strip().lower())
         model.set_structure(lai, hspot, _float(config, "row_width", default=0.5), _float(config, "row_blank", default=0.5), _float(config, "row_height", default=1.0))
         model.set_angle(np.asarray([model_vza]), np.asarray([model_sza]), np.asarray([vaa]), np.asarray([saa]), np.asarray([_float(config, "row_azimuth", default=0.0)]))
     else:
         model = Crown()
-        model.set_hotspot_geometry(config.get("thermal_crown_geometry", "legacy"),
-                                   config.get("thermal_hotspot_inner"), config.get("thermal_hotspot_outer"))
+        model.set_hotspot_geometry(*_forest_options(config)[:3])
+        model.crown_base = _float(config, "crown_height", default=3.0)
         rad_a = max(_float(config, "crown_rad_a", "crown_radius", default=3.0), 1.0e-6)
-        rad_b = max(_float(config, "crown_rad_b", "crown_width", default=3.0), 1.0e-6)
+        rad_b = max(_float(config, "crown_rad_b", default=3.0), 1.0e-6)
         model.set_structure(lai, hspot, _float(config, "crown_density", default=0.02), rad_b, rad_a)
         model.set_angle(np.asarray([model_vza]), np.asarray([model_sza]), np.asarray([abs(vaa - saa) % 360.0]))
-    model.set_optical(wavelength, spectra["soil_e"], spectra["leaf_e"])
+    model.set_optical(wavelength, _soil_emissivity(config, model_vza, spectra["soil_e"]), spectra["leaf_e"])
     model.set_thermal(soil_sun, soil_shade, leaf_sun, leaf_shade)
     radiance = float(np.asarray(model.run(ifradiance=1)).reshape(-1)[0])
     return _checked_radiance(radiance, wavelength, f"plane+{vegetation}", geometry)
@@ -451,7 +480,7 @@ def _slope_local_geometry(config, geometry):
 
 
 def _slope_result(config, vegetation, wavelength, geometry, spectra):
-    if vegetation == "crown" and str(config.get("thermal_crown_geometry", "legacy")).strip().lower() != "legacy":
+    if vegetation == "crown" and _forest_options(config)[0] != "legacy":
         from base.solar import slope_direction
         slope = _float(config, "slope_angle", "terrain_slope", default=0.0)
         aspect = _float(config, "slope_aspect", "terrain_aspect", default=0.0)
@@ -482,13 +511,14 @@ def _slope_result(config, vegetation, wavelength, geometry, spectra):
     hspot = _float(config, "hspot", "vegetation_hspot", default=0.15)
     stand_density = _float(config, "slope_density", "crown_density", default=0.02)
     crown_rad_a = max(_float(config, "slope_crown_rad_a", "crown_rad_a", "slope_crown_radius", "crown_radius", default=3.0), 1.0e-6)
-    crown_rad_b = max(_float(config, "slope_crown_rad_b", "crown_rad_b", "slope_crown_width", "crown_width", default=3.0), 1.0e-6)
+    crown_rad_b = max(_float(config, "slope_crown_rad_b", "crown_rad_b", default=3.0), 1.0e-6)
     slope_angle = _float(config, "slope_angle", "terrain_slope", default=0.0)
     slope_aspect = _float(config, "slope_aspect", "terrain_aspect", default=0.0)
 
     model = Slope_Veg()
     model.set_angle(np.asarray([abs(vza)]), np.asarray([sza]), np.asarray([vaa]), np.asarray([saa]))
-    model.set_optical(wavelength, spectra["soil_e"], spectra["leaf_e"])
+    local_vza = _slope_local_geometry(config, geometry)[0]
+    model.set_optical(wavelength, _soil_emissivity(config, local_vza, spectra["soil_e"]), spectra["leaf_e"])
     model.set_structure(lai, hspot, stand_density, crown_rad_b, crown_rad_a)
     _set_canopy_geometry(model, config, vegetation)
     model.set_slope(slope_angle, slope_aspect)
@@ -514,8 +544,8 @@ def _slope_backface(config, geometry):
 
 def _surface_result(config, surface, vegetation, wavelength, geometry, spectra):
     if (vegetation == "crown" and surface == "urban" and
-            str(config.get("thermal_crown_geometry", "legacy")).strip().lower() not in ("legacy", "clumping_dual")):
-        raise ValueError("Urban thermal crown geometry supports legacy or clumping_dual.")
+            _forest_options(config)[0] not in ("legacy", "clumping_dual", "parametric")):
+        raise ValueError("Urban thermal crown geometry supports legacy, clumping_dual or parametric.")
     vza, vaa, sza, saa = geometry
     if surface == "plane":
         return _vegetation_result(config, vegetation, wavelength, geometry, spectra)
@@ -525,19 +555,22 @@ def _surface_result(config, surface, vegetation, wavelength, geometry, spectra):
         return _slope_result(config, vegetation, wavelength, geometry, spectra)
     if surface == "terrain":
         from base.terrain import Terrain
-        from base.terrain_veg import Terrain_Veg
+        from base.terrain_forest import TerrainForest
 
         shapes = _terrain_shapes(config)
         if np.all(shapes[:, 2] == 0.0):
             return _vegetation_result(config, vegetation, wavelength, geometry, spectra)
-        if vegetation == "crown":
-            from base.terrain_forest import TerrainForest
-            model = TerrainForest()
-            model.set_hotspot_geometry(config.get("thermal_crown_geometry", "legacy"),
-                                       config.get("thermal_hotspot_inner"), config.get("thermal_hotspot_outer"))
-            model.set_radiative_transport(config.get("forest_transport",config.get("thermal_forest_transport", "legacy")))
+        if vegetation == "bare":
+            model = Terrain()
         else:
-            model = Terrain() if vegetation == "bare" else Terrain_Veg()
+            model = TerrainForest()
+            if vegetation == "crown":
+                mode, inner, outer, transport = _forest_options(config)
+                if transport == "reciprocal_exchange" and outer is None:
+                    # Same R/hcr outer width as the plane and urban whole-crown geometry.
+                    outer = _crown_semiaxes(config)[0] / _crown_semiaxes(config)[1]
+                model.set_hotspot_geometry(mode, inner, outer)
+                model.set_radiative_transport(transport)
         model.set_structural_input(shapes)
         terrain_vza = min(max(abs(vza), 1.0e-3), 89.999)
         terrain_vaa = saa if abs(float(vza)) <= 1.0e-8 else vaa
@@ -551,11 +584,11 @@ def _surface_result(config, surface, vegetation, wavelength, geometry, spectra):
             model.set_thermal_input(soil_sun, soil_shade, terrain_sun, terrain_shade)
             component_temperatures = (soil_sun, soil_shade, terrain_sun, terrain_shade)
         else:
-            model.forestshape = np.asarray([_float(config, "lai", default=1.5), _float(config, "crown_density", default=0.02), max(_float(config, "crown_rad_a", "crown_radius", default=3.0), 1.0e-6), max(_float(config, "crown_rad_b", "crown_width", default=3.0), 1.0e-6), _float(config, "hspot", default=0.15)])
-            if vegetation == "crown":
-                model.forestshape = np.append(model.forestshape, _float(config, "crown_height", default=3.0))
+            model.forestshape = np.asarray([_float(config, "lai", default=1.5), _float(config, "crown_density", default=0.02), max(_float(config, "crown_rad_a", "crown_radius", default=3.0), 1.0e-6), max(_float(config, "crown_rad_b", default=3.0), 1.0e-6), _float(config, "hspot", default=0.15)])
+            crown_base = _float(config, "crown_height", default=3.0) if vegetation == "crown" else 0.0
+            model.forestshape = np.append(model.forestshape, crown_base)
             _set_canopy_geometry(model, config, vegetation)
-            model.set_spectral_input(spectra["soil_e"], spectra["leaf_e"])
+            model.set_spectral_input(_soil_emissivity(config, terrain_vza, spectra["soil_e"]), spectra["leaf_e"])
             model.set_thermal_input(soil_sun, soil_shade, leaf_sun, leaf_shade)
             component_temperatures = (soil_sun, soil_shade, leaf_sun, leaf_shade)
         emissivity = _checked_components(
@@ -572,6 +605,8 @@ def _surface_result(config, surface, vegetation, wavelength, geometry, spectra):
         plane_config = config.copy()
         plane_config["soil_sunlit_k"] = str(_temperature(config, "street_sunlit", 45.0))
         plane_config["soil_shaded_k"] = str(_temperature(config, "street_shaded", 30.0))
+        # Streets are not soil: the Hapke soil model never applies to urban surfaces.
+        plane_config["hapke_enable"] = "0"
         plane_spectra = dict(spectra, soil_e=spectra["street_e"])
         return _vegetation_result(plane_config, vegetation, wavelength, geometry, plane_spectra)
     model = Urban() if vegetation == "bare" else Urban_Veg()
@@ -593,11 +628,11 @@ def _surface_result(config, surface, vegetation, wavelength, geometry, spectra):
         model.set_spectral_input(spectra["street_e"], spectra["wall_e"], spectra["roof_e"])
         component_temperatures = (wall_sun, wall_shade, street_sun, street_shade, roof_sun, roof_shade)
     else:
-        model.forestshape = np.asarray([_float(config, "lai", default=1.5), _float(config, "crown_density", default=0.02), max(_float(config, "crown_rad_a", "crown_radius", default=3.0), 1.0e-6), max(_float(config, "crown_rad_b", "crown_width", default=3.0), 1.0e-6), _float(config, "hspot", default=0.15)])
+        model.forestshape = np.asarray([_float(config, "lai", default=1.5), _float(config, "crown_density", default=0.02), max(_float(config, "crown_rad_a", "crown_radius", default=3.0), 1.0e-6), max(_float(config, "crown_rad_b", default=3.0), 1.0e-6), _float(config, "hspot", default=0.15)])
         _set_canopy_geometry(model, config, vegetation)
         if vegetation == "crown":
-            model.set_hotspot_geometry(str(config.get("thermal_crown_geometry", "legacy")).strip().lower(),
-                                       config.get("thermal_hotspot_inner"), config.get("thermal_hotspot_outer"))
+            model.set_hotspot_geometry(*_forest_options(config)[:3])
+            model.crown_base = _float(config, "crown_height", default=3.0)
         model.set_spectral_input(spectra["street_e"], spectra["wall_e"], spectra["roof_e"], spectra["leaf_e"])
         component_temperatures = (wall_sun, wall_shade, street_sun, street_shade, roof_sun, roof_shade, leaf_sun, leaf_shade)
     emissivity = _checked_components(
@@ -639,6 +674,33 @@ def _scenario_configs(config):
     return scenario_configs
 
 
+SKY_REFERENCE_TEMPERATURE = 300.0
+COMPONENT_TEMPERATURE_KEYS = tuple(f"{material}_{lighting}_k"
+                                   for material in ("soil", "leaf", "terrain", "roof", "wall", "street")
+                                   for lighting in ("sunlit", "shaded"))
+
+
+def _sky_temperature(config):
+    """Equivalent sky brightness temperature (K) of the downwelling radiance, or None for a black sky."""
+    kelvin = value(config, "sky_temperature_k")
+    celsius = value(config, "sky_temperature_c")
+    if kelvin in (None, "") and celsius in (None, ""):
+        return None
+    result = float(kelvin) if kelvin not in (None, "") else float(celsius) + 273.15
+    if not np.isfinite(result) or result <= 0.0:
+        raise ValueError("sky_temperature 必须为正的有限温度")
+    return result
+
+
+def _with_sky_reflection(config, surface, vegetation, wavelength, geometry, spectra, radiance, sky_temperature):
+    """Add (1 - directional effective emissivity) x B(T_sky) for an isotropic sky (Kirchhoff reciprocity)."""
+    isothermal = dict(config, **{key: str(SKY_REFERENCE_TEMPERATURE) for key in COMPONENT_TEMPERATURE_KEYS})
+    reference, _ = _surface_result(isothermal, surface, vegetation, wavelength, geometry, spectra)
+    emissivity = float(reference) / float(planck(wavelength, SKY_REFERENCE_TEMPERATURE))
+    total = float(radiance) + max(0.0, 1.0 - emissivity) * float(planck(wavelength, sky_temperature))
+    return _checked_radiance(total, wavelength, f"{surface}+{vegetation}", geometry)
+
+
 def _simulate_rows(config, input_path, surface, vegetation, wavelengths, spectra, scenario_id, scenario_label):
     geometries = _geometry(config, input_path)
     rows = []
@@ -651,6 +713,10 @@ def _simulate_rows(config, input_path, surface, vegetation, wavelengths, spectra
             band_spectra = {key: values[band_index] for key, values in spectra.items()}
             try:
                 radiance, brightness_temperature = _surface_result(config, surface, vegetation, float(wavelength), geometry, band_spectra)
+                sky_temperature = _sky_temperature(config)
+                if sky_temperature is not None and np.isfinite(radiance):
+                    radiance, brightness_temperature = _with_sky_reflection(
+                        config, surface, vegetation, float(wavelength), geometry, band_spectra, radiance, sky_temperature)
             except FloatingPointError as exc:
                 raise FloatingPointError(
                     f"{surface}+{vegetation}, wavelength={wavelength}, geometry={geometry}: {exc}") from exc
@@ -667,10 +733,10 @@ def _simulate_rows(config, input_path, surface, vegetation, wavelengths, spectra
     return rows
 
 
-def run(input_path=DEFAULT_INPUT, output_path=None, model=None, **overrides):
+def run(input_path=DEFAULT_INPUT, output_path=None, model=None, report=None, **overrides):
     input_path = Path(input_path).resolve()
     config = read_input(input_path)
-    config.update({key: str(item) for key, item in overrides.items() if item is not None})
+    config.update({key.lower(): str(item) for key, item in overrides.items() if item is not None})
     surface, vegetation = _canonical(config)
     if model is not None:
         vegetation = {"homogeneous": "hom", "raw": "row", "forest": "crown"}.get(str(model).lower(), str(model).lower())
@@ -701,12 +767,19 @@ def run(input_path=DEFAULT_INPUT, output_path=None, model=None, **overrides):
             scenario_id, scenario_label,
         ))
     # Do not expose invalid radiometric records to the GUI or plot readers.
+    requested = len(rows)
     rows = [
         row for row in rows
         if np.isfinite(float(row["radiance"])) and np.isfinite(float(row["brightness_temperature_K"]))
     ]
     if not rows:
         raise ValueError("未找到可见的观测方向；请检查坡面朝向和观测角度")
+    if len(rows) < requested:
+        warnings.warn(
+            f"{requested - len(rows)} 条观测记录位于坡面背面（相对坡面法线的观测天顶角大于 89°），已从输出中省略",
+            BackfaceOmittedWarning)
+    if report is not None:
+        report["omitted_backface"] = requested - len(rows)
     for output_index, row in enumerate(rows):
         row["index"] = output_index
     write_input_snapshot(config, input_path, snapshot, output_dir=output_path.parent)

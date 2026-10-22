@@ -152,8 +152,12 @@ class Slope_Veg(CanopyGeometry):
         if empty:
             scatter = np.zeros_like(proportions)
         else:
-            scatter, _ = emissivity_scatter_analytical(
-                lai, self.emissivity_leaf, self.emissivity_soil, local_vza, local_sza)
+            _, density, crown_radius, crown_height = self.forestshape[:4]
+            scatter = canopy_scatter(self.vegetation_model, lai, self.emissivity_leaf, self.emissivity_soil,
+                                     local_vza, local_sza, density, crown_height, crown_radius)
+            budget = np.maximum(0.0, 1.0 - np.sum(direct, axis=0))
+            total = np.sum(scatter, axis=0)
+            scatter = scatter * np.minimum(1.0, np.divide(budget, total, out=np.ones_like(total), where=total > 0))
         shadow = np.asarray(local_sun_cos).reshape(-1) <= 0.0
         scatter[1, shadow] += scatter[0, shadow]
         scatter[3, shadow] += scatter[2, shadow]

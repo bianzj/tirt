@@ -25,25 +25,23 @@ def emissivity_direct(Pcom,Ecom):
 
 
 
-def emissivity_scatter_analytical(lai, emis_l, emis_s, vza, sza):
+def emissivity_scatter_analytical(lai, emis_l, emis_s, vza, sza, view_gap=None, hemi_gap=None):
     '''
     组分有效发射率，组分观测比例*组分发射率 + 多次散射项
     :param lai:  叶面积指数
-    :param Psoil:  土壤观测比例
-    :param Pleaf:  叶片观测比例
-    :param Psoil_sunlit:  光照土壤观测比例
-    :param Pleaf_sunlit:  光照叶片观测比例
     :param emis_l: 叶片发射率
     :param emis_s: 土壤发射率
     :param vza:    观测天顶角
     :param sza:    太阳天顶角
+    :param view_gap: 实际冠层的视向间隙率；缺省为均质冠层
+    :param hemi_gap: 实际冠层的半球间隙率；缺省为均质冠层
     :return:
     '''
 
     refl_s = 1-emis_s
     refl_l = 1-emis_l
     Mleaf_sunlit, Mleaf_shaded = multiple_scattering_analytical_sunlit(
-        lai, vza, sza, refl_s, refl_l)
+        lai, vza, sza, refl_s, refl_l, bv=view_gap, M=hemi_gap)
     number_angle = np.size(vza)
     eemis_ss = np.zeros(number_angle)
     eemis_sh = np.zeros(number_angle)
@@ -53,6 +51,40 @@ def emissivity_scatter_analytical(lai, emis_l, emis_s, vza, sza):
     eemis = np.asarray([eemis_ss,eemis_sh,eemis_ls,eemis_lh])
 
     return eemis,eemis_sum
+
+
+_MU_NODES, _MU_WEIGHTS = np.polynomial.legendre.leggauss(12)
+_MU_NODES, _MU_WEIGHTS = 0.5 * (_MU_NODES + 1.0), 0.5 * _MU_WEIGHTS
+_MU_ZENITH = np.degrees(np.arccos(_MU_NODES))
+_HOM_LAI_TABLE = np.linspace(0.0, 30.0, 3001)
+_HOM_HEMI_TABLE = np.asarray([2.0 * np.sum(_MU_WEIGHTS * _MU_NODES * gap_probability_hom_analytical(x, _MU_ZENITH))
+                              for x in _HOM_LAI_TABLE])
+
+
+def _equivalent_hemispherical_gap(hemi_numeric):
+    """Map a cos-weighted hemispherical gap onto the fitted homogeneous closure exp(-0.825 LAI_eq)."""
+    lai_eq = np.interp(-np.asarray(hemi_numeric, float), -_HOM_HEMI_TABLE, _HOM_LAI_TABLE)
+    return gap_probability_hom_hemisphere_analytical(lai_eq)
+
+
+def canopy_scatter(kind, lai, emis_l, emis_s, vza, sza, density=None, crown_height=None, crown_radius=None):
+    """Leaf-source multiple scattering (4, N) using the actual canopy's view and hemispherical gaps.
+
+    Homogeneous and row canopies keep the established closure. Crowns use the
+    crown gap function, so the term vanishes as crown density goes to zero.
+    """
+    vza = np.atleast_1d(np.asarray(vza, float))
+    sza = np.atleast_1d(np.asarray(sza, float))
+    if lai <= 0.0 or (kind == "crown" and (density is None or density <= 0.0)):
+        return np.zeros((4, max(vza.size, sza.size)))
+    if kind != "crown":
+        return np.asarray(emissivity_scatter_analytical(lai, emis_l, emis_s, vza, sza)[0], float).reshape(4, -1)
+    view_gap = gap_probability_crown_analytical(lai, density, crown_height, crown_radius, vza)
+    hemi_numeric = 2.0 * np.sum(_MU_WEIGHTS * _MU_NODES *
+                                gap_probability_crown_analytical(lai, density, crown_height, crown_radius, _MU_ZENITH))
+    hemi_gap = _equivalent_hemispherical_gap(hemi_numeric)
+    return np.asarray(emissivity_scatter_analytical(lai, emis_l, emis_s, vza, sza, view_gap, hemi_gap)[0],
+                      float).reshape(4, -1)
 
 
 

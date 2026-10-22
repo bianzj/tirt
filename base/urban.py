@@ -1,5 +1,18 @@
 import numpy as np
 
+
+def _fold(angle):
+    """Absolute angular difference folded to [0, 180] degrees."""
+    return np.abs((np.asarray(angle, dtype=float) + 180.0) % 360.0 - 180.0)
+
+
+def _overlap(tantv, tants, up):
+    """Sun/view shadow overlap ratio; 0 when both directions are vertical (0/0)."""
+    num = np.sqrt(np.maximum(tantv * tantv + tants * tants - 2 * tantv * tants * up, 0.0))
+    den = tantv + tants
+    return num / den if abs(den) > 1.0e-12 else 0.0
+
+
 ### version 0.1 有错误，但是能跑
 ### version 0.5 有错误，修正了一部分，也能跑，这个版本投了iGARSS
 ### version 1.0 修正了一大部分，但是不能改变建筑的方位角，或者是说所有的建筑的方位角是固定的，同时来说，这么跑会快一点
@@ -64,7 +77,7 @@ class Urban:
         sza = self.sza
         saa = self.saa
         ci = self.ci
-        raa = np.asarray(vaa - saa)
+        raa = np.asarray(_fold(vaa - saa))
 
 
         ind = raa>180
@@ -108,7 +121,7 @@ class Urban:
             projs_temp = projs_wall
             projs = projs + projs_temp
             proof = proof+ proj_roof
-        Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
+        Overlapping = _overlap(tantv, tants, up)
         partmax = np.max([projv,projs])
         partmin = np.min([projv,projs])
         # if (raa == 0) | (raa == 180):
@@ -155,7 +168,7 @@ class Urban:
                                        height2m1 * width2 * tants * np.abs(np.cos((saa - waa2) * rd)))
                 projs_temp = projs_wall
                 projs = projs + projs_temp
-            Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
+            Overlapping = _overlap(tantv, tants, up)
             partmax = np.max([projv, projs])
             partmin = np.min([projv, projs])
             # if (raa == 0) | (raa==180):
@@ -216,7 +229,7 @@ class Urban:
                 projs = projs + projs_temp
             projv = projv / n_part
             projs = projs / n_part
-            Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
+            Overlapping = _overlap(tantv, tants, up)
             if Overlapping==0:
                 a = 1
             partmax = np.max([projv, projs])
@@ -231,25 +244,25 @@ class Urban:
 
             lsunlit = 0
             part1 = np.abs(laa1 - saa)
-            if part1 > 180: part1 = 360 - part1
+            part1 = _fold(part1)
             part2 = np.abs(laa1 - vaa)
-            if part2 > 180: part2 = 360 - part2
+            part2 = _fold(part2)
             if ((part1 < 90) * (part2 < 90)) > 0: lsunlit = 1
             part1 = np.abs(laa1+180 - saa)
-            if part1 > 180: part1 = 360 - part1
+            part1 = _fold(part1)
             part2 = np.abs(laa1+180 - vaa)
-            if part2 > 180: part2 = 360 - part2
+            part2 = _fold(part2)
             if ((part1 < 90) * (part2 < 90)) > 0: lsunlit = 1
             wsunlit = 0
             part1 = np.abs(waa1 - saa)
-            if part1 > 180: part1 = 360 - part1
+            part1 = _fold(part1)
             part2 = np.abs(waa1 - vaa)
-            if part2 > 180: part2 = 360 - part2
+            part2 = _fold(part2)
             if ((part1 < 90) * (part2 < 90)) > 0: wsunlit = 1
             part1 = np.abs(waa1+180 - saa)
-            if part1 > 180: part1 = 360 - part1
+            part1 = _fold(part1)
             part2 = np.abs(waa1+180 - vaa)
-            if part2 > 180: part2 = 360 - part2
+            part2 = _fold(part2)
             if ((part1 < 90) * (part2 < 90)) > 0: wsunlit = 1
 
             # lsunlit_ratio = np.cos(np.abs(laa1 - saa))
@@ -310,7 +323,7 @@ class Urban:
         sza = self.sza
         saa = self.saa
         ci = self.ci
-        raa = np.asarray(vaa - saa)
+        raa = np.asarray(_fold(vaa - saa))
 
         ind = raa>180
         if np.sum(ind)>0:
@@ -353,7 +366,7 @@ class Urban:
             projs_temp = projs_wall
             projs = projs + projs_temp
             proof = proof+ proj_roof
-        Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
+        Overlapping = _overlap(tantv, tants, up)
         partmax = np.max([projv,projs])
         partmin = np.min([projv,projs])
         # if (raa == 0) | (raa == 180):
@@ -400,7 +413,7 @@ class Urban:
                                        height2m1 * width2 * tants * np.abs(np.cos((saa - waa2) * rd)))
                 projs_temp = projs_wall
                 projs = projs + projs_temp
-            Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
+            Overlapping = _overlap(tantv, tants, up)
             partmax = np.max([projv, projs])
             partmin = np.min([projv, projs])
             # if (raa == 0) | (raa==180):
@@ -461,7 +474,7 @@ class Urban:
                 projs = projs + projs_temp
             projv = projv / n_part
             projs = projs / n_part
-            Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
+            Overlapping = _overlap(tantv, tants, up)
             if Overlapping==0:
                 a = 1
             partmax = np.max([projv, projs])
@@ -476,25 +489,25 @@ class Urban:
 
             lsunlit = 0
             part1 = np.abs(laa1 - saa)
-            if part1 > 180: part1 = 360 - part1
+            part1 = _fold(part1)
             part2 = np.abs(laa1 - vaa)
-            if part2 > 180: part2 = 360 - part2
+            part2 = _fold(part2)
             if ((part1 < 90) * (part2 < 90)) > 0: lsunlit = 1
             part1 = np.abs(laa1+180 - saa)
-            if part1 > 180: part1 = 360 - part1
+            part1 = _fold(part1)
             part2 = np.abs(laa1+180 - vaa)
-            if part2 > 180: part2 = 360 - part2
+            part2 = _fold(part2)
             if ((part1 < 90) * (part2 < 90)) > 0: lsunlit = 1
             wsunlit = 0
             part1 = np.abs(waa1 - saa)
-            if part1 > 180: part1 = 360 - part1
+            part1 = _fold(part1)
             part2 = np.abs(waa1 - vaa)
-            if part2 > 180: part2 = 360 - part2
+            part2 = _fold(part2)
             if ((part1 < 90) * (part2 < 90)) > 0: wsunlit = 1
             part1 = np.abs(waa1+180 - saa)
-            if part1 > 180: part1 = 360 - part1
+            part1 = _fold(part1)
             part2 = np.abs(waa1+180 - vaa)
-            if part2 > 180: part2 = 360 - part2
+            part2 = _fold(part2)
             if ((part1 < 90) * (part2 < 90)) > 0: wsunlit = 1
 
             # lsunlit_ratio = np.cos(np.abs(laa1 - saa))
@@ -546,7 +559,7 @@ class Urban:
         sza = self.sza
         saa = self.saa
         ci = self.ci
-        raa = np.asarray(vaa - saa)
+        raa = np.asarray(_fold(vaa - saa))
 
         ind = raa>180
         if np.sum(ind)>0:
@@ -601,7 +614,7 @@ class Urban:
             projs = projs + projs_temp
 
         ### calculate the sunlitfraction, this is the overlappling increatsing part, hotspot O = 0
-        Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
+        Overlapping = _overlap(tantv, tants, up)
         partmax = np.max([projv, projs])
         partmin = np.min([projv, projs])
         # if (raa == 0) | (raa==180):
@@ -843,7 +856,7 @@ class Urban:
             area = area + (alpha1 * (height1) * length1) * tants * np.abs(np.cos((saa - laa1) * rd)) + \
             (alpha1 * (height1) * width1) * tants * np.abs(np.cos((saa - waa1) * rd))
         if area > 0:
-            fts = (1 - np.exp(-area)*ci) / (area)
+            fts = (1 - np.exp(-area * ci)) / (area * ci)
 
         # eww = 0
         # ews = 0

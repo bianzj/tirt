@@ -133,6 +133,12 @@ def forest_sky_components(parameters, view, rho, tau, soil_rho):
 
 def urban_reflectance(settings, view, view_azimuth, solar, solar_azimuth, rho_roof, rho_wall,
                        rho_street, rho_leaf, tau_leaf):
+    if (str(settings.get('vegetation_model', 'crown')).lower() in ('hom', 'homogeneous', 'row', 'raw')
+            and float(settings.get('lai', 0.)) > 1e-8
+            and float(settings.get('urban_vegetation_fraction', 0.)) > 0):
+        from .optical_urban_layer import reflectance
+        return reflectance(settings, view, view_azimuth, solar, solar_azimuth,
+                           rho_roof, rho_wall, rho_street, rho_leaf, tau_leaf)
     shape = building_shape(settings)
     length, width, height, density, bearing = shape
     footprint = length*width*density

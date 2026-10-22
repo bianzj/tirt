@@ -55,13 +55,13 @@ StringStruct('ProductVersion','{__version__}')])]), VarFileInfo([VarStruct('Tran
     env = dict(os.environ, MPLBACKEND='Agg')
     env['PATH'] = os.pathsep.join([str(python_root), str(python_root/'Library/bin'),
                                   str(python_root/'Scripts'), env.get('PATH', '')])
-    bundle = ROOT / 'docs/validation/current_model_20261015'
+    bundle = ROOT / 'docs/validation/current_model_20261021'
     data = [(str(ROOT/'gui'), 'gui'), (str(ROOT/'data'), 'data'), (str(ROOT/'input.csv'), '.'),
             (str(ROOT/'input_tirteb.csv'), '.'),
             (str(metadata/'build_info.json'), '.'),
-            (str(bundle/'inputs'), 'docs/validation/current_model_20261015/inputs')]
+            (str(bundle/'inputs'), 'docs/validation/current_model_20261021/inputs')]
     for name in ('all_results.csv', 'histream_reference.csv', 'accuracy.csv', 'manifest.json'):
-        data.append((str(bundle/name), 'docs/validation/current_model_20261015'))
+        data.append((str(bundle/name), 'docs/validation/current_model_20261021'))
     # The numerical replay records checksums of the actual model source files.
     # Include these alongside the PYZ modules so that check also works frozen.
     model_manifest = json.loads((bundle/'manifest.json').read_text(encoding='utf-8'))

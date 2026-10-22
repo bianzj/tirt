@@ -112,9 +112,9 @@ class InputStructure:
     terrain_type: int = 1
     terrain_slope: float = 0.0
     terrain_aspect: float = 0.0
-    terrain_radius: float = 100.0
+    terrain_radius: float = 10.0
     terrain_height: float = 20.0
-    terrain_density: float = 1.0
+    terrain_density: float = 0.001
     terrain_base_model: str = "hom"
     defined_path: Optional[Path] = None
     meteo_path: Optional[Path] = None
@@ -221,9 +221,9 @@ class InputStructure:
             terrain_type=1 if str(config.get("surface_model", "")).strip().lower() == "slope" else int(float(config.get("terrain_type", 1))),
             terrain_slope=_number(config, "terrain_slope"),
             terrain_aspect=_number(config, "terrain_aspect"),
-            terrain_radius=_number(config, "terrain_radius", 100.0),
+            terrain_radius=_number(config, "terrain_radius", 10.0),
             terrain_height=_number(config, "terrain_height", 20.0),
-            terrain_density=_number(config, "terrain_density", 1.0),
+            terrain_density=_number(config, "terrain_density", 0.001),
             terrain_base_model=str(config.get("terrain_base_model", "hom")),
             defined_path=None,
             meteo_path=path("meteo", "data/defined/meteo.txt"),

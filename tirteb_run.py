@@ -7,7 +7,8 @@ from pathlib import Path
 
 import numpy as np
 
-from base.brightness import urban_brightness, urban_canopy_fraction, urban_component_fractions, urban_directional_reflectance, vegetation_brightness
+from base.brightness import urban_canopy_fraction, urban_component_fractions, urban_directional_reflectance
+from base.tirteb_tirt import tir_band_settings, tir_spectral_value, tirt_brightness
 from base.modelio import read_defined, read_directions, read_input, read_meteo, read_spectrals
 from base.model import run_node
 from base.solar import slope_direction
@@ -106,29 +107,26 @@ def _spectral_values(settings, wavelength, model=""):
     return float(leaf_rho), float(leaf_tau), float(soil_rho)
 
 
-def _tir_spectral_value(settings, key, scalar_key, wavelength):
-    spectrum = settings.get(key, [])
-    wavelengths = settings.get("tir_wavelengths", [])
-    if len(spectrum) == len(wavelengths) and wavelengths:
-        index = int(np.argmin(np.abs(np.asarray(wavelengths, dtype=float) - float(wavelength))))
-        return float(spectrum[index])
-    return float(settings.get(scalar_key, 0.0))
-
-
-def _tir_band_settings(settings, wavelength):
-    band_settings = dict(settings)
-    leaf_reflectance = _tir_spectral_value(settings, "leaf_reflectance_tir_spectrum", "leaf_reflectance", wavelength)
-    leaf_transmittance = _tir_spectral_value(settings, "leaf_transmittance_tir_spectrum", "leaf_transmittance", wavelength)
-    soil_reflectance = _tir_spectral_value(settings, "soil_reflectance_tir_spectrum", "soil_reflectance", wavelength)
-    band_settings["leaf_reflectance"] = leaf_reflectance
-    band_settings["leaf_transmittance"] = leaf_transmittance
-    band_settings["leaf_emissivity"] = max(1.0 - leaf_reflectance - leaf_transmittance, 1.0e-6)
-    band_settings["soil_reflectance"] = soil_reflectance
-    band_settings["soil_emissivity"] = max(1.0 - soil_reflectance, 1.0e-6)
-    return band_settings
+_tir_spectral_value = tir_spectral_value
+_tir_band_settings = tir_band_settings
 
 
 def _band_observation(settings, meteo, state, name, wavelength, vza, vaa):
+    # A solar reflectance is undefined without incident daylight. In particular,
+    # never pass below-horizon solar angles into the crown hotspot geometry.
+    # Thermal emission and the energy-balance time stepping remain active.
+    if float(wavelength) < 2.5 and (
+        float(meteo["shortwave"]) <= 0.0
+        or float(state.get("sza_global", state["sza"])) >= 90.0
+    ):
+        return RTStructure.from_mapping({
+            "wavelength_um": wavelength,
+            "reflectance": float("nan"),
+            "transmittance": float("nan"),
+            "reflected_shortwave": 0.0 if float(meteo["shortwave"]) <= 0.0 else float("nan"),
+            "radiance": float("nan"),
+            "brightness_temperature_K": float("nan"),
+        })
     if settings.get("surface_model") == "terrain" and int(settings.get("terrain_type", 1)) == 1:
         local_vza, local_vaa, _ = slope_direction(
             vza,
@@ -182,15 +180,13 @@ def _band_observation(settings, meteo, state, name, wavelength, vza, vaa):
     if name == "urban":
         urban_fractions = urban_component_fractions(settings, local_vza, local_vaa, state["sza"], state["saa"])
         street_fraction = float(urban_fractions[2] + urban_fractions[3])
-        transmittance = street_fraction * urban_canopy_fraction(settings, local_vza) * leaf_fraction * leaf_tau
+        transmittance = street_fraction * urban_canopy_fraction(settings, local_vza, local_vaa) * leaf_fraction * leaf_tau
     else:
         transmittance = leaf_fraction * leaf_tau
     if wavelength >= 2.5:
         band_settings = _tir_band_settings(settings, wavelength)
-        if name == "urban":
-            radiance, brightness_temperature = urban_brightness(band_settings, state, wavelength, local_vza, local_vaa)
-        else:
-            radiance, brightness_temperature = vegetation_brightness(band_settings, state, wavelength, local_vza, local_vaa)
+        # Thermal observations use the TiRT directional model at the energy-balance temperatures.
+        radiance, brightness_temperature = tirt_brightness(band_settings, state, wavelength, vza, vaa)
         reflected = float("nan")
     else:
         radiance = float("nan")

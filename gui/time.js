@@ -109,7 +109,7 @@ function updateQuantityOptions() {
   }
 }
 
-function setStatus(text, kind = "idle") { const pill = $("status-pill"); pill.className = `status-pill ${kind}`; pill.querySelector("span").textContent = text; }
+function setStatus(text, kind = "idle") { const pill = $("status-pill"); pill.className = `status-pill ${kind}`; pill.querySelector("span").textContent = text; if (kind !== "error") pill.title = ""; }
 function notify(message, error = false) { const toast = $("toast"); toast.textContent = message; toast.classList.toggle("error", error); toast.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove("show"), 4200); }
 function value(id) { return $(id).value; }
 function numberList(raw) { return String(raw || "").split(/[;,:\s]+/).map(Number).filter(Number.isFinite); }
@@ -163,8 +163,7 @@ function currentOverrides() {
 function updateConditionalFields() {
   const surface = value("surface-model");
   const vegetation = value("vegetation-model");
-  // Terrain and urban vegetation is always modelled as discrete crowns.
-  const crowns = vegetation === "crown" || ((surface === "terrain" || surface === "urban") && vegetation !== "bare");
+  const crowns = vegetation === "crown";
   $("slope-fields").classList.toggle("is-hidden", surface !== "slope");
   $("terrain-fields").classList.toggle("is-hidden", surface !== "terrain");
   $("urban-fields").classList.toggle("is-hidden", surface !== "urban");

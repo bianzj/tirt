@@ -7,12 +7,13 @@ with its contribution limited to the available directional emissivity budget.
 """
 import numpy as np
 
-from .emissivity import emissivity_scatter_analytical
+from .crown_parametric import crown_fractions
+from .emissivity import canopy_scatter
 from .optical_crown import fractions
 from .physicsF import inv_planck, planck
 
 
-MODES = ("legacy", "clumping_dual", "volume")
+MODES = ("legacy", "clumping_dual", "volume", "parametric")
 
 
 def geometry_mode(settings):
@@ -58,6 +59,10 @@ def component_fractions(settings, sza, vza, raa, sunlit=True):
     if lai == 0 or density == 0:
         values = np.zeros((4, solar.size))
         values[0] = 1
+    elif mode == "parametric":
+        base = settings.get("crown_base")
+        base = height if base in (None, "") else float(base)
+        values = crown_fractions(lai, density, hspot, height, width, base, view, solar, azimuth)
     else:
         values = np.asarray([fractions(*shape, float(s), float(v), float(a), mode,
                                        scales if mode == "clumping_dual" else None)
@@ -86,10 +91,11 @@ def thermal_emission(settings, temperatures, wavelength, sza, vza, raa, sunlit=T
     scatter = np.zeros_like(p)
     if settings["lai"] > 0 and settings["stand_density"] > 0:
         s, v, _ = np.broadcast_arrays(np.atleast_1d(sza), np.atleast_1d(vza), np.atleast_1d(raa))
-        scatter, _ = emissivity_scatter_analytical(
-            float(settings["lai"]), np.array([el]), np.array([es]),
+        scatter = canopy_scatter(
+            "crown", float(settings["lai"]), np.array([el]), np.array([es]),
             np.clip(np.abs(v.astype(float).ravel()), 0, 89.9),
-            np.clip(s.astype(float).ravel(), 0, 89.9))
+            np.clip(s.astype(float).ravel(), 0, 89.9),
+            float(settings["stand_density"]), float(settings["height"]), float(settings["width"]))
         scatter = np.asarray(scatter).reshape(4, -1)
         if not sunlit:
             scatter[1] += scatter[0]

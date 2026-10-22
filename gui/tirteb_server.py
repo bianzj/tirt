@@ -1,17 +1,12 @@
-"""Local GUI server for the TIRTEB temporal and directional simulators."""
+"""Energy-balance (time series) request handling for the TiRT GUI server."""
 
 from __future__ import annotations
 
 import csv
 import json
 import math
-import shutil
 import sys
-import tempfile
-import threading
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
 
 
 _BUNDLE_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
@@ -19,7 +14,6 @@ GUI_ROOT = _BUNDLE_ROOT / "gui" if (_BUNDLE_ROOT / "gui").exists() else Path(__f
 PROJECT_ROOT = GUI_ROOT.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from angle_run import run_angle  # noqa: E402
 from tirteb_run import run  # noqa: E402
 
 TIRTEB_INPUT = PROJECT_ROOT / "input_tirteb.csv"
@@ -88,46 +82,6 @@ def _read_csv(path: Path) -> list[dict[str, float | str]]:
         return rows
 
 
-def _angle_request(payload: dict, work_dir: Path) -> dict:
-    """Build a temporary angle input and run the directional simulator."""
-    overrides = {str(key): value for key, value in payload.get("overrides", {}).items()}
-    overrides["spectral_source"] = "direct"
-
-    geometry_text = payload.get("geometry_text")
-    if geometry_text:
-        geometry_path = work_dir / "geometry.txt"
-        geometry_path.write_text(str(geometry_text), encoding="utf-8")
-        overrides["additional_geometry_file"] = str(geometry_path)
-        overrides["geometry_file"] = str(geometry_path)
-        overrides["additional_geometry_source"] = "file"
-
-    uploaded_files = payload.get("files", {}) or {}
-    file_overrides = {
-        "wavelengths": ("spectral_source", "file", "spectrals_file", "wavelengths.txt"),
-        "leaf_spectrum": ("vegetation_spectrum_source", "file", "vegetation_spectrum_file", "leaf_spectrum.txt"),
-        "soil_spectrum": ("soil_spectrum_source", "file", "soil_spectrum_file", "soil_spectrum.txt"),
-        "terrain_spectrum": ("terrain_spectrum_source", "file", "terrain_spectrum_file", "terrain_spectrum.txt"),
-        "roof_spectrum": ("roof_spectrum_source", "file", "roof_spectrum_file", "roof_spectrum.txt"),
-        "wall_spectrum": ("wall_spectrum_source", "file", "wall_spectrum_file", "wall_spectrum.txt"),
-        "street_spectrum": ("street_spectrum_source", "file", "street_spectrum_file", "street_spectrum.txt"),
-    }
-    for key, (source_key, source_value, path_key, filename) in file_overrides.items():
-        contents = uploaded_files.get(key)
-        if not contents:
-            continue
-        file_path = work_dir / filename
-        file_path.write_text(str(contents), encoding="utf-8")
-        overrides[source_key] = source_value
-        overrides[path_key] = str(file_path)
-
-    input_path = work_dir / "input.csv"
-    _write_run_input(TIRTEB_INPUT, input_path, overrides)
-    output_path = work_dir / "output.csv"
-    run_angle(input_path, output_path)
-    rows = _read_csv(output_path)
-    return {"ok": True, "rows": rows, "count": len(rows)}
-
-
 def _time_overrides(payload: dict) -> dict:
     """Translate GUI geometry/material names to the temporal solver contract."""
     if not isinstance(payload, dict):
@@ -144,6 +98,8 @@ def _time_overrides(payload: dict) -> dict:
     }.items():
         if gui_key in overrides:
             overrides[solver_key] = overrides[gui_key]
+    if overrides.get("vegetation_model") == "row" and "row_height" in overrides:
+        overrides["height"] = overrides["row_height"]
     # Crown height in TIRTEB is the ellipsoid vertical semi-axis, not trunk height.
     if "crown_rad_b" in overrides:
         overrides["crown_height"] = overrides["crown_rad_b"]
@@ -220,6 +176,7 @@ def _time_request(payload: dict, work_dir: Path) -> dict:
     intermediate = _read_csv(intermediate_path) if intermediate_path.exists() else []
     return {
         "ok": True,
+        "scene": {key: overrides[key] for key in ("surface_model", "vegetation_model") if key in overrides},
         "series": series,
         "observations": observations,
         "intermediate": intermediate,
@@ -227,90 +184,3 @@ def _time_request(payload: dict, work_dir: Path) -> dict:
         "observation_count": len(observations),
         "intermediate_count": len(intermediate),
     }
-
-
-class Handler(SimpleHTTPRequestHandler):
-    """Serve both TIRTEB UIs and their local simulation endpoints."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=str(GUI_ROOT), **kwargs)
-
-    def log_message(self, format, *args):
-        """Keep windowed builds independent of unavailable stdout/stderr."""
-        return
-
-    def _json(self, status: int, payload: dict) -> None:
-        body = json.dumps(_json_safe(payload), ensure_ascii=False, allow_nan=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def end_headers(self):
-        if not self.path.startswith("/api/"):
-            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
-        super().end_headers()
-
-    def do_GET(self):  # noqa: N802
-        path = urlparse(self.path).path
-        if path == "/api/health":
-            self._json(200, {"ok": True, "project": str(PROJECT_ROOT), "engine": "tirteb"})
-            return
-        if path == "/":
-            self.send_response(302)
-            self.send_header("Location", "/time.html")
-            self.end_headers()
-            return
-        super().do_GET()
-
-    def do_POST(self):  # noqa: N802
-        path = urlparse(self.path).path
-        if path not in {"/api/run_time", "/api/run_angle", "/api/shutdown"}:
-            self._json(404, {"error": "Not found"})
-            return
-
-        if path == "/api/shutdown":
-            self._json(200, {"ok": True})
-            threading.Thread(target=self.server.shutdown, daemon=True).start()
-            return
-
-        work_dir = None
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-            payload = json.loads(self.rfile.read(length).decode("utf-8"))
-            overrides = {str(key): value for key, value in payload.get("overrides", {}).items()}
-            work_dir = Path(tempfile.mkdtemp(prefix="tirteb-gui-"))
-
-            if path == "/api/run_angle":
-                self._json(200, _angle_request(payload, work_dir))
-                return
-
-            self._json(200, _time_request(payload, work_dir))
-        except Exception as exc:
-            self._json(400, {"ok": False, "error": str(exc)})
-        finally:
-            if work_dir is not None:
-                shutil.rmtree(work_dir, ignore_errors=True)
-
-
-def main() -> None:
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Run the TIRTEB temporal GUI")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8901)
-    args = parser.parse_args()
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"TIRTEB GUI: http://{args.host}:{args.port}/time.html")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nStopping TIRTEB GUI")
-    finally:
-        server.server_close()
-
-
-if __name__ == "__main__":
-    main()

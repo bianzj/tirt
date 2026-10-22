@@ -565,9 +565,9 @@ def read_defined(path=None, overrides=None):
     terrain_type = 1 if raw_surface == "slope" else int(round(_input_number(overrides or {}, "terrain_type", 1.0)))
     terrain_slope = _input_number(overrides or {}, "terrain_slope", 0.0)
     terrain_aspect = _input_number(overrides or {}, "terrain_aspect", 0.0)
-    terrain_radius = _input_number(overrides or {}, "terrain_radius", 100.0)
+    terrain_radius = _input_number(overrides or {}, "terrain_radius", 10.0)
     terrain_height = _input_number(overrides or {}, "terrain_height", 20.0)
-    terrain_density = _input_number(overrides or {}, "terrain_density", 1.0)
+    terrain_density = _input_number(overrides or {}, "terrain_density", 0.001)
     soil_water_enabled = int(round(_input_number(overrides or {}, "soil_tir_water_effect", 0.0)))
     soil_emissivity_value = soil_tir_emissivity(
         soil_thermal[5],
@@ -588,7 +588,7 @@ def read_defined(path=None, overrides=None):
         "surface_model": surface_model or "plane",
         "surface_option": surface_model or "plane",
         "vegetation_model": vegetation_model,
-        "thermal_crown_geometry": str(_input_value(overrides or {}, "thermal_crown_geometry") or "legacy").strip().lower(),
+        "thermal_crown_geometry": str(_input_value(overrides or {}, "thermal_crown_geometry") or "parametric").strip().lower(),
         "thermal_hotspot_inner": _input_value(overrides or {}, "thermal_hotspot_inner"),
         "thermal_hotspot_outer": _input_value(overrides or {}, "thermal_hotspot_outer"),
         "lai": canopy[0], "stand_density": canopy[1],
@@ -681,6 +681,7 @@ def read_defined(path=None, overrides=None):
         "urban_building_length": _input_number(overrides or {}, "building_length", 10.0),
         "urban_building_width": _input_number(overrides or {}, "building_width", 10.0),
         "urban_building_height": _input_number(overrides or {}, "building_height", 20.0),
+        "urban_building_azimuth": _input_number(overrides or {}, "building_azimuth", 0.0),
         "urban_vegetation_fraction": min(max(_input_number(overrides or {}, "urban_vegetation_fraction", 0.30), 0.0), 1.0),
         "urban_roughness_length": max(_input_number(overrides or {}, "urban_roughness_length", 0.15), 0.01),
         "urban_canyon_roughness_ratio": max(_input_number(overrides or {}, "urban_canyon_roughness_ratio", 0.05), 0.005),

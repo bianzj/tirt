@@ -1,4 +1,5 @@
 import math
+from functools import lru_cache
 
 import numpy as np
 
@@ -61,6 +62,34 @@ def hapke_reflectance(view_zenith, K=1.0, albedo=0.05):
     return float(1.0 - float(hapke_emissivity(view_zenith, K, albedo)))
 
 
+_HAPKE_MU, _HAPKE_WEIGHTS = np.polynomial.legendre.leggauss(16)
+_HAPKE_MU, _HAPKE_WEIGHTS = 0.5 * (_HAPKE_MU + 1.0), 0.5 * _HAPKE_WEIGHTS
+
+
+def hapke_hemispherical_emissivity(K=1.0, albedo=0.05):
+    """Cosine-weighted hemispherical mean of hapke_emissivity."""
+    zenith = np.degrees(np.arccos(_HAPKE_MU))
+    return float(2.0 * np.sum(_HAPKE_WEIGHTS * _HAPKE_MU * hapke_emissivity(zenith, K, albedo)))
+
+
+@lru_cache(maxsize=256)
+def hapke_single_scattering_albedo(hemispherical_emissivity, K=1.0):
+    """Single-scattering albedo whose Hapke hemispherical emissivity equals the input."""
+    target = float(hemispherical_emissivity)
+    if not 0.0 < target <= 1.0:
+        raise ValueError("Hapke soil emissivity must be in (0, 1]")
+    if target >= hapke_hemispherical_emissivity(K, 0.0):
+        return 0.0
+    from scipy.optimize import brentq
+    return float(brentq(lambda w: hapke_hemispherical_emissivity(K, w) - target, 0.0, 0.999999, xtol=1.0e-12))
+
+
+def hapke_directional_emissivity(view_zenith, K=1.0, hemispherical_emissivity=0.955):
+    """Directional Hapke soil emissivity that preserves the given hemispherical emissivity."""
+    albedo = hapke_single_scattering_albedo(float(hemispherical_emissivity), float(K))
+    return hapke_emissivity(view_zenith, K, albedo)
+
+
 def soil_tir_emissivity(
     soil_moisture,
     enabled=0,
@@ -112,5 +141,6 @@ def hapke_thermal_emissivity(
 
 __all__ = [
     "bsm", "soil_emissivity", "hapke_emissivity", "hapke_reflectance",
+    "hapke_hemispherical_emissivity", "hapke_single_scattering_albedo", "hapke_directional_emissivity",
     "soil_tir_emissivity", "hapke_thermal_emissivity",
 ]

@@ -4,13 +4,19 @@ from functools import lru_cache
 import numpy as np
 
 
-def _build_hemisphere():
+def _build_hemisphere(n_zenith=None):
+    """Zenith nodes (as tan) and sin(theta) d(theta) weights of the upper hemisphere.
+
+    The integrands depend on zenith only, so no azimuth nodes are needed (all uses are normalised).
+    None keeps the original 0..89 degree grid of 90 nodes; an integer uses that many midpoint nodes.
+    """
     rd = np.pi / 180.0
-    n_hza0 = 90
-    n_haa0 = 60
-    hza, haa = np.meshgrid(np.linspace(0, 89, n_hza0), np.linspace(0, 360, n_haa0))
-    hza = np.reshape(hza, -1)
-    dangle = np.pi / 2.0 / n_hza0
+    if n_zenith is None:
+        hza = np.linspace(0, 89, 90)
+        dangle = np.pi / 2.0 / 90
+    else:
+        hza = (np.arange(n_zenith) + 0.5) * 90.0 / n_zenith
+        dangle = np.pi / 2.0 / n_zenith
     tantemp = np.tan(hza * rd)
     fweiplus = np.sin(hza * rd) * dangle
     fweiplusSum = np.sum(1.0 * fweiplus)
@@ -19,7 +25,7 @@ def _build_hemisphere():
     return tantemp, fweiplus, fweiplusSum
 
 
-_HEMISPHERE = _build_hemisphere()
+_HEMISPHERE = _build_hemisphere(9)
 
 
 def _mount_projection(dh, radius2, density2, tantemp, outside=False):
@@ -57,8 +63,8 @@ def _tilted_view_weights(beta, theta):
     return out
 
 
-_FACET_PHI = np.linspace(0.0, 2 * np.pi, 72, endpoint=False)
-_SHARE_THETA, _SHARE_PHI = np.meshgrid((np.arange(36) + 0.5) * np.pi / 36, (np.arange(72) + 0.5) * np.pi / 36, indexing="ij")
+_FACET_PHI = np.linspace(0.0, 2 * np.pi, 10, endpoint=False)
+_SHARE_THETA, _SHARE_PHI = np.meshgrid((np.arange(12) + 0.5) * np.pi / 12, (np.arange(24) + 0.5) * np.pi / 12, indexing="ij")
 
 
 def _unit(zenith, azimuth):

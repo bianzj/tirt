@@ -1,4 +1,4 @@
-﻿# TIRTEB single-point input,,,
+# TIRTEB single-point input,,,
 # section,key,value,description
 ,,,
 [case],,,
@@ -16,9 +16,9 @@ surface,vegetation_model,hom,bare=bare soil; hom=homogeneous canopy; raw=row/rid
 terrain,terrain_type,2,1=single slope using slope/aspect; 2=compound slope using radius/height/density
 terrain,terrain_slope,30,single-slope inclination in degrees; used when terrain_type=1
 terrain,terrain_aspect,0,single-slope aspect in degrees clockwise from north; used when terrain_type=1
-terrain,terrain_radius,100,equivalent compound-slope radius in m; used when terrain_type=2
+terrain,terrain_radius,10,equivalent compound-slope cone base radius in m; used when terrain_type=2
 terrain,terrain_height,20,equivalent compound-slope height in m; used when terrain_type=2
-terrain,terrain_density,1,compound-slope spatial density; used when terrain_type=2
+terrain,terrain_density,0.001,compound-slope cones per m2; density*pi*radius^2 must stay below 1; used when terrain_type=2
 ,,,
 [urban],,,
 urban,building_density,0.0015,building plan density

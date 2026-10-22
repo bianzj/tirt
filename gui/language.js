@@ -4,6 +4,7 @@ const sourceText = new WeakMap();
 const sourceAttributes = new WeakMap();
 
 const ZH = Object.freeze({
+  "Crown forest": "离散树冠森林",
   "Static scene": "静态场景",
   "Dynamic scene": "动态场景",
   "THERMAL INFRARED RADIATIVE TRANSFER": "热红外辐射传输",

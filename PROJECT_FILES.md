@@ -17,9 +17,8 @@
 | `desktop/` | Electron 桌面窗口、服务启动和退出清理 | 桌面窗口需要 |
 | `plot/` | TiRT 输出绘图 | 绘图时需要 |
 | `analysis/` | 实验分析脚本和分析结果 | 可选 |
-| `scripts/` | 自动验证、截图和视频工具 | 开发/发布时使用 |
-| `tests/` | 单元测试和 GUI 测试 | 开发/发布时使用 |
-| `docs/` | 用户手册和理论说明 | 发布时建议保留 |
+| `scripts/` | HiSTREAM 验证复算、打包和截图工具 | 开发/发布时使用 |
+| `docs/` | 操作说明、理论说明、测试文档（HiSTREAM 对比）与验证包 | 发布时建议保留 |
 
 每个主要目录都带有自己的 `README.md`，进入子目录时可以直接看到该目录的边界、入口和产物约定。
 
@@ -27,7 +26,7 @@
 
 - `run.py`：TiRT 主入口，读取 `input.csv`。
 - `tirteb_run.py`：TiRT 能量平衡时间序列兼容入口，读取 `input_tirteb.csv`。
-- `angle_run.py`：TiRT 多角度/多波段兼容入口。
+- `base/single_point.py`：单场景能量平衡（一个方向、一个波段），`python -m base.single_point`。
 - `input.csv`、`input_tirteb.csv`：两个输入模板，使用同一套参数名称和含义（共有参数由 `base/inputio.py` 解析）。`input.csv` 额外给出组分温度，`input_tirteb.csv` 额外给出气象、能量平衡和短波光学参数。
 - `start_tirt.*`：TiRT 桌面窗口启动脚本；只需启动它。
 - `build_tirt_exe.bat`、`electron-builder.yml`：Windows 桌面版打包配置，生成安装包和 `TiRT.exe`。
@@ -47,17 +46,11 @@
 - 能量平衡还会生成 `observations.csv` 和可选的 `intermediate.csv`。
 - `cases/` 中的输出文件可以删除并重新生成；Python 缓存、构建目录和发布目录不应提交。
 
-## 验证命令
+## 验证
+
+与 HiSTREAM 的对比见[测试文档](docs/TiRT_validation.md)，复算命令：
 
 ```bat
 cd /d C:\work\tirt
-python scripts\verify_run.py
-python -m unittest tests.test_urban_wall_radiation tests.test_tirteb_tirt_consistency tests.test_canopy_radiation tests.test_model_invariants
-python -m compileall -q .
-```
-
-能量平衡回归验证：
-
-```bat
-python scripts\verify_tirteb.py --input input_tirteb.csv --output-root cases\_verify_tirteb
+python scripts\validate_current_model.py --plots
 ```

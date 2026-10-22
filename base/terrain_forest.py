@@ -1,11 +1,13 @@
 """Crown-covered terrain geometry and exchange restored from GitHub 86c3829."""
 import numpy as np
 
-from .emissivity import emissivity_scatter_analytical
+from .emissivity import canopy_scatter
 from .terrain_exchange import TerrainExchange as Terrain, _self_lit_fraction, _unit, projection_overlap
 from .terrain_veg import Terrain_Veg
 from .thermal_crown import component_fractions, geometry_mode
 from .vegetation import vegetation_proportions
+
+_HEMISPHERICAL_CACHE = {}
 
 
 class TerrainForest(Terrain_Veg):
@@ -15,6 +17,10 @@ class TerrainForest(Terrain_Veg):
     thermal_hotspot_outer = None
     thermal_forest_transport = 'legacy'
     _collect_optical_geometry = False
+    # Coarse quadrature: 3 height bands and 10 facet azimuths change the 100 m hill scene by at most
+    # 0.08 K (12 azimuths: 0.03 K) while running about 4x faster.
+    n_part = 3
+    facet_azimuths = 10
 
     def set_radiative_transport(self,mode='legacy'):
         if mode not in ('legacy','reciprocal_exchange'):
@@ -42,7 +48,17 @@ class TerrainForest(Terrain_Veg):
         self.thermal_hotspot_inner = inner
         self.thermal_hotspot_outer = outer
 
-    def _forest_proportions(self, lai, density, hspot, height, width, view, solar, relative, hcb=0.):
+    def _forest_proportions(self, lai, density, hspot, height, width, view, solar, relative, hcb=0., azimuths=None):
+        kind = self.vegetation_model
+        if kind in ('hom', 'row'):
+            row_width, row_blank, row_height, row_azimuth = self.row_shape
+            if kind == 'row' and azimuths is not None:
+                view_azimuth, solar_azimuth, row_azimuth = azimuths
+            else:
+                view_azimuth, solar_azimuth = relative, 0.
+            return vegetation_proportions(kind, lai, hspot, view, view_azimuth, solar, solar_azimuth,
+                                          row_width=row_width, row_blank=row_blank, row_height=row_height,
+                                          row_azimuth=row_azimuth, row_geometry=self.row_geometry)
         if self.thermal_crown_geometry == 'legacy':
             return vegetation_proportions('crown', lai, hspot, view, relative, solar, 0.,
                                           density, height, width)
@@ -53,7 +69,7 @@ class TerrainForest(Terrain_Veg):
         settings = dict(lai=lai, stand_density=density, hspot=hspot, height=height, width=width,
                         thermal_crown_geometry=self.thermal_crown_geometry,
                         thermal_hotspot_inner=self.thermal_hotspot_inner,
-                        thermal_hotspot_outer=outer)
+                        thermal_hotspot_outer=outer, crown_base=hcb)
         return component_fractions(settings, solar, view, relative)
 
     def calculate_effective_component_emissivity(self, ifP=0):
@@ -160,7 +176,8 @@ class TerrainForest(Terrain_Veg):
         hcr = forestshape[3]
         rcr = forestshape[2]
         Pcomtemp = self._forest_proportions(lai, std, hspot, hcr, rcr, np.asarray([vza]),
-                                                      np.asarray([sza]), np.asarray([raa]), hcb=forestshape[5])
+                                                      np.asarray([sza]), np.asarray([raa]), hcb=forestshape[5],
+                                                      azimuths=(np.asarray([vaa]), np.asarray([saa]), self.row_shape[3]))
         ### ֻ�й���ɽ�µĹ���ֲ���͹����������ǹ���
         ### ����Ӱɽ�µ�����ֲ��������ȫ����Ӱ
         self._leaf_view_ground = Pcomtemp[2][0] + Pcomtemp[3][0]
@@ -179,7 +196,8 @@ class TerrainForest(Terrain_Veg):
         if self.thermal_forest_transport=='reciprocal_exchange':
             scat=np.zeros(4)
         else:
-            scat = np.asarray(emissivity_scatter_analytical(lai, self.Em, Esoil, np.asarray([vza]), np.asarray([sza]))[0], dtype=float).reshape(4, -1)[:, 0]
+            scat = canopy_scatter(self.vegetation_model, lai, self.Em, Esoil, np.asarray([vza]), np.asarray([sza]),
+                                  std, hcr, rcr)[:, 0]
         pPlaneV_scat_sunlit = pPlaneV_sunlit * scat[2]
         pPlaneV_scat_shaded = pPlaneV_sunlit * scat[3] + pPlaneV_shaded * (scat[2] + scat[3])
         ### ���Լ���
@@ -307,9 +325,8 @@ class TerrainForest(Terrain_Veg):
             hcr = forestshape[3]
             rcr = forestshape[2]
 
-            ### ����ÿ����ɢ360�����ϵĽǶȹ���
             # facet normals: zenith = side slope beta1 = atan(h/r), azimuth laa
-            laa = np.arange(0, 360, 1) * rd
+            laa = np.arange(self.facet_azimuths) * (2.0 * np.pi / self.facet_azimuths)
             normals = _unit(np.full(laa.size, beta1), laa)
             cosang = normals @ v_dir
             coss = normals @ s_dir
@@ -323,10 +340,21 @@ class TerrainForest(Terrain_Veg):
             vza_loc = np.minimum(np.arccos(np.clip(cosang, -1, 1)) / rd, 89.999)
             sza_loc = np.minimum(np.arccos(np.clip(coss, -1, 1)) / rd, 89.0)
             raa_loc = np.arccos(np.clip(cos_raa, -1, 1)) / rd
+            local_azimuths = None
+            if self.vegetation_model == 'row':
+                # in-plane basis of each facet: t1 = d(normal)/d(beta), t2 = vertical x normal direction
+                phi = laa[ind]
+                t1 = np.stack([np.cos(beta1) * np.cos(phi), np.cos(beta1) * np.sin(phi), -np.sin(beta1) * np.ones_like(phi)], -1)
+                t2 = np.stack([-np.sin(phi), np.cos(phi), np.zeros_like(phi)], -1)
+                row_dir = _unit(np.asarray(np.pi / 2), np.asarray(self.row_shape[3] * rd))
+                r_t = row_dir - (normals @ row_dir)[:, None] * normals
+                local = lambda w: np.degrees(np.arctan2(np.sum(w * t2, 1), np.sum(w * t1, 1))) % 360.0
+                local_azimuths = (local(v_t), local(s_t), local(r_t))
             # Boolean crowns standing on a facet: densities per facet area are lai*cos(beta), std*cos(beta); the path
             # factor is 1/cos(local zenith) (gap MC on tilted planes: 0.736 vs 0.738; old global-angle form 0.746/0.776 vs 0.603)
             cos_beta = np.cos(beta1)
-            Pcomtemp = np.asarray(self._forest_proportions(lai * cos_beta, std * cos_beta, hspot, hcr, rcr, vza_loc, sza_loc, raa_loc, hcb=forestshape[5]))
+            Pcomtemp = np.asarray(self._forest_proportions(lai * cos_beta, std * cos_beta, hspot, hcr, rcr, vza_loc, sza_loc, raa_loc, hcb=forestshape[5],
+                                                           azimuths=local_azimuths))
             # facets turned away from the sun are entirely shaded
             lit = coss > 0
             Pcomtemp[1] = Pcomtemp[1] + Pcomtemp[0] * ~lit
@@ -355,7 +383,8 @@ class TerrainForest(Terrain_Veg):
             if self.thermal_forest_transport=='reciprocal_exchange':
                 scat=np.zeros((4,len(vza_loc)))
             else:
-                scat = np.asarray(emissivity_scatter_analytical(lai * cos_beta, self.Em, Esoil, vza_loc, sza_loc)[0], dtype=float).reshape(4, -1)
+                scat = canopy_scatter(self.vegetation_model, lai * cos_beta, self.Em, Esoil, vza_loc, sza_loc,
+                                      std * cos_beta, hcr, rcr)
             pMount_scat = pMount_scat + pMountV_temp * np.sum((scat[2] + scat[3]) * weight)
             pMount_scat_sunlit = pMount_scat_sunlit + pMountV_temp * mutual * np.sum(scat[2] * lit * weight)
 
@@ -426,11 +455,23 @@ class TerrainForest(Terrain_Veg):
         zen = np.degrees(np.arccos(MU)).reshape(-1)
 
         def hemispherical(lai_x, std_x):
-            P = np.asarray(self._forest_proportions(lai_x, std_x, hspot, hcr, rcr, zen, np.full(zen.size, min(sza, 89.0)), REL.reshape(-1), hcb=hcb))
+            # Independent of the view direction: computed once per sun position and canopy.
+            key = (self.vegetation_model, self.thermal_crown_geometry, str(self.thermal_hotspot_inner),
+                   str(self.thermal_hotspot_outer), self.thermal_forest_transport, tuple(self.row_shape),
+                   self.row_geometry, float(lai_x), float(std_x), float(hspot), float(hcr), float(rcr),
+                   float(hcb), float(sza), float(self.saa))
+            if key in _HEMISPHERICAL_CACHE:
+                return _HEMISPHERICAL_CACHE[key]
+            azimuths = (self.saa + REL.reshape(-1), self.saa, self.row_shape[3])
+            P = np.asarray(self._forest_proportions(lai_x, std_x, hspot, hcr, rcr, zen, np.full(zen.size, min(sza, 89.0)), REL.reshape(-1), hcb=hcb,
+                                                    azimuths=azimuths))
             wt = WT.reshape(-1)
             gap = np.sum(wt * (P[0] + P[1]))
             soil_lit = np.sum(wt * P[0]) / max(np.sum(wt * (P[0] + P[1])), 1e-12)
             leaf_lit = np.sum(wt * P[2]) / max(np.sum(wt * (P[2] + P[3])), 1e-12)
+            if len(_HEMISPHERICAL_CACHE) > 4096:
+                _HEMISPHERICAL_CACHE.clear()
+            _HEMISPHERICAL_CACHE[key] = (gap, soil_lit, leaf_lit)
             return gap, soil_lit, leaf_lit
 
         G_g, sig_s, sig_l = hemispherical(lai, std)

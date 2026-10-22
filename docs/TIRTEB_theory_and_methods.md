@@ -47,7 +47,7 @@ TIRTEB 与 TiRT 使用同一套参数名称和含义（`input_tirteb.csv` 与 `i
 
 可见光和近红外波段使用叶片 PROSPECT 与土壤 BSM 光谱，也可以用 `leaf_optics_file`、`soil_optics_file` 读取实测光谱。热红外直接输入发射率，每个热红外波段（≥ 2.5 µm）一个值或所有波段共用一个值。能量平衡使用各热红外波段发射率的平均值，叶片和土壤的热红外反射率为 `1 - 发射率`（叶片热红外透过率取 0）。`soil_tir_water_effect=1` 时，土壤发射率随含水量从 `emissivity_soil` 线性增加到 `soil_tir_emissivity_wet`。
 
-热红外方向辐亮度和亮温直接调用 TiRT 的辐射传输（`run._surface_result`），输入为能量平衡求得的组分温度：平面用 Hom/Row/Crown 模型，单坡用坡面局地几何（树冠用 Slope_Veg），复合地形用 Terrain/Terrain_Veg，城市用 Urban/Urban_Veg（含树冠与背景之间的散射）。太阳在地平线以下或位于坡面背面时，所有组分按阴影温度计算。因此同一份输入在给定相同组分温度时，TIRTEB 与 TiRT 的热红外结果完全一致（`tests/test_tirteb_tirt_consistency.py`）。observations.csv 对小于 2.5 µm 的波段保存反射率，对热红外波段默认保存亮温 K；坡面背面不可见的方向记为空值。
+热红外方向辐亮度和亮温直接调用 TiRT 的辐射传输（`run._surface_result`，经 `base/tirteb_tirt.py` 映射），输入为能量平衡求得的组分温度，使用与 TiRT 相同的参数化标准（树冠、垄行 `parametric`）。参数映射：`terrain_type=1` → TiRT 单坡（`terrain_slope/aspect` → `slope_angle/aspect`），`terrain_type=2` → TiRT 复合地形（锥体占据率 `density·π·radius²` 必须小于 1）；树冠 `height` → 垂直半轴 `crown_rad_b`，`width` → 水平半径 `crown_rad_a`，`stand_density` → `crown_density`，冠底高度取 `crown_base_height`（缺省等于 `height`）；叶片发射率 1−ρ−τ、土壤 1−ρ_s，城市组分取各自热红外发射率；地形锥体按土壤处理；街道取土壤温度。太阳在地平线以下或位于坡面背面时，所有组分按阴影温度计算。同一场景、相同组分温度下 TIRTEB 与 `run.py` 的辐亮度一致（12 种地表 × 植被组合核对至 1e-9）。observations.csv 对小于 2.5 µm 的波段保存反射率，对热红外波段默认保存亮温 K；坡面背面不可见的方向记为空值。能量平衡内部的组分辐射收支仍使用 TIRTEB 自己的冠层辐射模块，本次未改动。
 
 观测方向由 `geometry_mode` 选择：0 为 `vza/vaa`（`geometry_pair_mode=cross` 为笛卡尔积，`zip` 为一一对应），1 为太阳主平面和垂直太阳主平面，2 为 `geometry_file`，3 为主平面加附加方向。模式 1 和 3 的主平面按每个时间步的实际太阳方位生成。观测时间支持全部时间、精确 DOY 和日内小时分数筛选。
 

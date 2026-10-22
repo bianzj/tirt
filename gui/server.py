@@ -28,7 +28,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from run import run  # noqa: E402
 from base.inputio import read_input  # noqa: E402
 from base.version import __version__  # noqa: E402
-from gui.tirteb_server import _angle_request, _time_request, _json_safe  # noqa: E402
+from gui.tirteb_server import _time_request, _json_safe  # noqa: E402
 
 
 FILE_INPUTS = {
@@ -159,7 +159,7 @@ class Handler(SimpleHTTPRequestHandler):
             self._json(200, {"ok": True, "message": "TiRT is shutting down"})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
-        if path not in {"/api/run", "/api/export", "/api/run_time", "/api/run_angle"}:
+        if path not in {"/api/run", "/api/export", "/api/run_time"}:
             self._json(404, {"error": "Not found"})
             return
         work_dir = None
@@ -169,9 +169,8 @@ class Handler(SimpleHTTPRequestHandler):
             if not isinstance(payload, dict):
                 raise ValueError("Request body must be an object")
             work_dir = Path(tempfile.mkdtemp(prefix="tirt-gui-"))
-            if path in {"/api/run_time", "/api/run_angle"}:
-                simulate = _time_request if path == "/api/run_time" else _angle_request
-                self._json(200, simulate(payload, work_dir))
+            if path == "/api/run_time":
+                self._json(200, _time_request(payload, work_dir))
                 return
             overrides = _prepare_overrides(payload, work_dir)
             if path == "/api/export":
@@ -184,9 +183,11 @@ class Handler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
-            output = run(PROJECT_ROOT / "input.csv", work_dir / "output.csv", **overrides)
+            report = {}
+            output = run(PROJECT_ROOT / "input.csv", work_dir / "output.csv", report=report, **overrides)
             rows = _read_csv(output)
-            self._json(200, {"ok": True, "rows": rows, "count": len(rows)})
+            self._json(200, {"ok": True, "rows": rows, "count": len(rows),
+                             "omitted_backface": report.get("omitted_backface", 0)})
         except Exception as exc:
             self._json(400, {"ok": False, "error": str(exc)})
         finally:

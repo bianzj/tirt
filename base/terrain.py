@@ -47,9 +47,7 @@ class Terrain:
         vaa = self.vaa_[kangle]
         sza = self.sza
         saa = self.saa
-        raa = vaa - saa
-
-        if raa > 180: raa = 360- raa
+        raa = np.abs((vaa - saa + 180.0) % 360.0 - 180.0)
 
         Es = self.Es
         Em = self.Em
@@ -224,285 +222,18 @@ class Terrain:
 
 
     def calculate_component_scatter_emissivity(self, kangle,ifP = 0):
-        shapes = self.shapes
-        Es = self.Es
-        n_shape = self.n_shape
-        n_dem = self.n_dim
-        n_part = self.n_part
-        vza = self.vza_[kangle]
-        vaa = self.vaa_[kangle]
-        sza = self.sza
-        saa = self.saa
-        raa = vaa - saa
-
-        if raa > 180:raa = 360-raa
-
-
-        rd = np.pi / 180.0
-        ui = np.cos(sza * rd)
-        uv = np.cos(vza * rd)
-        si = np.sin(sza * rd)
-        sv = np.sin(vza * rd)
-        up = np.cos(raa * rd)
-        tantv = np.tan(vza * rd)
-        tants = np.tan(sza * rd)
-
-        ####----------------------------------------------
-        ### PLANE surface
-        ###-----------------------------------------------
-        height1r = 0
-        projv = 0
-        projs = 0
-        poccupied = 0
-        projvs = 0
-        for kshape2 in range(n_shape):
-            shape2 = shapes[kshape2]
-            radius2 = shape2[1]
-            height2 = shape2[0]
-            density2 = shape2[2]
-            poccupied = poccupied + density2 * np.pi * (radius2*radius2)
-            dh = height2 - height1r
-            alpha2 = np.arctan(radius2/height2)
-
-            L2_v = dh * tantv
-            if L2_v < radius2: L2_v = radius2*1.0
-            theta2_v = np.arctan(L2_v*np.tan(alpha2)/radius2)
-            gamma2_v = np.arcsin(radius2/L2_v)
-            if dh <= 0 or L2_v <= radius2: continue
-            projv_mount = density2 * (np.cos(gamma2_v) + gamma2_v + np.pi/2.0)*radius2*radius2
-            projv = projv + projv_mount
-
-
-            L2_s = dh * tants
-            if L2_s < radius2: L2_s = radius2*1.0
-            theta2_s = np.arctan(L2_s*np.tan(alpha2)/radius2)
-            gamma2_s = np.arcsin(radius2/L2_s)
-            if dh <= 0 or L2_s <= radius2: continue
-            projs_mount = density2 * (1.0/np.tan(gamma2_s) + gamma2_s + np.pi/2.0)*radius2*radius2
-            projs = projs + projs_mount
-
-        Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
-        projvs = projv + projs * Overlapping
-        pPlaneV = np.exp(-projv)*(1-poccupied)
-        pPlaneS = np.exp(-projs)*(1-poccupied)
-        pPlaneV_sunlit = np.exp(-projvs)*(1-poccupied)
-        pPlaneV_shaded = pPlaneV - pPlaneV_sunlit
-
-        ### 半球投影的归一化
-        if2 = 1.0
-        ### 上半球的方向
-        n_hza0 = 90
-        n_haa0 = 60
-        hza0 = np.linspace(0, 89, n_hza0) # hemisphere space
-        haa0 = np.linspace(0, 360, n_haa0)
-        hza,haa = np.meshgrid(hza0,haa0)
-        hza = np.reshape(hza,-1)  ### to linear
-        haa = np.reshape(haa,-1)  ### to linear
-
-        ### step of hza in rad unit rather zhan degree unit
-        dangle = np.pi/2.0/n_hza0 # 角度的步长
-        tantemp = np.tan(hza * rd)   ### 半球的正切
-        # fweiplus = np.sin(hza*rd)*dangle *np.cos(hza*rd) # 角度的归一化方式, 一般是0.5
-        fweiplus = np.sin(hza * rd) * dangle  ##### 一般是1.0
-        fweiplusSum = np.sum(if2*fweiplus)  ### 权重累计，如果没有meshgrid，应该是0.5，现在总和是0.5*n_haa0
-
-        alpha2 = np.arctan(shapes[:, 1] / shapes[:, 0])
-
-        L2_v = shapes[:,0] * tantv
-        ind = L2_v < shapes[:, 1]
-        L2_v[ind] = shapes[ind, 1]
-        theta2_v = np.arctan(L2_v * np.tan(alpha2) / shapes[:, 1])
-        gamma2_v = np.arcsin(shapes[:, 1] / L2_v)
-        projv_mount = (shapes[:, 2] * (1.0/np.tan(gamma2_v) + gamma2_v + np.pi / 2.0) * shapes[:, 1] * shapes[:, 1])
-        tempSv = np.sum(projv_mount)
-        f0 = np.exp(-tempSv)
-        i0v = 1-f0
-
-
-        eu = 0.0
-        ed = 0.0
-        au = 0.5
-        ad = 0.5
-
-        for kshape1 in range(n_shape):
-            shape1 = shapes[kshape1]
-
-            radius1 = shape1[1]
-            height1 = shape1[0]
-            density1 = shape1[2]
-            height1r = height1
-            dheight = height1 / n_part
-            projv = 0
-            projs = 0
-
-            alpha1 = np.arctan(radius1 / height1)
-            L1_v = height1 * tantv
-            if L1_v < radius1: L1_v = radius1 * 1.0
-            theta1_v = np.arctan(L1_v * np.tan(alpha1) / radius1)
-            gamma1_v = np.arcsin(radius1 / L1_v)
-
-
-            for kh in range(n_part):
-                heighttemp = dheight * (kh + 0.5)
-                tempdS = ( dheight * density1)* tantv *(heighttemp/height1)*(2*radius1)
-
-                projStemp = 0
-                proj_roof = 0
-                tempSv = 0
-                for kshape2 in range(n_shape):
-                    shape2 = shapes[kshape2]
-                    radius2 = shape2[1]
-                    height2 = shape2[0]
-                    density2 = shape2[2]
-
-                    if (height2 - heighttemp > 0):
-
-                        dh = height2 - height1r
-                        alpha2 = np.arctan(radius2 / height2)
-                        L2_v = dh * tantemp
-                        ind = L2_v < radius2
-                        L2_v[ind] = radius2
-                        theta2_v = np.arctan(L2_v * np.tan(alpha2) / radius2)
-                        gamma2_v = np.arcsin(radius2 / L2_v)
-                        projtemp_mount = density2 * (1.0/np.tan(gamma2_v) + gamma2_v + np.pi / 2.0) * radius2 * radius2
-                        ind = (dh<=0)+(L2_v<=radius2)
-                        projtemp_mount[ind] = 0
-                        projStemp = projStemp + projtemp_mount
-
-                        L2_v = dh * tantv
-                        if L2_v < radius2: L2_v = radius2 * 1.0
-                        theta2_v = np.arctan(L2_v * np.tan(alpha2) / radius2)
-                        gamma2_v = np.arcsin(radius2 / L2_v)
-                        if dh <= 0 or L2_v <= radius2: continue
-                        projv_mount = density2 * (1.0/np.tan(gamma2_v) + gamma2_v + np.pi / 2.0) * radius2 * radius2
-                        tempSv = tempSv + projv_mount
-
-                ftempv = np.exp(-(tempSv))
-                ftemp = np.exp(-(projStemp))
-                eu = eu + np.sum(if2 * ftemp * fweiplus / fweiplusSum) * tempdS * ftempv
-
-                projStemp = 0
-                tempSv = 0
-                for kshape2 in range(n_shape):
-                    shape2 = shapes[kshape2]
-                    radius2 = shape2[1]
-                    height2 = shape2[0]
-                    density2 = shape2[2]
-
-                    if (height2 - heighttemp < 0):
-
-                        dh = height2
-                        alpha2 = np.arctan(radius2 / height2)
-                        L2_v = dh * tantemp
-                        ind = L2_v < radius2
-                        L2_v[ind] = radius2
-                        theta2_v = np.arctan(L2_v * np.tan(alpha2) / radius2)
-                        gamma2_v = np.arcsin(radius2 / L2_v)
-                        # if dh <= 0 or L2_v <= radius2: continue
-                        projtemp_mount = density2 * (1.0/np.tan(gamma2_v) + gamma2_v + np.pi / 2.0) * radius2 * radius2
-
-                        ind = (dh <= 0) + (L2_v <= radius2)
-                        projtemp_mount[ind] = 0
-
-                        projStemp = projStemp + projtemp_mount
-                    if (height2 - heighttemp > 0):
-
-                        dh = heighttemp
-                        alpha2 = np.arctan(radius2 / heighttemp)
-                        L2_v = dh * tantemp
-                        ind = L2_v < radius2
-                        L2_v[ind] = radius2
-                        theta2_v = np.arctan(L2_v * np.tan(alpha2) / radius2)
-                        gamma2_v = np.arcsin(radius2 / L2_v)
-                        # if dh <= 0 or L2_v <= radius2: continue
-                        projtemp_mount = density2 * (1.0/np.tan(gamma2_v) + gamma2_v + np.pi / 2.0) * radius2 * radius2
-                        ind = (dh <= 0) + (L2_v <= radius2)
-                        projtemp_mount[ind] = 0
-                        projStemp = projStemp + projtemp_mount
-
-
-                ftemp = np.exp(-(projStemp))
-                ed = ed + np.sum(if2 * ftemp * fweiplus/ fweiplusSum) * tempdS * ftempv
-
-        eu = eu / i0v*0.5
-        ed = ed / i0v*0.5
-        p = 1 - eu - ed
-        if i0v == 0:
-            p = 0
-            eu = 0
-            ed = 0
-
-        ### 到达街道，然后街道的比例，然后街道离开地面到达天空的概率
-        heighttemp = 0
-        ws = 0
-        C = 1.05
-        projStemp = 0
-        poccupied = 0
-        tempSv = 0
-        for kshape2 in range(n_shape):
-            shape2 = shapes[kshape2]
-            radius2 = shape2[1]
-            height2 = shape2[0]
-            density2 = shape2[2]
-            poccupied = poccupied + density2 * np.pi * (radius2*radius2)
-            if (height2 - heighttemp > 0):
-
-                dh = height2 - height1r
-                alpha2 = np.arctan(radius2 / height2)
-                L2_v = dh * tantemp
-                ind = L2_v < radius2
-                L2_v[ind] = radius2
-                theta2_v = np.arctan(L2_v * np.tan(alpha2) / radius2)
-                gamma2_v = np.arcsin(radius2 / L2_v)
-                if dh <= 0 or L2_v <= radius2: continue
-                projtemp_mount = density2 * (1.0/np.tan(gamma2_v) + gamma2_v + np.pi / 2.0) * radius2 * radius2
-                projStemp = projStemp + projtemp_mount
-
-                L2_v = dh * tantv
-                if L2_v < radius2: L2_v = radius2 * 1.0
-                theta2_v = np.arctan(L2_v * np.tan(alpha2) / radius2)
-                gamma2_v = np.arcsin(radius2 / L2_v)
-                if dh <= 0 or L2_v <= radius2: continue
-                projv_mount = density2 * (1.0/np.tan(gamma2_v) + gamma2_v + np.pi / 2.0) * radius2 * radius2
-                tempSv = tempSv + projv_mount
-
-        ftemp = np.exp(-(projStemp))
-        ftempv = np.exp(-(tempSv)) ### 到达该体元的概率
-        tempds = 1-poccupied
-        ws = (1-np.sum(if2*(ftemp) * fweiplus/ fweiplusSum)) * ftempv * tempds
-
-
-
-        eww = Es * (1 - Es) * p * i0v
-        ews = Es * (1-Es) * ws
-        esw = Es *(1-Es) * ed * i0v
-
-        vsraa = (180.0 - np.abs(raa)) / 180.0  # sunlit part becasue of raa
-        vhraa = 1 - vsraa
-        ## 场景中有多少光照组分
-
-        area = 0
-        fts = 1.0
-        for kshape1 in range(n_shape):
-            shape1 = shapes[kshape1]
-            radius1 = shape1[1]
-            height1 = shape1[0]
-            density1 = shape1[2]
-            height1r = height1
-            L1_s = height1 * tants
-            if L1_s < radius1: L2_v = radius1 * 1.0
-            gamma1_s = np.arcsin(radius1 / L1_s)
-            projs_mount = density1 * (1.0/np.tan(gamma1_s) + gamma1_s + np.pi / 2.0) * radius1 * radius1
-            area = area + projs_mount
-        if area > 0:
-            fts = (1 - np.exp(-area)) / (area)
-
-
-        emw = ews + eww
-        emws = emw * fts*vsraa
+        """Single-bounce terrain/ground interreflection with each emitter's own emissivity."""
+        from .terrain_exchange import TerrainExchange
+        t = TerrainExchange.scatter_terms(self, kangle)
+        Es, Em = self.Es, self.Em
+        mount_via_mount = Em * (1 - Em) * t["p"] * t["i0v"]
+        mount_via_ground = Em * (1 - Es) * t["ws"]
+        ground_via_mount = Es * (1 - Em) * t["ed"] * t["i0v"]
+        emw = mount_via_mount + mount_via_ground
+        emws = mount_via_mount * t["s_ww"] + mount_via_ground * t["s_ws"]
         emwh = emw - emws
-        ems = esw
-        emss = ems * pPlaneS
+        ems = ground_via_mount
+        emss = ems * t["ground_sunlit"]
         emsh = ems - emss
 
         if ifP == 1:
@@ -512,7 +243,7 @@ class Terrain:
         elif ifP == 3:
             return 0, 0, 0, 0
         else:
-            return esw + ews + eww
+            return ems + emw
 
     def set_strcutural_input(self,shapes):
         self.shapes = shapes

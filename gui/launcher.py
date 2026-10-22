@@ -60,7 +60,7 @@ def main() -> None:
         output.mkdir(parents=True, exist_ok=True)
         try:
             from scripts.validate_current_model import main as verify_model
-            sys.argv = [sys.argv[0], '--bundle', str(PROJECT_ROOT / 'docs/validation/current_model_20261015'),
+            sys.argv = [sys.argv[0], '--bundle', str(PROJECT_ROOT / 'docs/validation/current_model_20261021'),
                         '--output', str(output)]
             verify_model()
         except Exception:

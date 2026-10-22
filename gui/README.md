@@ -36,10 +36,10 @@ Three.js and `OrbitControls` are vendored in `gui/vendor/`, so the 3D scene work
 
 ## Energy balance GUI
 
-The temporal and directional energy-balance pages are served by the same TiRT server:
+The energy-balance (time series) page is served by the same TiRT server:
 
 ```bash
 python gui/server.py --port 8765
 ```
 
-The TiRT desktop window opens the directional model. Use the `Energy balance` button to open the time-series page, or `/angle/` during browser-based development. These pages use the energy-balance input template and the local `/api/run_time` and `/api/run_angle` endpoints. No second server is required.
+The TiRT desktop window opens the directional model (`/`). Use the `TIRT-Dynamic` button to open the time-series page (`/time.html`), which uses the energy-balance input template and the local `/api/run_time` endpoint. No second server is required.

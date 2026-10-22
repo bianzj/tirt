@@ -116,7 +116,8 @@ class Crown():
                             leaf_emissivity=float(np.asarray(el).item()),
                             thermal_crown_geometry=self.thermal_crown_geometry,
                             thermal_hotspot_inner=self.thermal_hotspot_inner,
-                            thermal_hotspot_outer=self.thermal_hotspot_outer)
+                            thermal_hotspot_outer=self.thermal_hotspot_outer,
+                            crown_base=getattr(self, "crown_base", None))
             self.radiance, temperature, self.Pcom = thermal_emission(
                 settings, [Tss, Tsh, Tls, Tlh], wl, sza, vza, vsa)
             return self.radiance if ifradiance == 1 else temperature
@@ -134,10 +135,11 @@ class Crown():
         Ecom_direct, Ecom_direct_sum = emissivity_direct(Pcom, Ecom)
         Rcom_direct = radiance_direct(Ecom_direct, Rcom)
 
-        if lai == 0.0 or std == 0.0:
-            Ecom_scatter = np.zeros_like(Pcom)
-        else:
-            Ecom_scatter, Ecom_scatter_sum = emissivity_scatter_analytical(lai, el, es, vza, sza)
+        Ecom_scatter = canopy_scatter("crown", lai, el, es, vza, sza, std, hcr, rcr)
+        # Limit scatter to the remaining emissivity budget, as in thermal_crown.
+        budget = np.maximum(0.0, 1.0 - np.sum(Ecom_direct, axis=0))
+        total = np.sum(Ecom_scatter, axis=0)
+        Ecom_scatter = Ecom_scatter * np.minimum(1.0, np.divide(budget, total, out=np.ones_like(total), where=total > 0))
         Rcom_scatter = radiance_scatter(Ecom_scatter, Rcom)
 
         self.radiance = Rcom_direct + Rcom_scatter

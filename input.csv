@@ -28,24 +28,27 @@ urban,building_azimuth,0,building direction degrees
 ,,,
 [vegetation_structure],,,
 vegetation_structure,lai,1.5,leaf area index
-vegetation_structure,height,3,vegetation height m
-vegetation_structure,G,0.5,leaf projection parameter
-vegetation_structure,lidfa,-0.35,leaf angle distribution parameter a
-vegetation_structure,lidb,-0.15,leaf angle distribution parameter b
-vegetation_structure,hspot,0.15,hotspot parameter m
-vegetation_structure,leaf_width,0.2,leaf width m
+vegetation_structure,height,3,vegetation height m (TIRTEB only; not used by run.py)
+vegetation_structure,G,0.5,leaf projection parameter (TIRTEB only; run.py uses G=0.5)
+vegetation_structure,lidfa,-0.35,leaf angle distribution parameter a (TIRTEB only; not used by run.py)
+vegetation_structure,lidb,-0.15,leaf angle distribution parameter b (TIRTEB only; not used by run.py)
+vegetation_structure,hspot,0.15,hotspot parameter = leaf size / canopy height; for crowns use leaf size / crown height
+vegetation_structure,leaf_width,0.2,leaf width m (TIRTEB only; not used by run.py)
 ,,,
 [row_structure],,,
 row_structure,row_width,0.5,row width m
 row_structure,row_blank,0.5,row gap m
 row_structure,row_height,1.0,row height m
 row_structure,row_azimuth,0,row direction degrees
+row_structure,thermal_row_geometry,parametric,parametric=closed-form row cross-section (standard); conditioned_corridor or legacy=earlier closures
 ,,,
 [crown_structure],,,
 crown_structure,crown_rad_a,3.0,crown horizontal radius m
-crown_structure,crown_rad_b,3.0,crown vertical radius m
-crown_structure,crown_height,3.0,crown height m
-crown_structure,crown_density,0.02,crown density
+crown_structure,crown_rad_b,3.0,crown vertical semiaxis m
+crown_structure,crown_height,3.0,crown base height above ground m (sets the crown-centre height of the parametric crowns)
+crown_structure,crown_density,0.02,crown density per m2
+crown_structure,thermal_crown_geometry,parametric,parametric=closed-form Poisson spheroid crowns (standard); clumping_dual or legacy=earlier closures
+crown_structure,forest_transport,legacy,terrain forests: legacy=terrain interreflection + canopy scatter (standard); reciprocal_exchange=4-state exchange (requires clumping_dual)
 ,,,
 [spectral],,,
 spectral,spectral_source,direct,direct=use wavelengths; file=read spectrals_file
@@ -83,6 +86,7 @@ thermal,wall_sunlit_c,45,sunlit wall temperature C
 thermal,wall_shaded_c,30,shaded wall temperature C
 thermal,street_sunlit_c,45,sunlit street temperature C
 thermal,street_shaded_c,30,shaded street temperature C
+thermal,sky_temperature_k,,optional equivalent sky brightness temperature K; empty = black sky (emission only); set to add (1-emissivity) x B(T_sky)
 ,,,
 [geometry],,,
 geometry,geometry_mode,0,0=given vza/vaa lists; 1=solar principal and perpendicular planes; 2=read geometry_file TXT

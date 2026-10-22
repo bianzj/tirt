@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
-BUNDLE = ROOT / 'docs/validation/current_model_20261015'
+BUNDLE = ROOT / 'docs/validation/current_model_20261021'
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'benchmark/streamsim'))
 import run

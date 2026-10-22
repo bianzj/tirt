@@ -1,6 +1,22 @@
 import numpy as np
 from .crown import *
+from .emissivity import canopy_scatter
 from .vegetation import CanopyGeometry
+
+_COVERAGE_CACHE = {}
+
+
+def _fold(angle):
+    """Absolute angular difference folded to [0, 180] degrees."""
+    return np.abs((np.asarray(angle, dtype=float) + 180.0) % 360.0 - 180.0)
+
+
+def _overlap(tantv, tants, up):
+    """Sun/view shadow overlap ratio; 0 when both directions are vertical (0/0)."""
+    num = np.sqrt(np.maximum(tantv * tantv + tants * tants - 2 * tantv * tants * up, 0.0))
+    den = tantv + tants
+    return num / den if abs(den) > 1.0e-12 else 0.0
+
 ### version 0.1 有错误，但是能跑
 ### version 0.5 有错误，修正了一部分，也能跑，这个版本投了iGARSS
 ### version 1.0 修正了一大部分，但是不能改变建筑的方位角，或者是说所有的建筑的方位角是固定的，同时来说，这么跑会快一点
@@ -17,10 +33,14 @@ class Urban_Veg(CanopyGeometry):
     thermal_crown_geometry = 'legacy'
     thermal_hotspot_inner = None
     thermal_hotspot_outer = None
-
+    # (zenith, azimuth) midpoint nodes of the wall-exchange hemisphere; 9 x 12 changes the urban forest
+    # scene by at most 0.016 K versus the original 90 x 60 grid
+    hemisphere_grid = (9, 12)
+    # (zenith, azimuth) nodes of the flux-weighted canopy coverage seen from the street
+    coverage_grid = (9, 12)
     def set_hotspot_geometry(self, mode='legacy', inner=None, outer=None):
-        if mode not in ('legacy', 'clumping_dual'):
-            raise ValueError('Urban forest geometry supports legacy or clumping_dual.')
+        if mode not in ('legacy', 'clumping_dual', 'parametric'):
+            raise ValueError('Urban forest geometry supports legacy, clumping_dual or parametric.')
         for width in (inner, outer):
             if width not in (None, '') and (not np.isfinite(float(width)) or float(width) < 0):
                 raise ValueError('Urban forest hotspot widths must be finite and nonnegative.')
@@ -29,19 +49,20 @@ class Urban_Veg(CanopyGeometry):
         self.thermal_hotspot_outer = outer
 
     def canopy_proportions(self, vza, vaa, sza, saa, density=None,
-                           crown_height=None, row_azimuth=None):
+                           crown_height=None, row_azimuth=None, row_geometry=None):
         if self.vegetation_model != 'crown' or self.thermal_crown_geometry == 'legacy':
             return super().canopy_proportions(vza, vaa, sza, saa, density,
-                                               crown_height, row_azimuth)
+                                               crown_height, row_azimuth, row_geometry)
         # Reuse whole-crown two-scale geometry only. Thermal source terms and
         # building sun/view overlap remain in the urban emission calculation.
         from .thermal_crown import component_fractions
         lai, std, radius, height, hspot = self.forestshape
         settings = dict(lai=lai, stand_density=std if density is None else density,
                         height=height if crown_height is None else crown_height,
-                        width=radius, hspot=hspot, thermal_crown_geometry='clumping_dual',
+                        width=radius, hspot=hspot, thermal_crown_geometry=self.thermal_crown_geometry,
                         thermal_hotspot_inner=self.thermal_hotspot_inner,
-                        thermal_hotspot_outer=self.thermal_hotspot_outer)
+                        thermal_hotspot_outer=self.thermal_hotspot_outer,
+                        crown_base=getattr(self, 'crown_base', None))
         view, view_azimuth, solar, solar_azimuth = np.broadcast_arrays(
             np.asarray(vza, float), np.asarray(vaa, float),
             np.asarray(sza, float), np.asarray(saa, float))
@@ -112,7 +133,7 @@ class Urban_Veg(CanopyGeometry):
         vaa = self.vaa_[kangle]
         sza = self.sza
         saa = self.saa
-        raa = np.asarray(vaa - saa)
+        raa = np.asarray(_fold(vaa - saa))
 
         ind = raa>180
         if np.sum(ind)>0:
@@ -155,7 +176,7 @@ class Urban_Veg(CanopyGeometry):
             projs_temp = projs_wall
             projs = projs + projs_temp
             proof = proof+ proj_roof
-        Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
+        Overlapping = _overlap(tantv, tants, up)
         partmax = np.max([projv,projs])
         partmin = np.min([projv,projs])
         # if (raa == 0) | (raa == 180):
@@ -184,6 +205,7 @@ class Urban_Veg(CanopyGeometry):
         pStreatV_veg_shaded = pStreatV_sunlit*Pcomtemp[1][0] + pStreatV_shaded*(Pcomtemp[0][0] + Pcomtemp[1][0])
         pStreatV_leaf_sunlit = pStreatV_sunlit * Pcomtemp[2][0]
         pStreatV_leaf_shaded = pStreatV * (Pcomtemp[2][0] + Pcomtemp[3][0]) - pStreatV_leaf_sunlit
+        self._street_view = (float(pStreatV_sunlit), float(pStreatV_shaded))
 
         ###-------------------------------------------------
 
@@ -222,7 +244,7 @@ class Urban_Veg(CanopyGeometry):
                                        height2m1 * width2 * tants * np.abs(np.cos((saa - waa2) * rd)))
                 projs_temp = projs_wall
                 projs = projs + projs_temp
-            Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
+            Overlapping = _overlap(tantv, tants, up)
             partmax = np.max([projv, projs])
             partmin = np.min([projv, projs])
             # if (raa == 0) | (raa==180):
@@ -283,7 +305,7 @@ class Urban_Veg(CanopyGeometry):
                 projs = projs + projs_temp
             projv = projv / n_part
             projs = projs / n_part
-            Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
+            Overlapping = _overlap(tantv, tants, up)
             if Overlapping==0:
                 a = 1
             partmax = np.max([projv, projs])
@@ -298,25 +320,25 @@ class Urban_Veg(CanopyGeometry):
 
             lsunlit = 0
             part1 = np.abs(laa1 - saa)
-            if part1 > 180: part1 = 360 - part1
+            part1 = _fold(part1)
             part2 = np.abs(laa1 - vaa)
-            if part2 > 180: part2 = 360 - part2
+            part2 = _fold(part2)
             if ((part1 < 90) * (part2 < 90)) > 0: lsunlit = 1
             part1 = np.abs(laa1+180 - saa)
-            if part1 > 180: part1 = 360 - part1
+            part1 = _fold(part1)
             part2 = np.abs(laa1+180 - vaa)
-            if part2 > 180: part2 = 360 - part2
+            part2 = _fold(part2)
             if ((part1 < 90) * (part2 < 90)) > 0: lsunlit = 1
             wsunlit = 0
             part1 = np.abs(waa1 - saa)
-            if part1 > 180: part1 = 360 - part1
+            part1 = _fold(part1)
             part2 = np.abs(waa1 - vaa)
-            if part2 > 180: part2 = 360 - part2
+            part2 = _fold(part2)
             if ((part1 < 90) * (part2 < 90)) > 0: wsunlit = 1
             part1 = np.abs(waa1+180 - saa)
-            if part1 > 180: part1 = 360 - part1
+            part1 = _fold(part1)
             part2 = np.abs(waa1+180 - vaa)
-            if part2 > 180: part2 = 360 - part2
+            part2 = _fold(part2)
             if ((part1 < 90) * (part2 < 90)) > 0: wsunlit = 1
 
             # lsunlit_ratio = np.cos(np.abs(laa1 - saa))
@@ -377,7 +399,7 @@ class Urban_Veg(CanopyGeometry):
         vaa = self.vaa_[kangle]
         sza = self.sza
         saa = self.saa
-        raa = np.asarray(vaa - saa)
+        raa = np.asarray(_fold(vaa - saa))
 
         ind = raa>180
         if np.sum(ind)>0:
@@ -420,7 +442,7 @@ class Urban_Veg(CanopyGeometry):
             projs_temp = projs_wall
             projs = projs + projs_temp
             proof = proof+ proj_roof
-        Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
+        Overlapping = _overlap(tantv, tants, up)
         partmax = np.max([projv,projs])
         partmin = np.min([projv,projs])
         # if (raa == 0) | (raa == 180):
@@ -467,7 +489,7 @@ class Urban_Veg(CanopyGeometry):
                                        height2m1 * width2 * tants * np.abs(np.cos((saa - waa2) * rd)))
                 projs_temp = projs_wall
                 projs = projs + projs_temp
-            Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
+            Overlapping = _overlap(tantv, tants, up)
             partmax = np.max([projv, projs])
             partmin = np.min([projv, projs])
             # if (raa == 0) | (raa==180):
@@ -528,7 +550,7 @@ class Urban_Veg(CanopyGeometry):
                 projs = projs + projs_temp
             projv = projv / n_part
             projs = projs / n_part
-            Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
+            Overlapping = _overlap(tantv, tants, up)
             if Overlapping==0:
                 a = 1
             partmax = np.max([projv, projs])
@@ -543,25 +565,25 @@ class Urban_Veg(CanopyGeometry):
 
             lsunlit = 0
             part1 = np.abs(laa1 - saa)
-            if part1 > 180: part1 = 360 - part1
+            part1 = _fold(part1)
             part2 = np.abs(laa1 - vaa)
-            if part2 > 180: part2 = 360 - part2
+            part2 = _fold(part2)
             if ((part1 < 90) * (part2 < 90)) > 0: lsunlit = 1
             part1 = np.abs(laa1+180 - saa)
-            if part1 > 180: part1 = 360 - part1
+            part1 = _fold(part1)
             part2 = np.abs(laa1+180 - vaa)
-            if part2 > 180: part2 = 360 - part2
+            part2 = _fold(part2)
             if ((part1 < 90) * (part2 < 90)) > 0: lsunlit = 1
             wsunlit = 0
             part1 = np.abs(waa1 - saa)
-            if part1 > 180: part1 = 360 - part1
+            part1 = _fold(part1)
             part2 = np.abs(waa1 - vaa)
-            if part2 > 180: part2 = 360 - part2
+            part2 = _fold(part2)
             if ((part1 < 90) * (part2 < 90)) > 0: wsunlit = 1
             part1 = np.abs(waa1+180 - saa)
-            if part1 > 180: part1 = 360 - part1
+            part1 = _fold(part1)
             part2 = np.abs(waa1+180 - vaa)
-            if part2 > 180: part2 = 360 - part2
+            part2 = _fold(part2)
             if ((part1 < 90) * (part2 < 90)) > 0: wsunlit = 1
 
             # lsunlit_ratio = np.cos(np.abs(laa1 - saa))
@@ -616,9 +638,21 @@ class Urban_Veg(CanopyGeometry):
 
         # Flux-weighted hemisphere canopy coverage drives the existing
         # street/wall interreflection approximation for every canopy kind.
-        hz, ha = np.meshgrid(np.arange(5.0, 90.0, 10.0), np.arange(0.0, 360.0, 30.0))
-        weights = np.cos(np.deg2rad(hz)).ravel() * np.sin(np.deg2rad(hz)).ravel()
-        coverage = self.canopy_proportions(hz.ravel(), ha.ravel(), self.sza, self.saa)
+        # It does not depend on the view direction: computed once per sun position and canopy.
+        key = (self.vegetation_model, self.thermal_crown_geometry, str(self.thermal_hotspot_inner),
+               str(self.thermal_hotspot_outer), str(getattr(self, 'crown_base', None)), tuple(self.row_shape),
+               tuple(np.asarray(forestshape, float)), float(self.sza), float(self.saa), tuple(self.coverage_grid))
+        if key not in _COVERAGE_CACHE:
+            hz, ha = np.meshgrid((np.arange(self.coverage_grid[0]) + 0.5) * 90.0 / self.coverage_grid[0],
+                                 np.arange(self.coverage_grid[1]) * 360.0 / self.coverage_grid[1])
+            cov_weights = np.cos(np.deg2rad(hz)).ravel() * np.sin(np.deg2rad(hz)).ravel()
+            # Only the leaf/soil view marginals are used; the row corridor
+            # correction preserves them, so the cheaper legacy row geometry is exact here.
+            cov = self.canopy_proportions(hz.ravel(), ha.ravel(), self.sza, self.saa, row_geometry="legacy")
+            if len(_COVERAGE_CACHE) > 4096:
+                _COVERAGE_CACHE.clear()
+            _COVERAGE_CACHE[key] = (cov, cov_weights)
+        coverage, weights = _COVERAGE_CACHE[key]
         Pveg_in_streat = float(np.average(coverage[2] + coverage[3], weights=weights))
         Estreat_ee = Estreat*(1-Pveg_in_streat)+Eveg*Pveg_in_streat
 
@@ -629,7 +663,7 @@ class Urban_Veg(CanopyGeometry):
         vaa = self.vaa_[hza0]
         sza = self.sza
         saa = self.saa
-        raa = np.asarray(vaa - saa)
+        raa = np.asarray(_fold(vaa - saa))
 
         ind = raa>180
         if np.sum(ind)>0:
@@ -684,7 +718,7 @@ class Urban_Veg(CanopyGeometry):
             projs = projs + projs_temp
 
         ### calculate the sunlitfraction, this is the overlappling increatsing part, hotspot O = 0
-        Overlapping = np.sqrt(tantv * tantv + tants * tants - 2 * tantv * tants * up) / (tantv + tants)
+        Overlapping = _overlap(tantv, tants, up)
         partmax = np.max([projv, projs])
         partmin = np.min([projv, projs])
         # if (raa == 0) | (raa==180):
@@ -705,10 +739,14 @@ class Urban_Veg(CanopyGeometry):
         ### 半球投影的归一化
         if2 = 1.0
         ### 上半球的方向
-        n_hza0 = 90
-        n_haa0 = 60
-        hza0 = np.linspace(0, 89, n_hza0) # hemisphere space
-        haa0 = np.linspace(0, 360, n_haa0)
+        if self.hemisphere_grid is None:
+            n_hza0, n_haa0 = 90, 60
+            hza0 = np.linspace(0, 89, n_hza0) # hemisphere space
+            haa0 = np.linspace(0, 360, n_haa0)
+        else:
+            n_hza0, n_haa0 = self.hemisphere_grid
+            hza0 = (np.arange(n_hza0) + 0.5) * 90.0 / n_hza0
+            haa0 = (np.arange(n_haa0) + 0.5) * 360.0 / n_haa0
         hza,haa = np.meshgrid(hza0,haa0)
         hza = np.reshape(hza,-1)  ### to linear
         haa = np.reshape(haa,-1)  ### to linear
@@ -997,17 +1035,35 @@ class Urban_Veg(CanopyGeometry):
         self.canopy_effective_emissivity = np.asarray(emissivity_ )
         return np.asarray(emissivity_ )
 
+    def _canopy_scatter(self, kangle):
+        """Leaf-source canopy scattering over the visible street, split by building shadow."""
+        sunlit_view, shaded_view = self._street_view
+        lai, std, rcr, hcr = self.forestshape[:4]
+        scat = canopy_scatter(self.vegetation_model, lai, self.Eveg, self.Estreat,
+                              np.asarray([self.vza_[kangle]]), np.asarray([self.sza]), std, hcr, rcr)[:, 0]
+        leaf_sunlit = sunlit_view * scat[2]
+        leaf_shaded = sunlit_view * scat[3] + shaded_view * (scat[2] + scat[3])
+        return leaf_sunlit, leaf_shaded
+
     def calculate_effective_component_emissivity(self,ifP = 0):
         emissivity_ = []
         for kangle in range(self.n_angle):
-            direct = self.calculate_direct_emissivity(kangle,ifP)
-            scatter = self.calculate_scattering_emissivity(kangle,ifP)
-            direct = np.asarray(direct)
-            scatter = np.asarray(scatter)
-            # print(direct)
-            # scatter[:] = 0
-            # direct[:] = 0
-            emissivity_.append(direct + scatter)
+            direct = np.asarray(self.calculate_direct_emissivity(kangle,2), dtype=float)
+            scatter = np.asarray(self.calculate_scattering_emissivity(kangle,2), dtype=float)
+            canopy = np.zeros_like(direct)
+            canopy[6], canopy[7] = self._canopy_scatter(kangle)
+            budget = max(0.0, 1.0 - float(np.sum(direct + scatter)))
+            if canopy.sum() > budget:
+                canopy *= budget / canopy.sum()
+            components = direct + scatter + canopy
+            if ifP == 2:
+                emissivity_.append(components)
+            elif ifP == 1:
+                emissivity_.append([components[0:2].sum(), components[2:4].sum() + components[6:8].sum(), components[4:6].sum()])
+            elif ifP == 3:
+                emissivity_.append(np.asarray(self.calculate_direct_emissivity(kangle,3)) * 0)
+            else:
+                emissivity_.append(components.sum())
 
         self.canopy_effective_emissivity = np.asarray(emissivity_ )
         return np.asarray(emissivity_ )
