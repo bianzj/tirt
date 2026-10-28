@@ -11,8 +11,8 @@ RAD_THRESHOLD = 5.0
 # are numerical guards, not expected operating limits for normal cases.
 TMIN_THRESHOLD = 240.0
 TMAX_THRESHOLD = 380.0
-WC = 0.08
-MAX_TEMPERATURE_STEP = 1.5
+WC = 0.8
+MAX_TEMPERATURE_STEP = 5.0
 
 
 def air_density(meteo):

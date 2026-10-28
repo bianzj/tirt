@@ -174,21 +174,21 @@ class HeatConductionTests(unittest.TestCase):
         expected = 2/math.sqrt(math.pi) * (2 + 0.5*(math.sqrt(5)-1))
         self.assertAlmostEqual(flux, expected)
 
-    def test_surface_convolution_truncates_at_48_hours_in_elapsed_time(self):
+    def test_surface_convolution_truncates_at_7_hours_in_elapsed_time(self):
         state = dict(dt_seconds=47*3600, thermal_history_dt_seconds=[3600, 3600],
                      surface_history_sunlit=[300, 290, 280])
         settings = dict(soil_cs=1, soil_rhos=1, soil_lambda=1)
-        flux = _surface_differential(settings, state, 300, "surface_history_sunlit")
-        expected = 20/math.sqrt(math.pi)/3600*(math.sqrt(48*3600)-math.sqrt(47*3600))
+        flux = _surface_differential(settings, state, 304, "surface_history_sunlit")
+        expected = 2/math.sqrt(math.pi)*(4/(47*3600))*math.sqrt(7*3600)
         self.assertAlmostEqual(flux, expected)
 
-    def test_history_retains_48_hours_and_interval_boundary_sample(self):
+    def test_history_retains_7_hours_and_interval_boundary_sample(self):
         state = state_at(surface=300, dt=1800)
         for _ in range(100):
             update_thermal_history(self.settings, state)
-        self.assertEqual(len(state["surface_history_sunlit"]), 97)
-        self.assertEqual(len(state["thermal_history_dt_seconds"]), 96)
-        self.assertEqual(sum(state["thermal_history_dt_seconds"]), 48*3600)
+        self.assertEqual(len(state["surface_history_sunlit"]), 15)
+        self.assertEqual(len(state["thermal_history_dt_seconds"]), 14)
+        self.assertEqual(sum(state["thermal_history_dt_seconds"]), 7*3600)
 
     def test_variable_interval_history_preserves_the_true_timing(self):
         state = state_at(surface=300, dt=3600)

@@ -104,7 +104,10 @@ def aerodynamic_resistance(settings, meteo, state, urban=False):
         count = max(density * pixel_area, 1e-6)
         lambda_p = min(max(count * building_area / pixel_area, 0.0), 0.99)
         displacement = (1.0 + 4.0 ** (-lambda_p) * (lambda_p - 1.0)) * hc
-        roughness = max(float(settings.get("urban_roughness_length", 0.15)), 0.01)
+        # Above-canopy momentum roughness follows the building height.  An
+        # explicit positive urban_roughness_length still overrides it.
+        configured_roughness = max(float(settings.get("urban_roughness_length", 0.0)), 0.0)
+        roughness = max(configured_roughness if configured_roughness > 0.0 else 0.1 * hc, 0.01)
         numerator = math.log(max((z - displacement) / roughness, 1.01)) - psim(z - displacement) + psim(roughness)
         ustar = max(0.001, KAPPA * wind / max(numerator, 1e-6))
         zr = 2.5 * hc
@@ -239,7 +242,11 @@ def _canopy(settings, lai, hc, z, wind, length, profile_reference, psim, psih, p
     n = float(settings["aero_cd"]) * lai / (2.0 * KAPPA * KAPPA)
     zr = 2.5 * hc
     displacement = hc * (1.0 - (1.0 - math.exp(-sq)) / sq)
-    roughness = max((hc - displacement) * math.exp(-KAPPA * g1 + float(settings["aero_psicor"])), 1e-4)
+    # Grass represented without an explicit height falls back to the fixed
+    # bare-surface roughness; vegetation with a height keeps Raupach z0.
+    raw_height = float(settings.get("height", 0.0))
+    roughness = (BARE_SOIL_ROUGHNESS if raw_height <= 0.0 else
+                 max((hc - displacement) * math.exp(-KAPPA * g1 + float(settings["aero_psicor"])), 1e-4))
     if hc > z:
         ustar_temp = max(0.001, KAPPA * wind / max(math.log(max((z - displacement) / roughness, 1.01)) - psim(z - displacement), 1e-6))
         wind = max(0.01, ustar_temp / KAPPA * (math.log(max((hc - displacement) / roughness, 1.01)) - psim(hc - displacement)))

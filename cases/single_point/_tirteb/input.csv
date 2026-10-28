@@ -27,7 +27,7 @@ urban,building_width,10,building width m
 urban,building_height,20,building height m
 urban,urban_street_radiation_factor,1.0,overall street-radiation correction; no street visibility weighting
 urban,urban_vegetation_fraction,0.30,vegetation footprint fraction in street area
-urban,urban_roughness_length,0.15,above-canopy momentum roughness length m
+urban,urban_roughness_length,0,0=derive 0.1*building height; positive=explicit above-canopy roughness length m
 urban,urban_canyon_roughness_ratio,0.05,canyon roughness length divided by mean building plan scale
 urban,urban_canyon_min_ratio,1.05,minimum canyon-to-roof aerodynamic resistance ratio
 urban,urban_leaf_wind_decay,0.5,leaf wind attenuation per LAI within the canyon

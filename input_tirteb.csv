@@ -25,7 +25,7 @@ urban,building_density,0.0015,building plan density
 urban,building_length,10,building length m
 urban,building_width,10,building width m
 urban,building_height,20,building height m
-urban,urban_roughness_length,0.15,above-canopy momentum roughness length m
+urban,urban_roughness_length,0,0=derive 0.1*building height; positive=explicit above-canopy roughness length m
 urban,urban_canyon_roughness_ratio,0.05,canyon roughness length divided by mean building plan scale
 urban,urban_canyon_min_ratio,1.05,minimum canyon-to-roof aerodynamic resistance ratio
 urban,urban_leaf_wind_decay,0.5,leaf wind attenuation per LAI within the canyon
@@ -126,7 +126,7 @@ soil_thermal,soil_cs,1180,soil specific heat capacity J kg-1 K-1
 soil_thermal,soil_rhos,1100,soil density
 soil_thermal,soil_lambda,1.55,soil thermal conductivity
 soil_thermal,soil_rbs,10,soil boundary resistance
-soil_thermal,soil_moisture,0.25,volumetric soil water content m3 m-3; values above 1 are read as percent
+soil_thermal,soil_moisture,0.25,volumetric soil water content m3 m-3 clamped to 0.05-0.55; values above 1 are read as percent
 soil_thermal,satwater,0.45,saturated volumetric soil water content m3 m-3; values above 1 are read as percent
 soil_thermal,soil_tir_water_effect,0,0=ignore soil water effect on TIR emissivity; 1=linear dry-to-wet correction
 soil_thermal,soil_tir_emissivity_wet,0.99,wet-soil TIR emissivity

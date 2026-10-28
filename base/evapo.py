@@ -246,7 +246,7 @@ def update_thermal_history(settings, state):
         retained += 1
         if elapsed >= HISTORY_SECONDS:
             break
-    # Keep the oldest bracketing sample, so an interval intersecting the 48 h
+    # Keep the oldest bracketing sample, so an interval intersecting the 7 h
     # cutoff can be integrated with its original slope and duration.
     for temp_key, suffix in mappings:
         history_key = "surface_history_" + suffix

@@ -145,6 +145,31 @@ def _empty_shortwave():
     return result
 
 
+SHORTWAVE_BIN_NM = 50
+
+
+def _spectral_groups(bin_nm=SHORTWAVE_BIN_NM):
+    """Contiguous 1 nm band groups used by the energy-balance shortwave solver."""
+    width = max(1, int(bin_nm))
+    return [(start, min(start + width, BANDS)) for start in range(0, BANDS, width)]
+
+
+def _group_sum(values, groups):
+    return np.asarray([float(np.sum(values[start:end])) for start, end in groups], float)
+
+
+def _group_mean(values, groups):
+    return np.asarray([float(np.mean(values[start:end])) for start, end in groups], float)
+
+
+def _expand_groups(values, groups):
+    """Expand group totals back to the 1 nm grid without changing each group total."""
+    expanded = np.zeros(BANDS, float)
+    for value, (start, end) in zip(values, groups):
+        expanded[start:end] = float(value) / (end - start)
+    return expanded
+
+
 def _plane_prepare_shortwave(settings, meteo, sza, saa, sunlit=True):
     """Absorbed shortwave: beam per unit sunlit area (soil, leaf) and diffuse per unit area of every component."""
     result = _empty_shortwave()
@@ -162,23 +187,34 @@ def _plane_prepare_shortwave(settings, meteo, sza, saa, sunlit=True):
         fesun = fesky = np.full(BANDS, 1000.0 / BANDS)
         wavelengths = np.arange(400.0, 2401.0)
     lit = bool(sunlit)
-    esun = rin * (1.0 - fraction) * fesun * 0.001
-    esky = rin * fraction * fesky * 0.001
-    beam = esun if lit else np.zeros(BANDS)
-    leaf_rho = np.clip(_spectrum(settings, "leaf_reflectance_spectrum", rho), 0.0, 1.0)
-    leaf_tau = np.clip(_spectrum(settings, "leaf_transmittance_spectrum", tau), 0.0, 1.0 - leaf_rho)
+    groups = _spectral_groups()
+    esun_full = rin * (1.0 - fraction) * fesun * 0.001
+    esky_full = rin * fraction * fesky * 0.001
+    esun = _group_sum(esun_full, groups)
+    esky = _group_sum(esky_full, groups)
+    wavelengths = _group_mean(wavelengths, groups)
+    beam = esun if lit else np.zeros(len(groups))
+    leaf_rho_full = np.clip(_spectrum(settings, "leaf_reflectance_spectrum", rho), 0.0, 1.0)
+    leaf_tau_full = np.minimum(
+        np.clip(_spectrum(settings, "leaf_transmittance_spectrum", tau), 0.0, 1.0), 1.0 - leaf_rho_full
+    )
+    leaf_rho = _group_mean(leaf_rho_full, groups)
+    leaf_tau = _group_mean(leaf_tau_full, groups)
     background = ("urban_reflectance_street_spectrum"
                   if str(settings.get("surface_model", "")).strip().lower() == "urban" else "soil_reflectance_spectrum")
-    soil_rho = np.clip(_spectrum(settings, background, soil), 0.0, 1.0)
-    result.update(directVrad_incident=float(beam.sum()), directVrad_incident_spectrum=beam.tolist(),
-                  diffuseVrad_incident=float(esky.sum()), diffuseVrad_incident_spectrum=esky.tolist())
+    soil_rho = _group_mean(np.clip(_spectrum(settings, background, soil), 0.0, 1.0), groups)
+    result.update(directVrad_incident=float(beam.sum()),
+                  directVrad_incident_spectrum=_expand_groups(beam, groups).tolist(),
+                  diffuseVrad_incident=float(esky.sum()),
+                  diffuseVrad_incident_spectrum=_expand_groups(esky, groups).tolist())
     par = np.where((wavelengths >= 400.0) & (wavelengths <= 700.0), wavelengths * PHOTONS, 0.0)
     layout = _scene(settings, sza, saa, lit)
     if layout is None:
         diffuse = esky * (1.0 - soil_rho)
         result.update(directVrad_soil=float((beam * (1.0 - soil_rho)).sum()), diffuseVrad_soil=float(diffuse.sum()),
                       diffuseVrad_soil_sunlit=float(diffuse.sum()), diffuseVrad_soil_shaded=float(diffuse.sum()),
-                      diffuseVrad_soil_spectrum=diffuse.tolist(), diffuseVrad_soil_incident_spectrum=esky.tolist(),
+                      diffuseVrad_soil_spectrum=_expand_groups(diffuse, groups).tolist(),
+                      diffuseVrad_soil_incident_spectrum=_expand_groups(esky, groups).tolist(),
                       shortwave_albedo=float(((beam + esky) * soil_rho).sum() / max((beam + esky).sum(), 1e-12)))
         return result
     nodes, unit_beam, soil_area, leaf_area, sunlit_area = layout
@@ -189,20 +225,21 @@ def _plane_prepare_shortwave(settings, meteo, sza, saa, sunlit=True):
     direct = beam[:, None] * beam_first
     diffuse = beam[:, None] * beam_scattered + esky[:, None] * (sky_first + sky_scattered)
     soil_sunlit, leaf_sunlit = (float(sunlit_area[mask].sum()) for mask in (nodes.soil, ~nodes.soil))
-    direct_soil = direct[:, nodes.soil].sum(axis=1) / soil_sunlit if soil_sunlit > 1e-12 else np.zeros(BANDS)
-    direct_leaf = direct[:, ~nodes.soil].sum(axis=1) / leaf_sunlit if leaf_sunlit > 1e-12 else np.zeros(BANDS)
+    direct_soil = direct[:, nodes.soil].sum(axis=1) / soil_sunlit if soil_sunlit > 1e-12 else np.zeros(len(groups))
+    direct_leaf = direct[:, ~nodes.soil].sum(axis=1) / leaf_sunlit if leaf_sunlit > 1e-12 else np.zeros(len(groups))
     soil_parts = _means(diffuse, soil_area, sunlit_area, nodes.soil)
     leaf_parts = _means(diffuse, leaf_area, sunlit_area, ~nodes.soil)
     soil_mean = diffuse[:, nodes.soil].sum(axis=1) / soil_area.sum()
     leaf_mean = diffuse[:, ~nodes.soil].sum(axis=1) / leaf_area.sum()
     absorbed_total = float((direct + diffuse).sum())
+    soil_incident = soil_mean / np.maximum(1.0 - soil_rho, 1e-12)
     result.update(
         directVrad_soil=float(direct_soil.sum()), directVrad_leaf=float(direct_leaf.sum()),
         diffuseVrad_soil=float(soil_mean.sum()), diffuseVrad_leaf=float(leaf_mean.sum()),
         diffuseVrad_soil_sunlit=float(soil_parts[:, 0].sum()), diffuseVrad_soil_shaded=float(soil_parts[:, 1].sum()),
         diffuseVrad_leaf_sunlit=float(leaf_parts[:, 0].sum()), diffuseVrad_leaf_shaded=float(leaf_parts[:, 1].sum()),
-        diffuseVrad_soil_spectrum=soil_mean.tolist(),
-        diffuseVrad_soil_incident_spectrum=(soil_mean / np.maximum(1.0 - soil_rho, 1e-12)).tolist(),
+        diffuseVrad_soil_spectrum=_expand_groups(soil_mean, groups).tolist(),
+        diffuseVrad_soil_incident_spectrum=_expand_groups(soil_incident, groups).tolist(),
         directPrad_leaf=float((direct_leaf * par).sum()), diffusePrad_leaf=float((leaf_mean * par).sum()),
         diffusePrad_leaf_sunlit=float((leaf_parts[:, 0] * par).sum()),
         diffusePrad_leaf_shaded=float((leaf_parts[:, 1] * par).sum()),

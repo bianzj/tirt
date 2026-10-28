@@ -5,7 +5,7 @@ Soil ``cs`` is specific heat [J kg-1 K-1]; urban ``cs`` is already volumetric
 """
 import math
 
-HISTORY_SECONDS = 48.0 * 3600.0
+HISTORY_SECONDS = 7.0 * 3600.0
 # Soil/street column for the depth method: 2 m deep with a zero-flux bottom,
 # about 11 diurnal damping depths for typical soil diffusivity (~1e-6 m2 s-1).
 COLUMN_DEPTH = 2.0
@@ -142,7 +142,7 @@ def history_intervals(state, count, current_dt):
 
 
 def surface_memory_flux(temp, history, intervals, current_dt, inertia):
-    """Integrate piecewise-linear temperature changes over the last 48 h.
+    """Integrate piecewise-linear temperature changes over the last 7 h.
 
     Each contribution integrates (dT/dt)/sqrt(age) over its true interval.
     A partly overlapping oldest interval retains its original temperature slope.

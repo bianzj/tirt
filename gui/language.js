@@ -260,7 +260,7 @@ const ZH = Object.freeze({
   "Indoor wall boundary (C)": "室内墙面边界温度 (C)",
   "Wall diffuse factor": "墙面散射因子",
   "Urban aerodynamic transfer": "城市空气动力传输",
-  "Urban roughness (m)": "城市粗糙度 (m)",
+  "Urban roughness (m, 0=auto)": "城市粗糙度 (m，0=自动)",
   "Canyon roughness ratio": "街谷粗糙度比",
   "Minimum canyon / roof ratio": "最小街谷/屋顶比",
   "Leaf wind decay": "叶片风速衰减",

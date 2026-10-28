@@ -7,7 +7,9 @@ import numpy as np
 
 from .inputio import BAND_PROPERTIES, band_cells, read_band_cells
 from .leafopt import fluspect
-from .soilopt import bsm, soil_tir_emissivity, volumetric_water
+from .soilopt import (
+    BSM_WATER_MAX, BSM_WATER_RESIDUAL, bsm, soil_tir_emissivity, volumetric_water,
+)
 from .structs import DefinedStructure
 from .tirteb_tirt import shortwave_optics
 
@@ -763,7 +765,7 @@ def read_defined(path=None, overrides=None):
         "urban_heat_fraction": _input_number(overrides or {}, "urban_heat_fraction", 0.4),
         "soil_temperature_method": str(_input_value(overrides or {}, "soil_temperature_method", "temperature_method") or "robust").strip().lower(),
         "urban_temperature_method": str(_input_value(overrides or {}, "urban_temperature_method", "temperature_method") or "robust").strip().lower(),
-        "soil_moisture": min(max(float(soil_thermal[5]), 0.0), soil_thermal[7]), "soil_temperature_c": meta[5],
+        "soil_moisture": min(max(float(soil_thermal[5]), BSM_WATER_RESIDUAL), BSM_WATER_MAX), "soil_temperature_c": meta[5],
         "satwater": soil_thermal[7], "dtime": meta[7],
         "z": meta[0], "ea": meta[2], "ca": meta[3], "oa": meta[4],
         "shortwave_diffuse_fraction": min(max(_input_number(overrides or {}, "shortwave_diffuse_fraction", 0.2), -1.0), 1.0),
@@ -792,7 +794,7 @@ def read_defined(path=None, overrides=None):
         "urban_building_width": _input_number(overrides or {}, "building_width", 10.0),
         "urban_building_height": _input_number(overrides or {}, "building_height", 20.0),
         "urban_building_azimuth": _input_number(overrides or {}, "building_azimuth", 0.0),
-        "urban_roughness_length": max(_input_number(overrides or {}, "urban_roughness_length", 0.15), 0.01),
+        "urban_roughness_length": max(_input_number(overrides or {}, "urban_roughness_length", 0.0), 0.0),
         "urban_canyon_roughness_ratio": max(_input_number(overrides or {}, "urban_canyon_roughness_ratio", 0.05), 0.005),
         "urban_canyon_min_ratio": max(_input_number(overrides or {}, "urban_canyon_min_ratio", 1.25), 1.0),
         "urban_leaf_wind_decay": max(_input_number(overrides or {}, "urban_leaf_wind_decay", 0.5), 0.0),

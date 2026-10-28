@@ -78,9 +78,9 @@ class LeafPhysiologyTests(unittest.TestCase):
                 self.assertAlmostEqual(one["rsshaded"], 3.0 * three["rsshaded"])
 
     def test_default_soil_resistance_uses_supplied_saturation(self):
-        dry = response(settings(soil_moisture=0.0, satwater=0.6))["rss"]
-        wet = response(settings(soil_moisture=0.6, satwater=0.6))["rss"]
-        self.assertAlmostEqual(dry, math.exp(8.206))
+        dry = response(settings(soil_moisture=0.05, satwater=0.55))["rss"]
+        wet = response(settings(soil_moisture=0.55, satwater=0.55))["rss"]
+        self.assertAlmostEqual(dry, math.exp(8.206 - 4.255 * 0.05 / 0.55))
         self.assertAlmostEqual(wet, math.exp(3.951))
         self.assertGreater(dry, wet)
 

@@ -109,7 +109,7 @@ thermal,broadband_urban_emissivity_street,0.955,gray street emissivity
 
 `stomatal_method=farquhar` 或 `ballberry`。两类叶片使用各自温度和 PAR：光照叶接受直接和对应散射 PAR，阴影叶仅接受散射 PAR。两种方案的气孔导度都不低于 `stomatal_g0`；Farquhar 在净光合 ≤0 时取该值，不再完全关闭气孔。`stressfactor` 是给定的植被胁迫参数。每段气动阻抗的上限由 `max_aerodynamic_resistance` 设置（默认 400 s m⁻¹，与 SCOPE 相同；0 表示不限制）。
 
-`soil_moisture` 和 `satwater` 统一为体积含水量 m³ m⁻³（0.25 为 BSM 的容量参考值），合法范围分别为 0–satwater、正数；默认 satwater=0.45。为兼容旧文件，任一土壤含水量输入大于 1 时按百分数除以 100，模型内部只使用 m³ m⁻³，不再出现百分数形式。未显式给定 `soil_rss`/`rss` 时，默认阻抗为 `exp(8.206−4.255·soil_moisture/satwater)`。模板中已有 `soil_rss=200` 这种显式值时，默认保留常数含义。要明确改为含水量关系，可添加：
+`soil_moisture` 和 `satwater` 统一为体积含水量 m³ m⁻³（0.25 为 BSM 的容量参考值）；`soil_moisture` 读入后限制在 0.05–0.55，`satwater` 为正数，默认 satwater=0.45。为兼容旧文件，任一土壤含水量输入大于 1 时按百分数除以 100，模型内部只使用 m³ m⁻³，不再出现百分数形式。未显式给定 `soil_rss`/`rss` 时，默认阻抗为 `exp(8.206−4.255·soil_moisture/satwater)`。模板中已有 `soil_rss=200` 这种显式值时，默认保留常数含义。要明确改为含水量关系，可添加：
 
 ~~~csv
 soil_thermal,soil_rss_method,sellers,moisture dependent surface resistance
@@ -117,7 +117,7 @@ soil_thermal,soil_rss_method,sellers,moisture dependent surface resistance
 
 若需要固定值，设 `soil_rss_method=constant` 并填写 `soil_rss`。这一关系不引入降水、渗流和根系吸水的水量演变；输入水分与植被胁迫仍为给定值。当前城市屋顶、墙面、街道的 LE 为零，城市潜热来自叶片，不能用于湿街道蒸发的直接模拟。
 
-热参数单位必须区分：`soil_cs` 为质量比热 J kg⁻¹ K⁻¹，乘 `soil_rhos` 后才是体积热容；`urban_cs` 已是 J m⁻³ K⁻¹。城市街道的 G 和温度剖面推进均使用土壤热参数，屋顶/墙面使用城市热参数。导热支持 `direct`（净辐射比例）、`surface`（真实时间间隔的 48 小时热历史）和 `depth`（向后欧拉内部温度剖面）。depth 使用当前表面边界，不截断 Fourier 数；固定底边界或固定室内温度是模型假定。
+热参数单位必须区分：`soil_cs` 为质量比热 J kg⁻¹ K⁻¹，乘 `soil_rhos` 后才是体积热容；`urban_cs` 已是 J m⁻³ K⁻¹。城市街道的 G 和温度剖面推进均使用土壤热参数，屋顶/墙面使用城市热参数。导热支持 `direct`（净辐射比例）、`surface`（真实时间间隔的 7 小时热历史）和 `depth`（向后欧拉内部温度剖面）。depth 使用当前表面边界，不截断 Fourier 数；固定底边界或固定室内温度是模型假定。
 
 ## output.csv 列说明
 

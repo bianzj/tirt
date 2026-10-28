@@ -62,9 +62,9 @@ TIRTEB 还包含气象与时间、`leaf_width`、空气动力学、生理和热�
 
 `spectral_source=file` 时从 `spectrals_file`（默认 [observation_spectrals_tirteb.txt](../data/spectrals/observation_spectrals_tirteb.txt)）读取同样 7 行的表，每行前面可以带文字标签。
 
-土壤短波反射率由 BSM 计算；土壤含水量统一用体积分数 m³ m⁻³，BSM 的容量参数也取 0.25，并直接在该尺度上计算 `μ = (θ − 0.05)/0.25`，不再换算成百分数。为兼容旧输入，`soil_moisture`、`satwater` 和 TIR 干/湿参考含水量中大于 1 的值按百分数除以 100，模型内部只保留 m³ m⁻³；`bsm_latitude`、`bsm_longitude` 是 BSM 的谱形角度参数（度），与土壤含水量无关。水膜反射率取 `1 − tav(40°, nw)`（`calctav` 返回的是透过率），土壤水膜下界反射率按 SCOPE 的 `rbac` 公式计算。
+土壤短波反射率由 BSM 计算；土壤含水量统一用体积分数 m³ m⁻³（读入后限制在 0.05–0.55），BSM 的容量参数也取 0.25，并直接在该尺度上计算 `μ = (θ − 0.05)/0.25`，不再换算成百分数。为兼容旧输入，`soil_moisture`、`satwater` 和 TIR 干/湿参考含水量中大于 1 的值按百分数除以 100，模型内部只保留 m³ m⁻³；`bsm_latitude`、`bsm_longitude` 是 BSM 的谱形角度参数（度），与土壤含水量无关。水膜反射率取 `1 − tav(40°, nw)`（`calctav` 返回的是透过率），土壤水膜下界反射率按 SCOPE 的 `rbac` 公式计算。
 
-短波默认按直射 0.8、漫射 0.2 划分（`shortwave_diffuse_fraction=0.2`）；填 `-1` 时按 Erbs 从总辐射和太阳高度角反算，填 0–1 时使用给定值。TiRT 方向模型的短波反射率使用同一默认值。
+短波默认按直射 0.8、漫射 0.2 划分（`shortwave_diffuse_fraction=0.2`）；填 `-1` 时按 Erbs 从总辐射和太阳高度角反算，填 0–1 时使用给定值。能量平衡的短波吸收按 50 nm 分组（约 41 组）计算，观测光谱仍保留 1 nm 分辨率。TiRT 方向模型的短波反射率使用同一默认值。
 
 能量平衡默认还启用 `shortwave_enforce_solar_limit=1`：直射法向辐照度不得超过晴空直射辐照度。晴空 DNI 采用 Meinel 模型 `DNI_clear = 1367·E0·0.7^(AM^0.678)`（Meinel & Meinel, 1976），E0 = `1+0.033·cos(2π·DOY/365)`，相对大气质量 AM 采用 Kasten & Young (1989) 公式 `AM = 1/[cos(sza) + 0.50572·(96.07995−sza)^−1.6364]`（sza 为度）。若给定比例下的直射超过这一上限，保留原气象总短波，将超出的直射功率转为漫射；地平线以下的正短波全部作为漫射。日地距离修正采用 [FAO 的年内近似](https://www.fao.org/4/x0490e/x0490e07.htm)。该处理是物理可行性约束，不是实际直散射观测反演；Meinel 值是典型晴空值，高海拔极洁净大气下真实 DNI 可能略高于此上限。中间文件保留请求比例、实际比例、`shortwave_partition_limited`、直射法向功率和上限（`solar_direct_normal_limit_W_m2`）；控制试验可显式设为 0 关闭限制。单纯给定几何的静态 BRF 没有绝对入射功率，不进行这一约束。小于 20 W m⁻² 的正入射也继续参与预算，不再直接丢弃。
 
@@ -149,7 +149,7 @@ rss = exp(8.206 − 4.255·clip(soil_moisture/satwater,0,1))   [s m⁻¹]
 `soil_cs` 是质量比热，单位 J kg⁻¹ K⁻¹；土壤体积热容为 `soil_rhos·soil_cs`，扩散率为 `soil_lambda/(soil_rhos·soil_cs)`。`urban_cs` 本身是体积热容，单位 J m⁻³ K⁻¹，不再乘 `urban_rhos`。模板中的数值必须按这些单位解释。
 
 - direct：G 取给定的净辐射比例（`soil_heat_fraction` 或 `urban_heat_fraction`）。
-- surface：用半无限介质表面温度变化的卷积核求 G，热惯量为 `sqrt(lambda·Cvol)`；保存实际经过的 48 小时时间窗及各段真实间隔，包含跨越截断边界的最老线性段。
+- surface：用半无限介质表面温度变化的卷积核求 G，热惯量为 `sqrt(lambda·Cvol)`；保存实际经过的 7 小时时间窗及各段真实间隔，包含跨越截断边界的最老线性段。
 - depth（土壤及街道）：土柱深 2 m，层厚自表层 0.01 m 起按 1.3 倍几何加粗（共 16 个节点，常量见 `base/heat_conduction.py`），底部为零通量（Neumann）边界。有限体积向后欧拉：节点 i 的热容为 `Cvol·(h_(i−1)+h_i)/2`，底节点为半层，`Cvol·w_i·(Ti−Ti_old)/dt = lambda·(Ti−1−Ti)/h_(i−1) − lambda·(Ti−Ti+1)/h_i`，不截断 Fourier 数。表面节点温度为当前迭代的表面温度，表面热通量包含第一层导热和表层半格储热：`G = lambda·(T0−T1)/h0 + Cvol·(h0/2)·(T0−T0_old)/dt`，因此 `G·dt` 等于整列储热变化。每个气象步只在最终状态提交一次剖面，迭代中不重复推进历史。`soil_depth_step / urban_depth_step` 不再参与土柱网格。正弦表面温度驱动（振幅 10 K）下，第 7–8 天平均 G 约 −0.1 W m⁻²，振幅与解析半无限解相差 <1%；首日平均 G 仍受初始土柱温度（取首日平均气温）与表面平均温度之差的调整过程影响。
 - depth（屋顶/墙面）：均匀分层的有限围护结构，内侧为固定室内温度，表面通量取第一层梯度。
 
@@ -157,7 +157,7 @@ rss = exp(8.206 − 4.255·clip(soil_moisture/satwater,0,1))   [s m⁻¹]
 
 ## 耦合稳定度与数值求解
 
-组件温度首先采用阻尼的分量近似牛顿修正，固定 `WC=0.08`，单次温度变化限制为 ±1.5 K，温度保护范围为 240–380 K。`direct` 使用各分量近似导数；`robust` 使用简化的传热/辐射分母。标量修正达到每批上限仍未闭合时，采用有界信赖域最小二乘后备求解，同时把组分温度和控制阵风速度的场景 H 作为未知量，用数值雅可比求全部组分能量方程及 H 一致性方程。数值扰动期间固定前一时间步的热剖面和历史，不重复推进时间。
+组件温度首先采用阻尼的分量近似牛顿修正，固定 `WC=0.8`，单次温度变化限制为 ±5 K，温度保护范围为 240–380 K。`direct` 使用各分量近似导数；`robust` 使用简化的传热/辐射分母。标量修正达到每批上限仍未闭合时，采用有界信赖域最小二乘后备求解，同时把组分温度和控制阵风速度的场景 H 作为未知量，用数值雅可比求全部组分能量方程及 H 一致性方程。数值扰动期间固定前一时间步的热剖面和历史，不重复推进时间。
 
 傍晚生理响应切换可能改变温度平衡分支，使此前建立的标量 L 区间失效。外层达到上限仍未共同闭合时，再联合求解温度、阵风 H 与 `1/L`，增加方程 `H + rho·cp·Ta·ustar³·(1/L)/(kappa·g) = 0`，最多进行 `4·max_iter` 次信赖域目标求值。后备求解器的 success 标志不替代物理残差检查；最终仍按同一共同闭合判据判断。`stability_joint_evaluations` 记录这一联合后备路径的求值数，`iterations` 包含标量及后备温度求值数。
 
@@ -187,7 +187,7 @@ U = sqrt(max(u, min_wind_speed)² + wstar²)
 
 与 SCOPE（`resistances.m`）相同，每一段气动阻抗都不超过 `max_aerodynamic_resistance`（默认 400 s m⁻¹，设为 0 表示不限制）。分段为：冠层上方 rai+rar+rac；叶边界层；冠层内到土壤（含 aero_rbs）；裸土的 bulk-transfer 阻抗；城市的屋顶、街谷 bulk-transfer 及叶边界层阻抗。叶片总阻抗 raa_leaf = 冠层上方段 + 叶边界层段，土壤总阻抗 raa_soil = 冠层上方段 + 冠层内段，所以总阻抗最大可到两倍上限。这是经验限幅：在弱风、稳定层结下防止交换完全停止，不是物理推导。
 
-1000 m 是固定混合层高度近似。裸土使用动量和热粗糙度的 bulk-transfer 阻抗，`z0m=0.01 m`，`z0h=z0m/10`；冠层稳定度修正参与摩擦速度和冠层扩散交换。冠层 d 与 z0 采用 Raupach (1994) 关系（与 SCOPE 相同）：`d = hc·[1−(1−exp(−sqrt(cd1·LAI/2)))/sqrt(cd1·LAI/2)]`，`z0 = (hc−d)·exp(−kappa·G1+psicor)`，`G1 = max(3.3, (cssoil+cr·LAI/2)^−1/2)`，因此稀疏冠层的 z0 随 LAI 减小。为使 LAI→0 时与裸土连续，LAI < 0.5 时以权重 `w = s²(3−2s)`（`s=LAI/0.5`）混合冠层与裸土的 ustar、土壤阻抗 raa_soil、稳定度参考高度，d 按 `w·d`、z0 按对数加权报告（`aerodynamic_displacement / aerodynamic_roughness_length / aerodynamic_canopy_weight`）；LAI ≥ 0.5 时结果与原冠层方案相同。LAI=1e−6、1e−4、0.01 的 raa_soil、ustar 与土壤温度单调趋近裸土结果。城市屋顶采用冠层上方交换，墙面/街道采用局地街谷风速和粗糙度，叶片再加叶边界层阻抗。这些经验传输近似及低风保护不能替代稳定夜间或真实城市的独立通量验证。
+1000 m 是固定混合层高度近似。裸土使用动量和热粗糙度的 bulk-transfer 阻抗，`z0m=0.01 m`，`z0h=z0m/10`；冠层稳定度修正参与摩擦速度和冠层扩散交换。冠层 d 与 z0 采用 Raupach (1994) 关系（与 SCOPE 相同）：`d = hc·[1−(1−exp(−sqrt(cd1·LAI/2)))/sqrt(cd1·LAI/2)]`，`z0 = (hc−d)·exp(−kappa·G1+psicor)`，`G1 = max(3.3, (cssoil+cr·LAI/2)^−1/2)`，因此稀疏冠层的 z0 随 LAI 减小。为使 LAI→0 时与裸土连续，LAI < 0.5 时以权重 `w = s²(3−2s)`（`s=LAI/0.5`）混合冠层与裸土的 ustar、土壤阻抗 raa_soil、稳定度参考高度，d 按 `w·d`、z0 按对数加权报告（`aerodynamic_displacement / aerodynamic_roughness_length / aerodynamic_canopy_weight`）；LAI ≥ 0.5 时结果与原冠层方案相同。LAI=1e−6、1e−4、0.01 的 raa_soil、ustar 与土壤温度单调趋近裸土结果。城市屋顶采用冠层上方交换，`urban_roughness_length=0` 时 z0 取 0.1×建筑高度（正数则显式覆盖），墙面/街道采用局地街谷风速和粗糙度，叶片再加叶边界层阻抗；`height≤0` 的草地按 0.01 m 固定粗糙度处理。这些经验传输近似及低风保护不能替代稳定夜间或真实城市的独立通量验证。
 
 ## 输出与验证边界
 
