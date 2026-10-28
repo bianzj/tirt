@@ -13,10 +13,28 @@ def _shade(values):
 
 
 def _shape_values(settings):
-    height = max(float(settings.get("terrain_height", 20.0)), 1.0e-6)
-    radius = max(float(settings.get("terrain_radius", 100.0)), 1.0e-6)
-    density = max(float(settings.get("terrain_density", 1.0)), 0.0)
-    return ((height, radius, density),)
+    """Cone classes as (height, radius, density), accepting the thermal multi-value syntax.
+
+    Defaults and the semicolon-separated form follow run.py so both bands read the same scene.
+    """
+    def read(key, default):
+        value = settings.get(key, default)
+        if isinstance(value, (list, tuple)):
+            return [float(item) for item in value]
+        if isinstance(value, str) and ";" in value:
+            return [float(item) for item in value.split(";") if item.strip()]
+        return [float(value)]
+
+    heights, radii, densities = read("terrain_height", 20.0), read("terrain_radius", 10.0), read("terrain_density", 0.001)
+    count = max(len(heights), len(radii), len(densities))
+
+    def pad(values):
+        if not values:
+            return [0.0] * count
+        return (values * count)[:count] if len(values) == 1 else (values + [values[-1]] * count)[:count]
+
+    return tuple((max(h, 1.0e-6), max(r, 1.0e-6), max(n, 0.0))
+                 for h, r, n in zip(pad(heights), pad(radii), pad(densities)))
 
 
 def _safe_tangent(angle):

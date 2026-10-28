@@ -33,4 +33,8 @@ cases/**/observations.csv
 cases/**/intermediate.csv
 cases/**/summary.csv
 cases/**/plots/
-benchmark/**/runs/
+validation/**/runs/
+validation/results/
+tmp/
+.tmp_init/
+.dsh-office-*/

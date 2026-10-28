@@ -6,13 +6,13 @@ let renderer;
 let controls;
 let sceneObjects;
 let uploadedGeometryText = "";
-const uploadedFiles = { wavelengths: "", leaf_spectrum: "", soil_spectrum: "", terrain_spectrum: "", roof_spectrum: "", wall_spectrum: "", street_spectrum: "" };
 let simulationRows = [];
 let selectedWavelength = null;
-let selectedScenarioId = "1";
+let selectedSceneKey = null;
 let toastTimer;
 
 const $ = (id) => document.getElementById(id);
+const t = (key, params) => window.tirtI18n.t(key, params);
 if (window.location.protocol === "file:") {
   window.location.replace("http://127.0.0.1:8765/");
 }
@@ -31,10 +31,38 @@ function firstNumber(raw, fallback = 0) {
   return values.length ? values[0] : fallback;
 }
 
-function parseWavelengthFile(text) {
-  return String(text).replace(/^\uFEFF/, "").split(/\r?\n/)
-    .map((line) => line.trim()).filter((line) => line && !line.startsWith("#"))
-    .map((line) => Number(line.split(/[;,\s]+/)[0])).filter(Number.isFinite);
+const BAND_TABLE_IDS = ["wavelengths", "leaf-reflectance", "leaf-transmittance", "soil-reflectance",
+  "street-reflectance", "wall-reflectance", "roof-reflectance"];
+
+// Same layout as run.py read_band_table: optional text label, then values; "#" starts a comment.
+function parseBandTable(text) {
+  const rows = [];
+  for (const line of String(text).replace(/^\uFEFF/, "").split(/\r?\n/)) {
+    const fields = line.split("#")[0].split(/[\s,;:，；：]+/).filter(Boolean);
+    while (fields.length && !Number.isFinite(Number(fields[0]))) fields.shift();
+    if (!fields.length) continue;
+    const values = fields.map(Number);
+    if (!values.every(Number.isFinite)) throw new Error(t("Band table contains a non-numeric value"));
+    rows.push(values);
+  }
+  if (rows.length !== BAND_TABLE_IDS.length) {
+    throw new Error(t("Band table needs {count} rows, found {found}", { count: BAND_TABLE_IDS.length, found: rows.length }));
+  }
+  return rows;
+}
+
+function updateEmissivityReadout() {
+  const wavelengths = numberList(value("wavelengths"));
+  const row = (id) => numberList(value(id));
+  const [leafRho, leafTau, soil, street, wall, roof] = BAND_TABLE_IDS.slice(1).map(row);
+  const parts = wavelengths.map((wave, index) => {
+    if (!(wave >= 2.5)) return null;
+    const show = (rho, tau = 0) => fmt(1 - rho - tau, 3);
+    return `${wave} µm: ${t("leaf")} ${show(leafRho[index], leafTau[index])} · ${t("soil")} ${show(soil[index])} · ${t("street")} ${show(street[index])} · ${t("wall")} ${show(wall[index])} · ${t("roof")} ${show(roof[index])}`;
+  }).filter(Boolean);
+  $("thermal-emissivity-readout").textContent = parts.length
+    ? `${t("Thermal emissivity ε = 1 − ρ − τ")} — ${parts.join("; ")}`
+    : t("No thermal band (≥ 2.5 µm): all bands give reflectance BRF");
 }
 
 // Y is vertical; zenith angles are measured from the vertical axis.
@@ -55,7 +83,7 @@ function manualGeometryPairs() {
 function setStatus(text, kind = "idle") {
   const pill = $("status-pill");
   pill.className = `status-pill ${kind}`;
-  pill.querySelector("span").textContent = text;
+  pill.querySelector("span").textContent = t(text);
 }
 function notify(message, error = false) {
   const toast = $("toast");
@@ -67,14 +95,6 @@ function notify(message, error = false) {
 }
 
 function currentOverrides() {
-  const wavelengths = numberList(value("wavelengths"));
-  const bandValues = (id, fallback) => {
-    const values = numberList(value(id));
-    if ($(id).closest(".is-hidden") && values.length !== wavelengths.length) {
-      return wavelengths.map(() => Number(fallback)).join(";");
-    }
-    return value(id);
-  };
   const overrides = {
     surface_model: value("surface-model"),
     vegetation_model: value("vegetation-model"),
@@ -85,15 +105,16 @@ function currentOverrides() {
     include_hemisphere: $("include-hemisphere").checked ? "1" : "0",
     sza: value("sza"),
     saa: value("saa"),
+    spectral_source: "direct",
     wavelengths: value("wavelengths"),
-    emissivity_leaf: bandValues("emissivity-leaf", "0.985"),
-    emissivity_soil: bandValues("emissivity-soil", "0.955"),
+    leaf_reflectance: value("leaf-reflectance"),
+    leaf_transmittance: value("leaf-transmittance"),
+    soil_reflectance: value("soil-reflectance"),
+    street_reflectance: value("street-reflectance"),
+    wall_reflectance: value("wall-reflectance"),
+    roof_reflectance: value("roof-reflectance"),
     hapke_enable: value("hapke-enable"),
     hapke_K: value("hapke-k"),
-    emissivity_terrain: bandValues("emissivity-terrain", "0.975"),
-    emissivity_roof: bandValues("emissivity-roof", "0.95"),
-    emissivity_wall: bandValues("emissivity-wall", "0.92"),
-    emissivity_street: bandValues("emissivity-street", "0.955"),
     building_density: value("building-density"),
     building_height: value("building-height"),
     building_length: value("building-length"),
@@ -148,7 +169,7 @@ function currentOverrides() {
 
 function currentPayload() {
   return { overrides: currentOverrides(),
-    geometry_text: selectedAdditionalSource() === "file" ? uploadedGeometryText : "", files: { ...uploadedFiles } };
+    geometry_text: selectedAdditionalSource() === "file" ? uploadedGeometryText : "" };
 }
 
 function updateGeometryFields() {
@@ -167,12 +188,7 @@ function updateConditionalFields() {
   $("row-structure-fields").classList.toggle("is-hidden", vegetation !== "row");
   $("crown-structure-fields").classList.toggle("is-hidden", vegetation !== "crown");
   $("bare-structure-note").classList.toggle("is-hidden", vegetation !== "bare");
-  $("leaf-component-row").classList.toggle("is-hidden", vegetation === "bare");
   $("bare-soil-anisotropy-fields").classList.toggle("is-hidden", vegetation !== "bare");
-  $("terrain-component-row").classList.toggle("is-hidden", surface !== "terrain");
-  $("roof-component-row").classList.toggle("is-hidden", surface !== "urban");
-  $("wall-component-row").classList.toggle("is-hidden", surface !== "urban");
-  $("street-component-row").classList.toggle("is-hidden", surface !== "urban");
   $("leaf-temperature-row").classList.toggle("is-hidden", vegetation === "bare");
   $("terrain-temperature-row").classList.toggle("is-hidden", surface !== "terrain");
   $("roof-temperature-row").classList.toggle("is-hidden", surface !== "urban");
@@ -191,12 +207,12 @@ function updateSceneReadout() {
   const principalCount = Math.ceil(Number(value("principal-vza-max")) / Math.max(Number(value("principal-vza-step")), 0.1)) + 1;
   const additionalCount = selectedAdditionalSource() === "manual" ? manualGeometryPairs().length : 0;
   const parts = [];
-  if ($("include-principal").checked) parts.push(`${principalCount * 4} principal`);
-  if ($("include-hemisphere").checked) parts.push("hemisphere");
-  if (selectedAdditionalSource() === "file" && !$("include-hemisphere").checked) parts.push("file");
-  if (additionalCount) parts.push(`${additionalCount} manual`);
-  let count = parts.join(" + ") || "No directions";
-  if (simulationRows.length) count = `${new Set(simulationRows.map((row) => `${row.scenario_id || 1}|${row.vza}|${row.vaa}|${row.sza}|${row.saa}`)).size} directions`;
+  if ($("include-principal").checked) parts.push(t("{count} principal", { count: principalCount * 4 }));
+  if ($("include-hemisphere").checked) parts.push(t("hemisphere"));
+  if (selectedAdditionalSource() === "file" && !$("include-hemisphere").checked) parts.push(t("file"));
+  if (additionalCount) parts.push(t("{count} manual", { count: additionalCount }));
+  let count = parts.join(" + ") || t("No directions");
+  if (simulationRows.length) count = t("{count} directions", { count: new Set(simulationRows.map((row) => `${row.scenario_id || 1}|${row.vza}|${row.vaa}|${row.sza}|${row.saa}`)).size });
   $("observation-readout").textContent = count;
 }
 
@@ -212,43 +228,55 @@ function validateInputs() {
     return input.value.trim() === "" || !Number.isFinite(input.valueAsNumber) || !input.checkValidity();
   });
   if (invalidNumber) {
-    return { input: invalidNumber, message: `Invalid value for ${fieldName(invalidNumber)}` };
+    return { input: invalidNumber, message: t("Invalid value for {field}", { field: fieldName(invalidNumber) }) };
   }
 
   const wavelengths = numberList(value("wavelengths"));
-  if (!wavelengths.length || wavelengths.some((item) => !Number.isFinite(item) || item <= 0)) {
-    return { input: $("wavelengths"), message: "Wavelengths must contain positive numbers" };
+  if (!wavelengths.length || wavelengths.some((item) => !Number.isFinite(item) || item < 0.4)) {
+    return { input: $("wavelengths"), message: t("Wavelengths must be numbers of at least 0.4 µm") };
+  }
+  const laiValues = numberList(value("lai"));
+  if (!laiValues.length || laiValues.some((item) => !Number.isFinite(item) || item < 0 || item > 20)) {
+    return { input: $("lai"), message: t("LAI must contain numbers in 0..20, for example 1;3;5") };
+  }
+  const hotspotValues = numberList(value("hspot"));
+  if (!$("hspot").closest(".is-hidden") && (!hotspotValues.length || hotspotValues.some((item) => !Number.isFinite(item) || item < 0))) {
+    return { input: $("hspot"), message: t("Hotspot must contain nonnegative numbers, for example 0.1;0.2") };
   }
 
-  const spectrumIds = [
-    ["emissivity-soil", "Soil emissivity", "soil_spectrum"],
-    ["emissivity-leaf", "Leaf emissivity", "leaf_spectrum"],
-    ["emissivity-terrain", "Terrain emissivity", "terrain_spectrum"],
-    ["emissivity-roof", "Roof emissivity", "roof_spectrum"],
-    ["emissivity-wall", "Wall emissivity", "wall_spectrum"],
-    ["emissivity-street", "Street emissivity", "street_spectrum"],
+  const propertyIds = [
+    ["leaf-reflectance", "Leaf reflectance"],
+    ["leaf-transmittance", "Leaf transmittance"],
+    ["soil-reflectance", "Soil reflectance"],
+    ["street-reflectance", "Street reflectance"],
+    ["wall-reflectance", "Wall reflectance"],
+    ["roof-reflectance", "Roof reflectance"],
   ];
-  for (const [id, label, fileKey] of spectrumIds) {
+  for (const [id, label] of propertyIds) {
     const input = $(id);
-    if (!input || input.closest(".is-hidden") || uploadedFiles[fileKey]) continue;
-    const numbers = numberList(input.value);
-    if (!numbers.length || numbers.some((item) => !Number.isFinite(item) || item < 0 || item > 1)) {
-      return { input, message: `${label} must be between 0 and 1` };
+    const values = numberList(input.value);
+    if (!values.length || values.some((item) => !Number.isFinite(item) || item < 0 || item > 1)) {
+      return { input, message: t("{label} must be between 0 and 1", { label: t(label) }) };
     }
-    if (numbers.length !== wavelengths.length) {
-      return { input, message: `${label}: enter ${wavelengths.length} values, one per wavelength` };
+    if (values.length !== wavelengths.length) {
+      return { input, message: t("{label}: enter {count} values, one per wavelength", { label: t(label), count: wavelengths.length }) };
     }
+  }
+  const leafRho = numberList(value("leaf-reflectance"));
+  const leafTau = numberList(value("leaf-transmittance"));
+  if (leafRho.some((item, index) => item + leafTau[index] > 1)) {
+    return { input: $("leaf-reflectance"), message: t("Leaf reflectance + transmittance must not exceed 1") };
   }
 
   const source = selectedAdditionalSource();
   if (source === "manual" && manualGeometryPairs().some((pair) => pair.length !== 2 ||
       !pair.every(Number.isFinite) || pair[0] < 0 || pair[0] > 90 || pair[1] < 0 || pair[1] > 360)) {
-    return { input: $("manual-geometry"), message: "Manual angles must be VZA/VAA pairs with VZA 0–90° and VAA 0–360°" };
+    return { input: $("manual-geometry"), message: t("Manual angles must be VZA/VAA pairs with VZA 0–90° and VAA 0–360°") };
   }
   const hasAdditional = source === "manual" ? manualGeometryPairs().length > 0 : Boolean(uploadedGeometryText);
   if (!$("include-principal").checked && !$("include-hemisphere").checked && !hasAdditional) {
     const input = source === "manual" ? $("manual-geometry") : $("geometry-upload");
-    return { input, message: "Select an observation plane or provide observation angles" };
+    return { input, message: t("Select an observation plane or provide observation angles") };
   }
   return null;
 }
@@ -258,7 +286,7 @@ function setRunBusy(busy) {
   button.disabled = busy;
   button.setAttribute("aria-busy", String(busy));
   button.classList.toggle("is-running", busy);
-  button.querySelector(".button-label").textContent = busy ? "Running..." : "Run simulation";
+  button.querySelector(".button-label").textContent = t(busy ? "Running..." : "Run simulation");
 }
 
 async function runSimulation() {
@@ -270,6 +298,10 @@ async function runSimulation() {
     return;
   }
 
+  const started = Date.now();
+  const timer = setInterval(() => {
+    setStatus(t("Running {seconds} s", { seconds: Math.floor((Date.now() - started) / 1000) }), "busy");
+  }, 1000);
   setStatus("Running", "busy");
   setRunBusy(true);
   try {
@@ -279,20 +311,21 @@ async function runSimulation() {
       body: JSON.stringify(currentPayload()),
     });
     const payload = await response.json();
-    if (!response.ok || !payload.ok) throw new Error(payload.error || "Simulation failed");
+    if (!response.ok || !payload.ok) throw new Error(payload.error || t("Simulation failed"));
     simulationRows = payload.rows;
     $("save-output-button").disabled = false;
     updateBandOptions();
-    updateScenarioOptions();
+    updateSceneOptions();
     renderResults();
     updateSceneReadout();
     updateScene();
     setStatus("Complete", "idle");
-    notify(`Simulation complete - ${payload.count} output records`);
+    notify(t("Simulation complete - {count} output records", { count: payload.count }));
   } catch (error) {
     setStatus("Error", "error");
     notify(error.message, true);
   } finally {
+    clearInterval(timer);
     setRunBusy(false);
   }
 }
@@ -300,48 +333,85 @@ async function runSimulation() {
 function updateBandOptions() {
   const bands = [...new Set(simulationRows.map((row) => Number(row.wavelength_um)))].sort((a, b) => a - b);
   const select = $("band-select");
+  const previous = Number(selectedWavelength);
   select.innerHTML = "";
   bands.forEach((band) => {
     const option = document.createElement("option");
     option.value = String(band);
-    option.textContent = `${fmt(band, 1)} µm`;
+    const kind = Number(band) < 2.5 ? "BRF" : "BT";
+    option.textContent = `${fmt(band, Number(band) < 2 ? 2 : 1)} µm · ${kind}`;
     select.appendChild(option);
   });
   if (bands.length) {
-    selectedWavelength = bands.includes(10.5) ? 10.5 : bands[0];
+    selectedWavelength = bands.includes(previous)
+      ? previous
+      : (bands.includes(10.5) ? 10.5 : bands[0]);
     select.value = String(selectedWavelength);
   }
 }
 
-function updateScenarioOptions() {
-  const scenarios = [...new Map(simulationRows.map((row) => [String(row.scenario_id || 1), row.scenario_label || "default"])).entries()];
-  const select = $("scenario-select");
-  select.innerHTML = "";
-  scenarios.forEach(([id, label]) => {
-    const option = document.createElement("option");
-    option.value = id;
-    option.textContent = `S${String(id).padStart(2, "0")} · ${label}`;
-    select.appendChild(option);
+function sceneKey(row) { return `${Number(row.lai)}|${Number(row.scenario_id) || 1}`; }
+
+function sceneList(rows) {
+  const scenes = new Map();
+  rows.forEach((row) => {
+    const key = sceneKey(row);
+    if (!scenes.has(key)) scenes.set(key, { key, lai: Number(row.lai), scenarioId: Number(row.scenario_id) || 1, scenarioLabel: row.scenario_label || "default" });
   });
-  if (!scenarios.some(([id]) => id === selectedScenarioId)) selectedScenarioId = scenarios[0]?.[0] || "1";
-  select.value = selectedScenarioId;
+  const list = [...scenes.values()].sort((a, b) => a.lai - b.lai || a.scenarioId - b.scenarioId);
+  const multipleLai = new Set(list.map((scene) => scene.lai)).size > 1;
+  list.forEach((scene) => {
+    const parts = [];
+    if (multipleLai && Number.isFinite(scene.lai)) parts.push(`LAI=${scene.lai}`);
+    if (scene.scenarioLabel !== "default") parts.push(...scene.scenarioLabel.split("; ").map((part) => {
+      const [name, setting] = part.split("=");
+      return setting === undefined ? t(part) : `${t(name)}=${setting}`;
+    }));
+    scene.label = parts.join("; ") || t("default");
+  });
+  return list;
 }
 
-function selectedScenarioRows() {
-  selectedScenarioId = $("scenario-select")?.value || selectedScenarioId;
-  return simulationRows.filter((row) => String(row.scenario_id || 1) === selectedScenarioId);
+function updateSceneOptions() {
+  const scenes = sceneList(simulationRows);
+  const select = $("scene-select");
+  select.closest("label").classList.toggle("is-hidden", scenes.length <= 1);
+  select.innerHTML = "";
+  scenes.forEach((item) => {
+    const option = document.createElement("option");
+    option.value = item.key;
+    option.textContent = item.label;
+    select.appendChild(option);
+  });
+  if (scenes.length) {
+    selectedSceneKey = scenes.some((item) => item.key === selectedSceneKey) ? selectedSceneKey : scenes[0].key;
+    select.value = selectedSceneKey;
+  }
+}
+
+function bandRows() {
+  const wavelength = Number($("band-select").value);
+  selectedWavelength = wavelength;
+  return simulationRows.filter((row) => Math.abs(Number(row.wavelength_um) - wavelength) < 1e-7);
 }
 
 function selectedRows() {
-  const wavelength = Number($("band-select").value);
-  selectedWavelength = wavelength;
-  return selectedScenarioRows().filter((row) => Math.abs(Number(row.wavelength_um) - wavelength) < 1e-7);
+  const rows = bandRows();
+  if (selectedSceneKey === null) return rows;
+  return rows.filter((row) => sceneKey(row) === selectedSceneKey);
 }
 
-function outputValue(row, quantity = $("quantity").value) { return Number(row[quantity]); }
-function quantityValue(row) { return outputValue(row); }
-function quantityLabel(quantity = $("quantity").value) {
-  return { brightness_temperature_C: "Temperature (°C)", brightness_temperature_K: "Temperature (K)", radiance: "Radiance" }[quantity] || quantity;
+function isShortwaveBand(band) { return Number(band) < 2.5; }
+function bandQuantity(band = $("band-select")?.value) {
+  return isShortwaveBand(band) ? "reflectance_brf" : "brightness_temperature_C";
+}
+function outputValue(row, quantity = bandQuantity()) {
+  const raw = row[quantity];
+  return raw === null || raw === undefined || raw === "" ? NaN : Number(raw);
+}
+function quantityValue(row) { return outputValue(row, bandQuantity()); }
+function quantityLabel(quantity = bandQuantity()) {
+  return t(quantity === "reflectance_brf" ? "Reflectance (BRF)" : "Brightness temperature (°C)");
 }
 function fmt(number, digits = 2) { return Number.isFinite(Number(number)) ? Number(number).toFixed(digits) : "--"; }
 function fmtSignificant(number, significant = 3) {
@@ -353,8 +423,7 @@ function fmtSignificant(number, significant = 3) {
 }
 function formatOutputNumber(number) { return fmtSignificant(number, 3); }
 function formatOutputValue(number, quantity) {
-  const suffix = quantity === "brightness_temperature_C" ? " °C" : quantity === "brightness_temperature_K" ? " K" : "";
-  return `${formatOutputNumber(number)}${suffix}`;
+  return `${formatOutputNumber(number)}${quantity === "brightness_temperature_C" ? " °C" : ""}`;
 }
 
 function renderResults() {
@@ -363,31 +432,33 @@ function renderResults() {
   $("results-content").classList.remove("is-hidden");
   const rows = selectedRows();
   const values = rows.map(quantityValue).filter(Number.isFinite);
-  const radiances = rows.map((row) => Number(row.radiance)).filter(Number.isFinite);
-  const mean = values.reduce((sum, item) => sum + item, 0) / Math.max(values.length, 1);
+  const quantity = bandQuantity();
+  const mean = values.length ? values.reduce((sum, item) => sum + item, 0) / values.length : NaN;
   const span = values.length ? Math.max(...values) - Math.min(...values) : NaN;
-  const meanRadiance = radiances.reduce((sum, item) => sum + item, 0) / Math.max(radiances.length, 1);
-  $("mean-bt").closest(".metric").querySelector("span").textContent = `Mean ${quantityLabel()}`;
-  $("mean-bt").textContent = formatOutputValue(mean, $("quantity").value);
+  $("mean-bt").closest(".metric").querySelector("span").textContent = t("Mean {quantity}", { quantity: quantityLabel(quantity) });
+  $("mean-bt").textContent = formatOutputValue(mean, quantity);
   $("range-bt").textContent = fmtSignificant(span);
-  $("mean-radiance").textContent = fmtSignificant(meanRadiance);
+  $("metric-band").textContent = `${fmt(selectedWavelength, 2)} µm`;
+  $("metric-band-kind").textContent = quantityLabel(quantity);
   $("observation-count").textContent = String(rows.length);
   renderCharts(rows);
   updateChartVisibility();
 }
 
-function observationTableRows(rows, quantity) {
+function observationTableRows(rows) {
   const bands = [...new Set(rows.map((row) => Number(row.wavelength_um)).filter(Number.isFinite))].sort((a, b) => a - b);
   const observations = new Map();
   rows.forEach((row) => {
     const scenarioId = Number(row.scenario_id) || 1; const scenarioLabel = row.scenario_label || "default";
+    const lai = Number(row.lai);
     const vza = Number(row.vza); const vaa = Number(row.vaa); const raa = Number(row.raa);
-    const sza = Number(row.sza); const saa = Number(row.saa); const wavelength = Number(row.wavelength_um); const output = outputValue(row, quantity);
-    if (![vza, vaa, raa, wavelength, output].every(Number.isFinite)) return;
-    const key = [scenarioId, vza, vaa, sza, saa].map((value) => Number.isFinite(value) ? value : "").join("|");
+    const sza = Number(row.sza); const saa = Number(row.saa); const wavelength = Number(row.wavelength_um);
+    const output = outputValue(row, bandQuantity(wavelength));
+    if (![lai, vza, vaa, raa, wavelength, output].every(Number.isFinite)) return;
+    const key = [scenarioId, lai, vza, vaa, sza, saa].map((value) => Number.isFinite(value) ? value : "").join("|");
     let observation = observations.get(key);
     if (!observation) {
-      observation = { scenarioId, scenarioLabel, vza, vaa, raa, values: new Map() };
+      observation = { scenarioId, scenarioLabel, lai, vza, vaa, raa, values: new Map() };
       observations.set(key, observation);
     }
     observation.values.set(wavelength, output);
@@ -402,17 +473,16 @@ function csvEscape(value) {
 
 function exportOutput() {
   if (!simulationRows.length) {
-    notify("Run a simulation first", true);
+    notify(t("Run a simulation first"), true);
     return;
   }
-  const quantity = $("quantity").value;
-  const { bands, observationRows } = observationTableRows(simulationRows, quantity);
-  const valueName = quantity === "radiance" ? "radiance" : quantity === "brightness_temperature_K" ? "temperature_K" : "temperature_C";
-  const fields = ["index", "scenario_id", "scenario_label", "vza", "vaa", "raa", ...bands.map((band) => `${fmt(band, 1)}um_${valueName}`)];
+  const { bands, observationRows } = observationTableRows(simulationRows);
+  const fields = ["index", "scenario_id", "scenario_label", "lai", "vza", "vaa", "raa",
+    ...bands.map((band) => `${fmt(band, 2)}um_${isShortwaveBand(band) ? "brf" : "temperature_C"}`)];
   const lines = [
     fields.join(","),
     ...observationRows.map((observation, index) => [
-      index, observation.scenarioId, observation.scenarioLabel, observation.vza, observation.vaa, observation.raa,
+      index, observation.scenarioId, observation.scenarioLabel, observation.lai, observation.vza, observation.vaa, observation.raa,
       ...bands.map((band) => formatOutputNumber(observation.values.get(band))),
     ].map(csvEscape).join(",")),
   ];
@@ -422,7 +492,7 @@ function exportOutput() {
   link.download = "observations.csv";
   link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 0);
-  notify(`Saved observations.csv · ${observationRows.length} directions · all cases · ${quantityLabel(quantity)}`);
+  notify(t("Saved observations.csv · {count} directions · BRF + brightness temperature (°C)", { count: observationRows.length }));
 }
 
 function canvasContext(canvas) {
@@ -535,7 +605,7 @@ function drawPolar(rows) {
   [0, 90, 180, 270].forEach((angle) => { const rad = angle * Math.PI / 180; ctx.strokeStyle = "#b8cbd7"; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.sin(rad) * radius, cy - Math.cos(rad) * radius); ctx.stroke(); ctx.fillStyle = colors.muted; ctx.fillText(`${angle}°`, cx + Math.sin(rad) * (radius + 16), cy - Math.cos(rad) * (radius + 16)); });
   $("polar-colorbar-min").textContent = fmt(min);
   $("polar-colorbar-max").textContent = fmt(max);
-  ctx.fillStyle = colors.muted; ctx.textAlign = "left"; ctx.fillText(`VZA radius · ${fmt(selectedWavelength, 1)} µm`, 8, height - 10);
+  ctx.fillStyle = colors.muted; ctx.textAlign = "left"; ctx.fillText(t("VZA radius · {band} µm · {quantity}", { band: fmt(selectedWavelength, 2), quantity: quantityLabel() }), 8, height - 10);
 }
 
 function planeRows(rows, plane) {
@@ -556,21 +626,21 @@ function lineChartRange(rows) {
   const values = ["parallel", "perpendicular"].flatMap((plane) => planeRows(rows, plane).map((point) => quantityValue(point.row))).filter(Number.isFinite);
   const yMin = values.length ? Math.min(...values) : 0;
   const yMax = values.length ? Math.max(...values) : 1;
-  const margin = Math.max((yMax - yMin) * .15, .5);
+  const margin = Math.max((yMax - yMin) * .15, Math.abs(yMax) > 10 ? .5 : .01);
   return { lo: yMin - margin, hi: yMax + margin };
 }
 
-function drawLineChart(rows, canvasId, plane, color, scale) {
+function drawLineChart(rows, canvasId, plane, scale, color) {
   const { ctx, width, height } = canvasContext($(canvasId));
-  const points = planeRows(rows, plane); const pad = { left: 38, right: 12, top: 26, bottom: 29 };
-  const xMax = Math.max(30, ...points.map((point) => Math.abs(point.x)), 80); const { lo, hi } = scale; const plotW = width - pad.left - pad.right, plotH = height - pad.top - pad.bottom;
+  const points = planeRows(rows, plane);
+  const pad = { left: 38, right: 12, top: 26, bottom: 29 };
+  const xMax = Math.max(30, ...points.map((point) => Math.abs(point.x)), 80);
+  const { lo, hi } = scale; const plotW = width - pad.left - pad.right, plotH = height - pad.top - pad.bottom;
   ctx.font = "10px system-ui"; ctx.strokeStyle = colors.grid; ctx.fillStyle = colors.muted; ctx.lineWidth = 1;
   [-xMax, 0, xMax].forEach((x) => { const px = pad.left + (x + xMax) / (xMax * 2) * plotW; ctx.beginPath(); ctx.moveTo(px, pad.top); ctx.lineTo(px, pad.top + plotH); ctx.stroke(); ctx.textAlign = "center"; ctx.fillText(`${fmt(x, 0)}°`, px, height - 11); });
   [lo, (lo + hi) / 2, hi].forEach((y) => { const py = pad.top + (hi - y) / (hi - lo) * plotH; ctx.beginPath(); ctx.moveTo(pad.left, py); ctx.lineTo(pad.left + plotW, py); ctx.stroke(); ctx.textAlign = "right"; ctx.fillText(fmt(y), pad.left - 7, py); });
-  if (!points.length) { ctx.fillStyle = colors.muted; ctx.textAlign = "center"; ctx.fillText("No matching directions", width / 2, height / 2); return; }
+  if (!points.length) { ctx.fillStyle = colors.muted; ctx.textAlign = "center"; ctx.fillText(t("No matching directions"), width / 2, height / 2); return; }
   const px = (x) => pad.left + (x + xMax) / (xMax * 2) * plotW; const py = (y) => pad.top + (hi - y) / (hi - lo) * plotH;
-  // Keep the two sides separate so the perpendicular plane cannot look truncated
-  // when one side is rendered after the other at the nadir point.
   const branches = [points.filter((point) => point.negative), points.filter((point) => !point.negative)];
   branches.forEach((branch) => {
     ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
@@ -578,16 +648,16 @@ function drawLineChart(rows, canvasId, plane, color, scale) {
     ctx.stroke();
   });
   points.forEach((point) => { ctx.fillStyle = color; ctx.beginPath(); ctx.arc(px(point.x), py(quantityValue(point.row)), 3.5, 0, Math.PI * 2); ctx.fill(); });
-  ctx.fillStyle = colors.muted; ctx.textAlign = "center";
-  const sideText = plane === "perpendicular" ? "RAA 90° / 270° · both sides" : "RAA 0° / 180° · both sides";
-  ctx.fillText(`${sideText} · ${points.length} directions`, width / 2, 12);
+  ctx.textAlign = "center"; ctx.fillStyle = colors.muted;
+  const sideText = t(plane === "perpendicular" ? "RAA 90° / 270° · both sides" : "RAA 0° / 180° · both sides");
+  ctx.fillText(`${sideText} · ${t("{count} directions", { count: points.length })}`, width / 2, 12);
 }
 
 function renderCharts(rows) {
   drawPolar(rows);
   const scale = lineChartRange(rows);
-  drawLineChart(rows, "parallel-chart", "parallel", colors.amber, scale);
-  drawLineChart(rows, "perpendicular-chart", "perpendicular", colors.coral, scale);
+  drawLineChart(rows, "parallel-chart", "parallel", scale, colors.amber);
+  drawLineChart(rows, "perpendicular-chart", "perpendicular", scale, colors.coral);
 }
 
 function updateChartVisibility() {
@@ -757,10 +827,10 @@ async function exportInput() {
       headers: { "Content-Type": "application/json" }, body: JSON.stringify(currentPayload()) });
     if (!response.ok) {
       const payload = await response.json();
-      throw new Error(payload.error || "Input export failed");
+      throw new Error(payload.error || t("Input export failed"));
     }
     downloadBlob(await response.blob(), "tirt_input.zip");
-    notify("Saved input ZIP with spectra and observation files");
+    notify(t("Saved input ZIP with spectra and observation files"));
   } catch (error) {
     notify(error.message, true);
   } finally {
@@ -773,16 +843,16 @@ async function shutdownTiRT() {
   button.disabled = true;
   try {
     await fetch("/api/shutdown", { method: "POST" });
-    document.body.textContent = "TiRT has exited.";
+    document.body.textContent = t("TiRT has exited.");
   } catch (error) {
     button.disabled = false;
-    notify(error.message || "TiRT could not exit", true);
+    notify(error.message || t("TiRT could not exit"), true);
   }
 }
 
 function bindEvents() {
   $("run-button").addEventListener("click", runSimulation); $("save-output-button").addEventListener("click", exportOutput); $("export-button").addEventListener("click", exportInput); document.getElementById('exit-button').addEventListener('click', shutdownTiRT); $("reset-button").addEventListener("click", () => window.location.reload());
-  document.querySelectorAll('input[name="additional-source"]').forEach((input) => input.addEventListener("change", updateGeometryFields)); $("band-select").addEventListener("change", renderResults); $("quantity").addEventListener("change", renderResults); $("scenario-select").addEventListener("change", renderResults);
+  document.querySelectorAll('input[name="additional-source"]').forEach((input) => input.addEventListener("change", updateGeometryFields)); $("band-select").addEventListener("change", renderResults); $("scene-select").addEventListener("change", () => { selectedSceneKey = $("scene-select").value; renderResults(); });
   ["show-polar", "show-parallel", "show-perpendicular"].forEach((id) => $(id).addEventListener("change", updateChartVisibility));
   ["surface-model", "vegetation-model"].forEach((id) => $(id).addEventListener("change", () => { updateConditionalFields(); updateSceneReadout(); updateScene(); }));
   const sceneInputIds = ["sza", "saa", "principal-vza-step", "principal-vza-max", "manual-geometry", "lai", "hspot", "slope-angle", "slope-aspect", "terrain-height", "terrain-radius", "terrain-density", "row-width", "row-blank", "row-height", "row-azimuth", "crown-rad-a", "crown-rad-b", "crown-height", "crown-density", "building-density", "building-height", "building-length", "building-width", "building-azimuth"];
@@ -795,7 +865,7 @@ function bindEvents() {
     if (!file) {
       status.textContent = "•";
       status.className = "file-status no-file";
-      status.setAttribute("aria-label", "No file selected");
+      status.setAttribute("aria-label", t("No file selected"));
       uploadedGeometryText = "";
       return;
     }
@@ -804,58 +874,45 @@ function bindEvents() {
     uploadedGeometryText = contents;
     status.textContent = "✓";
     status.className = "file-status has-file";
-    status.setAttribute("aria-label", `Selected ${file.name}`);
-    notify(`Loaded ${file.name}`);
+    status.setAttribute("aria-label", t("Selected {name}", { name: file.name }));
+    notify(t("Loaded {name}", { name: file.name }));
   });
-  [["wavelength-file", "wavelengths"], ["leaf-spectrum-file", "leaf_spectrum"], ["soil-spectrum-file", "soil_spectrum"], ["terrain-spectrum-file", "terrain_spectrum"], ["roof-spectrum-file", "roof_spectrum"], ["wall-spectrum-file", "wall_spectrum"], ["street-spectrum-file", "street_spectrum"]].forEach(([id, key]) => {
-    $(id)?.addEventListener("change", async (event) => {
-      const file = event.target.files[0];
-      const status = $(`${id}-status`);
-      if (!file) {
-        uploadedFiles[key] = "";
-        if (status) {
-          status.textContent = "•"; status.className = "file-status no-file";
-          status.setAttribute("aria-label", "No file selected");
-        }
-        return;
-      }
-      const contents = await file.text();
-      if (event.target.files[0] !== file) return;
-      uploadedFiles[key] = contents;
-      if (status) {
-        status.textContent = "✓";
-        status.className = "file-status has-file";
-        status.setAttribute("aria-label", `Selected ${file.name}`);
-      }
-      if (key === "wavelengths") {
-        $("wavelengths").value = parseWavelengthFile(contents).join(";");
-      }
-      notify(`Loaded ${file.name}`);
-    });
+  const tableStatus = (text, className, label) => {
+    const status = $("band-table-file-status");
+    status.textContent = text; status.className = `file-status ${className}`;
+    status.setAttribute("aria-label", label);
+  };
+  $("band-table-file").addEventListener("change", async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    const contents = await file.text();
+    if (event.target.files[0] !== file) return;
+    try {
+      parseBandTable(contents).forEach((row, index) => { $(BAND_TABLE_IDS[index]).value = row.join(";"); });
+    } catch (error) {
+      event.target.value = "";
+      tableStatus("•", "no-file", t("No file selected"));
+      notify(`${file.name}: ${error.message}`, true);
+      return;
+    }
+    tableStatus("✓", "has-file", t("Selected {name}", { name: file.name }));
+    updateEmissivityReadout();
+    notify(t("Loaded {name}", { name: file.name }));
   });
-  [["wavelengths", "wavelength-file", "wavelengths"],
-    ["emissivity-leaf", "leaf-spectrum-file", "leaf_spectrum"],
-    ["emissivity-soil", "soil-spectrum-file", "soil_spectrum"],
-    ["emissivity-terrain", "terrain-spectrum-file", "terrain_spectrum"],
-    ["emissivity-roof", "roof-spectrum-file", "roof_spectrum"],
-    ["emissivity-wall", "wall-spectrum-file", "wall_spectrum"],
-    ["emissivity-street", "street-spectrum-file", "street_spectrum"]].forEach(([textId, fileId, key]) => {
-    $(textId).addEventListener("input", () => {
-      uploadedFiles[key] = ""; $(fileId).value = "";
-      const status = $(`${fileId}-status`);
-      status.textContent = "•"; status.className = "file-status no-file";
-      status.setAttribute("aria-label", "Using entered values");
-    });
-  });
+  BAND_TABLE_IDS.forEach((id) => $(id).addEventListener("input", () => {
+    $("band-table-file").value = "";
+    tableStatus("•", "no-file", t("Using entered values"));
+    updateEmissivityReadout();
+  }));
 }
 
 async function boot() {
-  bindEvents(); updateGeometryFields(); updateConditionalFields(); updateSceneReadout(); updateChartVisibility();
+  bindEvents(); updateGeometryFields(); updateConditionalFields(); updateSceneReadout(); updateChartVisibility(); updateEmissivityReadout();
   try {
     THREE = await import("three"); ({ OrbitControls } = await import("three/addons/controls/OrbitControls.js")); initScene();
   } catch (error) {
     console.error(error);
-    $("scene-loading").textContent = `Three.js could not be loaded: ${error.message}`; notify("Three.js load failed", true); setStatus("Scene unavailable", "error");
+    $("scene-loading").textContent = t("Three.js could not be loaded: {message}", { message: error.message }); notify(t("Three.js load failed"), true); setStatus("Scene unavailable", "error");
   }
 }
 

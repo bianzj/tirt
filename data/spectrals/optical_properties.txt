@@ -1,0 +1,9 @@
+# TIRT band table: one row per property, one value per band (separated by ;)
+# Thermal bands (>= 2.5 um) use Kirchhoff emissivity: leaf 1 - rho - tau, other surfaces 1 - rho
+wavelength_um      0.67;0.86;10.5
+leaf_reflectance   0.05;0.45;0.015
+leaf_transmittance 0.03;0.40;0.0
+soil_reflectance   0.12;0.25;0.045
+street_reflectance 0.12;0.18;0.045
+wall_reflectance   0.20;0.25;0.07
+roof_reflectance   0.15;0.20;0.05

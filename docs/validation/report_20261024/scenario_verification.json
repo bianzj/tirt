@@ -1,0 +1,190 @@
+{
+  "cases": 26,
+  "rows": 2138,
+  "pngs": 52,
+  "passed": true,
+  "details": [
+    {
+      "domain": "optical",
+      "scene": "plane_bare",
+      "rows": 33,
+      "valid": 33,
+      "pngs": 2
+    },
+    {
+      "domain": "optical",
+      "scene": "plane_hom",
+      "rows": 99,
+      "valid": 99,
+      "pngs": 2
+    },
+    {
+      "domain": "optical",
+      "scene": "plane_row",
+      "rows": 99,
+      "valid": 99,
+      "pngs": 2
+    },
+    {
+      "domain": "optical",
+      "scene": "plane_crown",
+      "rows": 99,
+      "valid": 99,
+      "pngs": 2
+    },
+    {
+      "domain": "optical",
+      "scene": "slope_crown",
+      "rows": 99,
+      "valid": 99,
+      "pngs": 2
+    },
+    {
+      "domain": "optical",
+      "scene": "terrain_crown",
+      "rows": 99,
+      "valid": 99,
+      "pngs": 2
+    },
+    {
+      "domain": "optical",
+      "scene": "urban_bare",
+      "rows": 33,
+      "valid": 33,
+      "pngs": 2
+    },
+    {
+      "domain": "optical",
+      "scene": "urban_hom",
+      "rows": 99,
+      "valid": 99,
+      "pngs": 2
+    },
+    {
+      "domain": "optical",
+      "scene": "urban_row",
+      "rows": 99,
+      "valid": 99,
+      "pngs": 2
+    },
+    {
+      "domain": "optical",
+      "scene": "urban_crown",
+      "rows": 99,
+      "valid": 99,
+      "pngs": 2
+    },
+    {
+      "domain": "thermal",
+      "scene": "plane_bare",
+      "rows": 32,
+      "valid": 32,
+      "pngs": 2
+    },
+    {
+      "domain": "thermal",
+      "scene": "plane_hom",
+      "rows": 96,
+      "valid": 96,
+      "pngs": 2
+    },
+    {
+      "domain": "thermal",
+      "scene": "plane_row",
+      "rows": 96,
+      "valid": 96,
+      "pngs": 2
+    },
+    {
+      "domain": "thermal",
+      "scene": "plane_crown",
+      "rows": 96,
+      "valid": 96,
+      "pngs": 2
+    },
+    {
+      "domain": "thermal",
+      "scene": "slope_bare",
+      "rows": 32,
+      "valid": 32,
+      "pngs": 2
+    },
+    {
+      "domain": "thermal",
+      "scene": "slope_hom",
+      "rows": 96,
+      "valid": 96,
+      "pngs": 2
+    },
+    {
+      "domain": "thermal",
+      "scene": "slope_row",
+      "rows": 96,
+      "valid": 96,
+      "pngs": 2
+    },
+    {
+      "domain": "thermal",
+      "scene": "slope_crown",
+      "rows": 96,
+      "valid": 96,
+      "pngs": 2
+    },
+    {
+      "domain": "thermal",
+      "scene": "terrain_bare",
+      "rows": 32,
+      "valid": 32,
+      "pngs": 2
+    },
+    {
+      "domain": "thermal",
+      "scene": "terrain_hom",
+      "rows": 96,
+      "valid": 96,
+      "pngs": 2
+    },
+    {
+      "domain": "thermal",
+      "scene": "terrain_row",
+      "rows": 96,
+      "valid": 96,
+      "pngs": 2
+    },
+    {
+      "domain": "thermal",
+      "scene": "terrain_crown",
+      "rows": 96,
+      "valid": 96,
+      "pngs": 2
+    },
+    {
+      "domain": "thermal",
+      "scene": "urban_bare",
+      "rows": 32,
+      "valid": 32,
+      "pngs": 2
+    },
+    {
+      "domain": "thermal",
+      "scene": "urban_hom",
+      "rows": 96,
+      "valid": 96,
+      "pngs": 2
+    },
+    {
+      "domain": "thermal",
+      "scene": "urban_row",
+      "rows": 96,
+      "valid": 96,
+      "pngs": 2
+    },
+    {
+      "domain": "thermal",
+      "scene": "urban_crown",
+      "rows": 96,
+      "valid": 96,
+      "pngs": 2
+    }
+  ]
+}

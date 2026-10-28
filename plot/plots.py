@@ -27,18 +27,20 @@ def load_output(input_path, wavelength=None, quantity="brightness_temperature_C"
     with input_path.open(newline="", encoding="utf-8-sig") as file:
         rows = list(csv.DictReader(file))
     if not rows:
-        raise ValueError(f"{input_path} 没有可绘图的数据")
+        raise ValueError(f"{input_path} contains no data to plot")
     fields = set(rows[0])
     required = {"vza", "vaa", "sza", "saa", "wavelength_um", quantity}
     missing = sorted(required - fields)
     if missing:
-        raise ValueError(f"output.csv 缺少绘图字段: {', '.join(missing)}")
+        raise ValueError(f"output.csv is missing plot fields: {', '.join(missing)}")
     wavelengths = np.asarray([float(row["wavelength_um"]) for row in rows])
     selected = float(np.unique(wavelengths)[0] if wavelength is None else wavelength)
     mask = np.isclose(wavelengths, selected, rtol=0.0, atol=1.0e-7)
     if not np.any(mask):
         available = ", ".join(f"{item:g}" for item in sorted(set(wavelengths)))
-        raise ValueError(f"波段 {selected:g} 不存在，可选波段: {available}")
+        raise ValueError(f"Band {selected:g} does not exist; available bands: {available}")
+    if selected < 2.5 and quantity == "brightness_temperature_C" and "reflectance_brf" in fields:
+        quantity = "reflectance_brf"
     result = []
     for row, keep in zip(rows, mask):
         if not keep:
@@ -70,6 +72,7 @@ def _label(quantity):
         "brightness_temperature_C": "Brightness temperature (C)",
         "brightness_temperature_K": "Brightness temperature (K)",
         "radiance": "Radiance",
+        "reflectance_brf": "Reflectance (BRF)",
     }
     return labels.get(quantity, quantity)
 
@@ -81,7 +84,7 @@ def plot_polar(rows, output_path=None, quantity="brightness_temperature_C", titl
     azimuths = np.sort(np.unique([float(row["vaa"]) % 360.0 for row in rows]))
     azimuths = azimuths[azimuths < 360.0]
     if zeniths.size < 2 or azimuths.size < 2:
-        raise ValueError("极坐标填充至少需要两个天顶角和两个方位角")
+        raise ValueError("Polar fill needs at least two zenith angles and two azimuth angles")
 
     lookup = {
         (float(row["vza"]), float(row["vaa"]) % 360.0): float(row["value"])
@@ -92,7 +95,7 @@ def plot_polar(rows, output_path=None, quantity="brightness_temperature_C", titl
         dtype=float,
     )
     if not np.any(np.isfinite(values)):
-        raise ValueError("极坐标数据没有有限值")
+        raise ValueError("Polar data contains no finite values")
 
     # Interpolate around the periodic azimuth axis first, then along VZA.
     fine_azimuths = np.linspace(0.0, 360.0, 361)
@@ -159,7 +162,7 @@ def _principal_plane(rows, plane, tolerance):
         mask = (np.abs(delta - 90.0) <= tolerance) | (np.abs(delta - 270.0) <= tolerance)
         sign = np.where(np.abs(delta - 270.0) <= tolerance, -1.0, 1.0)
     if not np.any(mask):
-        raise ValueError(f"没有找到太阳主平面{plane}方向，请检查 vaa、saa 或 angle_tolerance")
+        raise ValueError(f"No directions found in the {plane} solar principal plane; check vaa, saa or angle_tolerance")
     selected = [row for row, keep in zip(rows, mask) if keep]
     x = np.asarray([row["vza"] for row in selected]) * sign[mask]
     y = np.asarray([row["value"] for row in selected])

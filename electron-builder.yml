@@ -1,22 +1,29 @@
 appId: cn.tirt.desktop
 productName: TiRT
+copyright: Copyright © TIRTLab. PolyForm Noncommercial License 1.0.0
 asar: true
+electronDist: node_modules/electron/dist
 electronLanguages:
   - zh-CN
   - en-US
 directories:
-  output: release
+  output: release/v${version}
 files:
   - desktop/**/*
+  - "!desktop/installer.nsh"
   - package.json
   - tirt.ico
+# Built by scripts/build_installer.py into build/installer/.
 extraResources:
-  - from: dist/TiRT-service.exe
-    to: backend/TiRT-service.exe
-    filter:
-      - "**/*"
+  - from: build/installer/backend/TiRT-service
+    to: backend
   - from: tirt.ico
     to: tirt.ico
+extraFiles:
+  - from: build/installer/docs
+    to: docs
+  - from: build/installer/source
+    to: .
 win:
   target:
     - target: nsis
@@ -34,3 +41,5 @@ nsis:
   deleteAppDataOnUninstall: false
   installerIcon: tirt.ico
   uninstallerIcon: tirt.ico
+  license: build/installer/LICENSE.txt
+  include: desktop/installer.nsh

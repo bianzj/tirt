@@ -1,4 +1,4 @@
-"""Executable launcher for the STREAM TIRT local GUI."""
+"""Executable launcher for the RTLab TIRT local GUI."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ PORT_SEARCH_COUNT = 20
 def _show_error(message: str) -> None:
     """Report startup failures even when running as a windowed executable."""
     if sys.platform == "win32":
-        ctypes.windll.user32.MessageBoxW(None, message, "STREAM TIRT", 0x10)
+        ctypes.windll.user32.MessageBoxW(None, message, "RTLab TIRT", 0x10)
     else:
         print(message, file=sys.stderr)
 
@@ -45,10 +45,14 @@ def _create_server(host: str, first_port: int) -> tuple[ThreadingHTTPServer, int
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the STREAM TIRT GUI")
+    parser = argparse.ArgumentParser(description="Run the RTLab TIRT GUI")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--server-only", action="store_true",
+                        help="Do not open a browser (used by the desktop window).")
+    parser.add_argument("--ready-file", type=Path,
+                        help="Write the bound host and port as JSON to this file once the server is listening.")
     parser.add_argument("--version", action="version", version=f"TiRT {__version__}")
     parser.add_argument("--verify-model", type=Path,
                         help="Recompute bundled model validation and save results to this directory.")
@@ -60,7 +64,7 @@ def main() -> None:
         output.mkdir(parents=True, exist_ok=True)
         try:
             from scripts.validate_current_model import main as verify_model
-            sys.argv = [sys.argv[0], '--bundle', str(PROJECT_ROOT / 'docs/validation/current_model_20261021'),
+            sys.argv = [sys.argv[0], '--bundle', str(PROJECT_ROOT / 'validation/reference'),
                         '--output', str(output)]
             verify_model()
         except Exception:
@@ -73,10 +77,13 @@ def main() -> None:
     server = None
     try:
         server, port = _create_server(args.host, args.port)
+        port = server.server_address[1]
         url = f"http://{args.host}:{port}/"
-        if args.no_browser:
+        if args.ready_file:
+            args.ready_file.write_text(json.dumps({"host": args.host, "port": port}), encoding="utf-8")
+        if args.no_browser or args.server_only:
             if sys.stdout is not None:
-                print(f"STREAM TIRT: {url}")
+                print(f"RTLab TIRT: {url}")
         else:
             opener = threading.Timer(0.5, webbrowser.open, args=(url,), kwargs={"new": 2})
             opener.daemon = True
@@ -85,7 +92,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     except Exception as exc:
-        _show_error(f"STREAM TIRT could not start.\n\n{exc}")
+        _show_error(f"RTLab TIRT could not start.\n\n{exc}")
     finally:
         if server is not None:
             server.server_close()

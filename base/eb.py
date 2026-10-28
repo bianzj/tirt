@@ -1,8 +1,8 @@
 import math
 
 
-RHOA = 1.2047
 CP = 1004.0
+RD = 287.05
 MAIR = 28.96
 MH20 = 18.0
 SIGMASB = 5.67e-8
@@ -13,6 +13,14 @@ TMIN_THRESHOLD = 240.0
 TMAX_THRESHOLD = 380.0
 WC = 0.08
 MAX_TEMPERATURE_STEP = 1.5
+
+
+def air_density(meteo):
+    """Moist-air density [kg m-3] = p / (Rd*Tv); pressure and vapour pressure are in hPa."""
+    pressure = float(meteo["pressure"]) * 100.0
+    vapor = float(meteo["vapor_pressure"]) * 100.0
+    virtual = (float(meteo["air_temperature_c"]) + 273.15) / (1.0 - 0.378 * vapor / pressure)
+    return pressure / (RD * virtual)
 
 
 def saturation_vapor_pressure(temp_c):
@@ -37,12 +45,13 @@ def _temperature_method(value):
     raise ValueError("temperature_method must be direct or robust")
 
 
-def _update_temperature(state, key, ra, rs, gterm, emissivity, pressure, closed, name=None, gkey=None, method="direct", lai=0.0, soil=False):
+def _update_temperature(state, key, ra, rs, gterm, emissivity, pressure, closed, name=None, gkey=None, method="direct", lai=0.0, soil=False, faces=1.0, rho=None):
     name = name or {"Tls": "leafsunlit", "Tlh": "leafshaded", "Tss": "soilsunlit", "Tsh": "soilshaded"}[key]
     old = float(state[key])
     ra = max(float(ra), 1.0)
     rs = max(float(rs), 0.0)
     pressure = max(float(pressure), 1.0e-6)
+    rho = float(rho)
     old_for_derivative = min(max(old, 180.0), 380.0)
     residual = float(state.get("N_" + name, 0.0)) - float(state.get("LE_" + name, 0.0)) - float(state.get("H_" + name, 0.0))
     if gkey:
@@ -51,7 +60,7 @@ def _update_temperature(state, key, ra, rs, gterm, emissivity, pressure, closed,
         # ebal.m: T = T + Wc*EBres / (heat-conduction + 4*sigma*T^3).
         # The MATLAB soil expression contains two air heat-conduction terms.
         effective_resistance = max(ra + rs, 1.0)
-        conduction = RHOA * CP / effective_resistance
+        conduction = rho * CP / effective_resistance
         if soil:
             conduction *= 2.0
         else:
@@ -59,10 +68,10 @@ def _update_temperature(state, key, ra, rs, gterm, emissivity, pressure, closed,
         denominator = conduction + 4.0 * SIGMASB * old_for_derivative ** 3
     else:
         denominator = (
-            RHOA * CP / ra
-            + RHOA * latent_heat(old_for_derivative) * (MH20 / MAIR / pressure)
+            rho * CP / ra
+            + rho * latent_heat(old_for_derivative) * (MH20 / MAIR / pressure)
             * saturation_slope(old_for_derivative - 273.15) / (ra + rs)
-            + 4.0 * emissivity * SIGMASB * old_for_derivative ** 3
+            + 4.0 * faces * emissivity * SIGMASB * old_for_derivative ** 3
             + max(float(gterm), 0.0)
         )
     if not math.isfinite(residual) or not math.isfinite(denominator) or denominator <= 0.0:
@@ -86,12 +95,13 @@ def rebalance(settings, meteo, state):
     leaf_method = _temperature_method(settings.get("temperature_method", "direct"))
     # A soil override is independent; other components retain temperature_method.
     soil_method = _temperature_method(settings.get("soil_temperature_method", leaf_method))
+    rho = air_density(meteo)
     closed = True
     if settings["lai"] > 0.0:
-        closed = _update_temperature(state, "Tls", state["raa_leaf"], state["rssunlit"], 0.0, settings["leaf_emissivity"], meteo["pressure"], closed, method=leaf_method, lai=settings["lai"])
-        closed = _update_temperature(state, "Tlh", state["raa_leaf"], state["rsshaded"], 0.0, settings["leaf_emissivity"], meteo["pressure"], closed, method=leaf_method, lai=settings["lai"])
-    closed = _update_temperature(state, "Tss", state["raa_soil"], state["rss"], state["dG_term"], settings["soil_emissivity"], meteo["pressure"], closed, gkey="G_sunlit", method=soil_method, lai=settings["lai"], soil=True)
-    closed = _update_temperature(state, "Tsh", state["raa_soil"], state["rss"], state["dG_term"], settings["soil_emissivity"], meteo["pressure"], closed, gkey="G_shaded", method=soil_method, lai=settings["lai"], soil=True)
+        closed = _update_temperature(state, "Tls", state["raa_leaf"], state["rssunlit"], 0.0, settings["leaf_emissivity"], meteo["pressure"], closed, method=leaf_method, lai=settings["lai"], faces=2.0 * settings["lai"], rho=rho)
+        closed = _update_temperature(state, "Tlh", state["raa_leaf"], state["rsshaded"], 0.0, settings["leaf_emissivity"], meteo["pressure"], closed, method=leaf_method, lai=settings["lai"], faces=2.0 * settings["lai"], rho=rho)
+    closed = _update_temperature(state, "Tss", state["raa_soil"], state["rss"], state["dG_term"], settings["soil_emissivity"], meteo["pressure"], closed, gkey="G_sunlit", method=soil_method, lai=settings["lai"], soil=True, rho=rho)
+    closed = _update_temperature(state, "Tsh", state["raa_soil"], state["rss"], state["dG_term"], settings["soil_emissivity"], meteo["pressure"], closed, gkey="G_shaded", method=soil_method, lai=settings["lai"], soil=True, rho=rho)
     if soil_method == "robust":
         for key in ("Tss", "Tsh"):
             if abs(state[key] - 273.15) > 100.0:
@@ -110,7 +120,7 @@ def rebalance(settings, meteo, state):
     return closed
 
 
-def _urban_temperature(state, temp_key, components, resistances, emissivity, settings, pressure, closed, method):
+def _urban_temperature(state, temp_key, components, resistances, emissivity, settings, pressure, closed, method, rho):
     residual = 0.0
     denominator = 0.0
     for component, suffix in components:
@@ -121,9 +131,9 @@ def _urban_temperature(state, temp_key, components, resistances, emissivity, set
         residual += float(state.get("N_" + name, 0.0)) - float(state.get("LE_" + name, 0.0)) - float(state.get("H_" + name, 0.0)) - float(state.get("G_" + name, 0.0))
         old = min(max(float(state[temp_key]), 180.0), 380.0)
         if method == "robust":
-            denominator += RHOA * CP / (ra + rs) + 4.0 * emissivity[component] * SIGMASB * old ** 3
+            denominator += rho * CP / (ra + rs) + 4.0 * emissivity[component] * SIGMASB * old ** 3
         else:
-            denominator += RHOA * CP / ra + RHOA * latent_heat(old) * (MH20 / MAIR / max(float(pressure), 1.0e-6)) * saturation_slope(old - 273.15) / (ra + rs) + 4.0 * emissivity[component] * SIGMASB * old ** 3
+            denominator += rho * CP / ra + rho * latent_heat(old) * (MH20 / MAIR / max(float(pressure), 1.0e-6)) * saturation_slope(old - 273.15) / (ra + rs) + 4.0 * emissivity[component] * SIGMASB * old ** 3
     if not math.isfinite(residual) or not math.isfinite(denominator) or denominator <= 0.0:
         return False
     raw_delta = WC * residual / denominator
@@ -139,6 +149,7 @@ def _urban_temperature(state, temp_key, components, resistances, emissivity, set
 
 def rebalance_urban(settings, meteo, state):
     urban_method = _temperature_method(settings.get("temperature_method", "direct"))
+    rho = air_density(meteo)
     resistance = {
         "roof": (state.get("raa_roof", 1.0), state.get("rssroof", 3662.8562)),
         "wall": (state.get("raa_wall", 1.0), state.get("rsswall", 3662.8562)),
@@ -160,20 +171,20 @@ def rebalance_urban(settings, meteo, state):
     ):
         closed = _urban_temperature(
             state, temp_key, ((component, suffix),), resistance, emissivity,
-            settings, meteo["pressure"], closed, urban_method,
+            settings, meteo["pressure"], closed, urban_method, rho,
         )
     if float(settings.get("lai", 0.0)) > 0.0:
         closed = _update_temperature(
             state, "Tls", state.get("raa_leaf", state.get("raa_street", 1.0)),
             state.get("rssunlit", 625000.0), 0.0, settings["leaf_emissivity"],
             meteo["pressure"], closed, name="leafsunlit", method=urban_method,
-            lai=settings["lai"],
+            lai=settings["lai"], faces=2.0 * float(settings["lai"]), rho=rho,
         )
         closed = _update_temperature(
             state, "Tlh", state.get("raa_leaf", state.get("raa_street", 1.0)),
             state.get("rsshaded", 625000.0), 0.0, settings["leaf_emissivity"],
             meteo["pressure"], closed, name="leafshaded", method=urban_method,
-            lai=settings["lai"],
+            lai=settings["lai"], faces=2.0 * float(settings["lai"]), rho=rho,
         )
     else:
         state["Tls"] = 0.5 * (state["Troof_sunlit"] + state["Twall_sunlit"])
@@ -190,4 +201,4 @@ def rebalance_urban(settings, meteo, state):
     return closed
 
 
-__all__ = ["saturation_vapor_pressure", "saturation_slope", "latent_heat", "rebalance", "rebalance_urban"]
+__all__ = ["air_density", "saturation_vapor_pressure", "saturation_slope", "latent_heat", "rebalance", "rebalance_urban"]

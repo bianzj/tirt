@@ -3,9 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TIRT-Dynamic 1.1.2 — 动态场景</title>
+  <title>TIRT-Dynamic 1.2.0 — Dynamic scene</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="time.css?v=streamsim-scene-2">
-  <link rel="stylesheet" href="model_identity.css?v=1.1.2">
+  <link rel="stylesheet" href="model_identity.css?v=1.2.0">
   <script type="importmap">
     {"imports":{"three":"./vendor/three.module.js","three/addons/":"./vendor/"}}
   </script>
@@ -14,8 +15,8 @@
   <div class="app-shell">
     <header class="topbar">
       <div class="brand-lockup">
-        <div class="brand-logo model-dynamic" aria-label="STREAM TIRT"><span class="logo-stream">STREAM</span><span class="logo-slash" aria-hidden="true"></span><span class="logo-tirt">TIRT</span><span class="app-version">v1.1.2</span></div>
-        <div><div class="eyebrow">THERMAL INFRARED ENERGY BALANCE</div><h1>TIRT-Dynamic · <span>Dynamic scene</span></h1></div>
+        <div class="brand-logo model-dynamic" aria-label="RTLab TIRT"><span class="logo-stream">RTLab</span><span class="logo-slash" aria-hidden="true"></span><span class="logo-tirt">TIRT</span><span class="app-version">v1.2.0</span></div>
+        <div><div class="eyebrow">LAND SURFACE ENERGY BALANCE</div><h1>TIRT-Dynamic · <span>Dynamic scene</span></h1></div>
       </div>
       <div class="topbar-actions">
         <button id="language-toggle" class="button button-secondary language-toggle" type="button" title="Switch to Chinese" aria-label="Switch to Chinese"><span data-language-label>中文</span></button>
@@ -35,7 +36,7 @@
 
         <details class="form-section accordion">
           <summary class="section-title"><span class="section-number">01</span><span>Site and period</span><span class="accordion-mark">⌄</span></summary>
-          <div class="field-grid"><label>Latitude (°)<input id="latitude" type="number" step="0.01" value="39.9"></label><label>Longitude (°)<input id="longitude" type="number" step="0.01" value="116.4"></label></div>
+          <div class="field-grid"><label>Latitude (°)<input id="latitude" type="number" step="0.0001" value="38.8555"></label><label>Longitude (°)<input id="longitude" type="number" step="0.0001" value="100.3722"></label></div>
           <div class="field-grid"><label>START-END (DOY)<input id="time-range" value="214-215" spellcheck="false"></label><label>UTC offset (h)<input id="utc-offset" type="number" step="1" value="8"></label></div>
           <div class="subsection-title">Meteorological driver</div>
           <div class="source-row"><span class="source-name">File</span><input id="meteo-upload" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Meteorological file"><label class="file-trigger" for="meteo-upload" title="Select meteorological file">...</label><span id="meteo-status" class="file-status no-file" role="status" aria-label="Using default meteorological file">•</span></div>
@@ -45,7 +46,6 @@
         <details class="form-section accordion">
           <summary class="section-title"><span class="section-number">02</span><span>Observation</span><span class="accordion-mark">⌄</span></summary>
           <div class="input-file-row"><label>Angles<input id="observation-angles" value="0/0" placeholder="0/0; 20/90" spellcheck="false"></label><div class="inline-file-control"><span class="source-name">File</span><input id="angle-upload" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Observation angle file"><label class="file-trigger" for="angle-upload" title="Select observation angle file">...</label><span id="angle-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></div></div>
-          <div class="input-file-row"><label>Wavelengths (µm)<input id="wavelengths" value="10.5" spellcheck="false"></label><div class="inline-file-control"><span class="source-name">File</span><input id="wavelength-upload" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Wavelength file"><label class="file-trigger" for="wavelength-upload" title="Select wavelength file">...</label><span id="wavelength-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></div></div>
           <div class="field-grid"><label>Time<select id="observation-time-mode"><option value="all" selected>All times</option><option value="time">Specific times</option><option value="hour">Specific hours</option></select></label><label>Values<input id="observation-time-values" value="" placeholder="214.5 or 12" spellcheck="false"></label></div>
         </details>
 
@@ -63,6 +63,13 @@
 
         <details class="form-section accordion">
           <summary class="section-title"><span class="section-number">04</span><span>Spectral information</span><span class="accordion-mark">⌄</span></summary>
+          <div class="subsection-title">Observation band table</div>
+          <p class="field-note">One value per band (;). "-" uses the PROSPECT/BSM or measured spectrum (shortwave) or the default (thermal). Thermal emissivity = 1 − ρ − τ, also used by the energy balance.</p>
+          <div class="input-file-row"><label>Wavelengths (µm)<input id="wavelengths" value="0.67;0.86;10.5" spellcheck="false"></label><div class="inline-file-control"><span class="source-name">Table</span><input id="band-table-upload" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Band table file"><label class="file-trigger" for="band-table-upload" title="Load a 7-row band table">...</label><span id="band-table-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></div></div>
+          <div class="field-grid"><label>Leaf ρ<input id="leaf-reflectance" value="-;-;0.015" spellcheck="false"></label><label>Leaf τ<input id="leaf-transmittance" value="-;-;0.0" spellcheck="false"></label></div>
+          <div class="field-grid"><label>Soil ρ<input id="soil-reflectance" value="-;-;0.045" spellcheck="false"></label><label>Street ρ<input id="street-reflectance" value="-;-;0.045" spellcheck="false"></label></div>
+          <div class="field-grid"><label>Wall ρ<input id="wall-reflectance" value="-;-;0.07" spellcheck="false"></label><label>Roof ρ<input id="roof-reflectance" value="-;-;0.05" spellcheck="false"></label></div>
+          <p id="thermal-emissivity-readout" class="field-note"></p>
           <div class="subsection-title">PROSPECT</div>
           <div class="field-grid"><label>Cab<input id="cab" type="number" step="0.1" value="58"></label><label>Cw<input id="cw" type="number" step="0.001" value="0.013"></label></div>
           <div class="field-grid"><label>Cdm<input id="cdm" type="number" step="0.0001" value="0.0036"></label><label>Cs<input id="cs" type="number" step="0.01" value="0"></label></div>
@@ -70,10 +77,6 @@
           <div class="subsection-title">BSM</div>
           <div class="field-grid"><label>BSM brightness<input id="soil-brightness" type="number" step="0.01" value="0.25"></label><label>BSM latitude<input id="soil-latitude" type="number" step="1" value="25"></label></div>
           <label>BSM longitude<input id="soil-longitude" type="number" step="1" value="45"></label>
-          <div class="subsection-title">Thermal infrared</div>
-          <div class="field-grid"><label>Leaf emissivity<input id="emissivity-leaf" value="0.975" spellcheck="false"></label><label>Soil emissivity<input id="emissivity-soil" value="0.955" spellcheck="false"></label></div>
-          <div class="field-grid"><label>Roof emissivity<input id="emissivity-roof" value="0.95" spellcheck="false"></label><label>Wall emissivity<input id="emissivity-wall" value="0.92" spellcheck="false"></label></div>
-          <label>Street emissivity<input id="emissivity-street" value="0.955" spellcheck="false"></label>
           <div class="subsection-title">Spectrum files</div>
           <div class="source-row"><span class="source-name">Leaf VNIR</span><input id="vegetation-spectrum-upload" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Leaf spectrum file"><label class="file-trigger" for="vegetation-spectrum-upload" title="Select leaf spectrum file">...</label><span id="vegetation-spectrum-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></div>
           <div class="source-row"><span class="source-name">Soil VNIR</span><input id="soil-spectrum-upload" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Soil spectrum file"><label class="file-trigger" for="soil-spectrum-upload" title="Select soil spectrum file">...</label><span id="soil-spectrum-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></div>
@@ -96,7 +99,7 @@
 
         <details class="form-section accordion">
           <summary class="section-title"><span class="section-number">06</span><span>Physical properties</span><span class="accordion-mark">⌄</span></summary>
-          <label>SW diffuse fraction<input id="shortwave-diffuse-fraction" type="number" min="-1" max="1" step="0.01" value="-1" title="-1: automatic Erbs partition; 0-1: measured diffuse fraction"></label><div class="field-grid"><label>Soil moisture<input id="soil-moisture" type="number" step="0.01" value="0.25"></label><label>Soil surface resistance (s m⁻¹)<input id="soil-rss" type="number" min="0" step="1" value="200"></label></div>
+          <label>SW diffuse fraction<input id="shortwave-diffuse-fraction" type="number" min="-1" max="1" step="0.01" value="-1" title="-1: automatic Erbs partition; 0-1: measured diffuse fraction"></label><div class="field-grid"><label>Soil moisture (m³ m⁻³)<input id="soil-moisture" type="number" step="0.01" value="0.25" title="Volumetric water content; values above 1 are read as percent"></label><label>Soil surface resistance (s m⁻¹)<input id="soil-rss" type="number" min="0" step="1" value="200"></label></div>
           <div class="field-grid"><label>Soil heat capacity<input id="soil-cs" type="number" step="1" value="1180"></label><label>Soil density<input id="soil-rhos" type="number" step="1" value="1100"></label></div>
           <div class="field-grid"><label>Soil conductivity<input id="soil-lambda" type="number" step="0.01" value="1.55"></label><label>Soil boundary resistance<input id="soil-rbs" type="number" min="0" step="1" value="10"></label></div>
           <div class="field-grid"><label>Urban surface resistance<input id="urban-rss" type="number" min="0" step="1" value="3662.8562"></label><label>Urban heat capacity<input id="urban-cs" type="number" step="1" value="1000000"></label></div>
@@ -121,8 +124,8 @@
         </section>
         <section class="results-panel panel">
           <div class="overview">
-            <div class="panel-toolbar"><div><span class="section-kicker">TEMPORAL OUTPUT</span><h2>Time evolution</h2></div><div class="output-toolbar"><label>Time output<select id="quantity"><option value="Tv_C" selected>Brightness temperature</option><option value="Tss_C">Sunlit soil temperature</option><option value="Tsh_C">Shaded soil temperature</option><option value="Tls_C">Sunlit leaf temperature</option><option value="Tlh_C">Shaded leaf temperature</option><option value="Troof_sunlit_C">Sunlit roof temperature</option><option value="Troof_shaded_C">Shaded roof temperature</option><option value="Twall_sunlit_C">Sunlit wall temperature</option><option value="Twall_shaded_C">Shaded wall temperature</option><option value="Tstreet_sunlit_C">Sunlit street temperature</option><option value="Tstreet_shaded_C">Shaded street temperature</option><option value="Tleaf_sunlit_C">Sunlit leaf temperature</option><option value="Tleaf_shaded_C">Shaded leaf temperature</option><option value="Ta_C">Air temperature</option><option value="LE">Latent heat flux</option><option value="H">Sensible heat flux</option><option value="G">Ground heat flux</option></select></label><span id="series-count" class="record-count">No time series</span></div></div>
-            <div class="metric-strip"><div class="metric"><span>Selected quantity</span><strong id="metric-label">Brightness temperature</strong><small>time series</small></div><div class="metric"><span>Minimum</span><strong id="metric-min">--</strong><small id="metric-min-time">--</small></div><div class="metric"><span>Maximum</span><strong id="metric-max">--</strong><small id="metric-max-time">--</small></div><div class="metric"><span>Time steps</span><strong id="metric-count">--</strong><small>selected interval</small></div></div>
+            <div class="panel-toolbar"><div><span class="section-kicker">TEMPORAL OUTPUT</span><h2>Time evolution</h2></div><div class="output-toolbar"><span id="series-count" class="record-count">No time series</span></div></div>
+            <div class="metric-strip"><div class="metric"><span>Output</span><strong id="metric-label">Brightness temperature</strong><small>time series</small></div><div class="metric"><span>Minimum</span><strong id="metric-min">--</strong><small id="metric-min-time">--</small></div><div class="metric"><span>Maximum</span><strong id="metric-max">--</strong><small id="metric-max-time">--</small></div><div class="metric"><span>Time steps</span><strong id="metric-count">--</strong><small>selected interval</small></div></div>
             <p id="convergence-summary" class="field-note" aria-live="polite"></p>
             <article class="chart-card"><div class="chart-heading"><div><span class="chart-kicker">TIRT-Dynamic</span><h3 id="chart-title">Brightness temperature over time</h3></div><span class="chart-badge cyan">TIME</span></div><canvas id="time-chart"></canvas></article>
             <article id="diagnostics-card" class="diagnostics-card is-hidden"><div class="chart-heading"><div><span class="chart-kicker">URBAN COMPONENTS</span><h3>Resistance and energy diagnostics</h3></div><span class="chart-badge amber">LATEST STEP</span></div><div id="diagnostics-meta" class="diagnostics-meta">--</div><div class="diagnostics-table-wrap"><table class="diagnostics-table"><thead><tr><th>Component</th><th>State</th><th>SW direct</th><th>SW diffuse</th><th>LW input</th><th>LW out</th><th>H</th><th>LE</th><th>G</th><th>raa</th><th>rss</th></tr></thead><tbody id="diagnostics-body"></tbody></table></div></article>
@@ -131,11 +134,11 @@
         </section>
       </section>
     </main>
-    <footer class="app-footer">出品: TIRTLab　邮箱: <a href="mailto:bianzj@aircas.ac.cn">bianzj@aircas.ac.cn</a></footer>
+    <footer class="app-footer">Produced by TIRTLab · Email: <a href="mailto:bianzj@aircas.ac.cn">bianzj@aircas.ac.cn</a></footer>
     <div id="toast" class="toast" role="status"></div>
   </div>
-  <script type="module" src="language.js?v=1"></script>
+  <script type="module" src="language.js?v=2"></script>
   <script type="module" src="time_scene.js?v=streamsim-scene-2"></script>
-  <script src="time.js?v=1.1.2"></script>
+  <script src="time.js?v=1.2.0-i18n"></script>
 </body>
 </html>

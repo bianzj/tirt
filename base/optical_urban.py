@@ -1,4 +1,4 @@
-"""Sunlit urban facets and conservative wall/street optical radiosity."""
+﻿"""Sunlit urban facets and conservative wall/street optical radiosity."""
 import math
 from functools import lru_cache
 
@@ -133,9 +133,12 @@ def forest_sky_components(parameters, view, rho, tau, soil_rho):
 
 def urban_reflectance(settings, view, view_azimuth, solar, solar_azimuth, rho_roof, rho_wall,
                        rho_street, rho_leaf, tau_leaf):
-    if (str(settings.get('vegetation_model', 'crown')).lower() in ('hom', 'homogeneous', 'row', 'raw')
-            and float(settings.get('lai', 0.)) > 1e-8
-            and float(settings.get('urban_vegetation_fraction', 0.)) > 0):
+    kind = str(settings.get('vegetation_model', 'bare')).strip().lower()
+    from . import canopy_closure
+    standard_canopy = (canopy_closure.closure(settings) != 'legacy' and float(settings.get('lai', 0.)) > 1e-8 and
+                       (kind in ('hom', 'homogeneous', 'row', 'raw') or
+                        (kind in ('crown', 'forest') and float(settings.get('stand_density', 0.)) > 0)))
+    if standard_canopy or (kind in ('hom', 'homogeneous', 'row', 'raw') and float(settings.get('lai', 0.)) > 1e-8):
         from .optical_urban_layer import reflectance
         return reflectance(settings, view, view_azimuth, solar, solar_azimuth,
                            rho_roof, rho_wall, rho_street, rho_leaf, tau_leaf)
@@ -143,11 +146,9 @@ def urban_reflectance(settings, view, view_azimuth, solar, solar_azimuth, rho_ro
     length, width, height, density, bearing = shape
     footprint = length*width*density
     ground_area = 1-footprint
-    forest_fraction = float(settings.get('urban_vegetation_fraction', 0.))
-    if not 0 <= forest_fraction <= 1:
-        raise ValueError('Urban vegetation fraction must be in [0, 1].')
-    if float(settings.get('lai', 0.)) <= 1e-8 or float(settings.get('stand_density', 0.)) <= 0:
-        forest_fraction = 0.
+    forest_fraction = (1.0 if kind in ('crown', 'forest')
+                       and float(settings.get('lai', 0.)) > 1e-8
+                       and float(settings.get('stand_density', 0.)) > 0 else 0.0)
     diffuse = float(settings.get('shortwave_diffuse_fraction', 0.))
     sunlit = bool(settings.get('shortwave_sunlit_surface', True))
     if not 0 <= diffuse <= 1:
@@ -184,11 +185,12 @@ def urban_reflectance(settings, view, view_azimuth, solar, solar_azimuth, rho_ro
         illumination = np.exp(-np.array([solar_leaf, solar_ground]))
         single, multiple = forest_components(parameters, solar, view, relative, rho_leaf, tau_leaf,
                                               rho_street, *illumination)
-        forest_beam = ground_area*(single*np.exp(-np.array([joint_leaf, joint_ground]))+
-                                  multiple*np.exp(-np.array([view_leaf, view_ground])))
-        forest_sky = ground_area*forest_sky_components(parameters, view, rho_leaf, tau_leaf, rho_street)*np.exp(-np.array([view_leaf, view_ground]))
+        sky_parts = forest_sky_components(parameters, view, rho_leaf, tau_leaf, rho_street)
         fluxes = forest_origins(parameters[0], solar, rho_leaf, tau_leaf, rho_street,
                                 parameters[1], parameters[2], parameters[3], parameters[4])[2]
+        forest_beam = ground_area*(single*np.exp(-np.array([joint_leaf, joint_ground]))+
+                                  multiple*np.exp(-np.array([view_leaf, view_ground])))
+        forest_sky = ground_area*sky_parts*np.exp(-np.array([view_leaf, view_ground]))
         forest_flux = float(fluxes@illumination)
         from .gap import gap_probability_crown_analytical
         gap = float(gap_probability_crown_analytical(*parameters[0][:4], view))

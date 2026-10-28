@@ -1,0 +1,11 @@
+﻿domain,scene,rows,valid,pngs
+optical,plane_bare,33,33,2
+optical,plane_hom,99,99,2
+optical,plane_row,99,99,2
+optical,plane_crown,99,99,2
+optical,slope_crown,99,99,2
+optical,terrain_crown,99,99,2
+optical,urban_bare,33,33,2
+optical,urban_hom,99,99,2
+optical,urban_row,99,99,2
+optical,urban_crown,99,99,2

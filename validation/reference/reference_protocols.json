@@ -1,0 +1,534 @@
+{
+  "01_T1_plane_bare": {
+    "test": "T1",
+    "mode": "eRaytracing",
+    "seed": 1,
+    "samples": 32,
+    "depth": 4,
+    "resolution": 512,
+    "sza": 30,
+    "saa": 0,
+    "bandNm": 10500,
+    "L": 20,
+    "sceneHeight": 2,
+    "emissivity": {
+      "soil": 0.955,
+      "street": 0.955,
+      "leaf": 0.985,
+      "roof": 0.95,
+      "wall": 0.93,
+      "terrain": 0.95
+    },
+    "temperature": {
+      "soil": [
+        318.15,
+        303.15
+      ],
+      "leaf": [
+        306.15,
+        303.15
+      ],
+      "roof": [
+        318.15,
+        303.15
+      ],
+      "wall": [
+        318.15,
+        303.15
+      ],
+      "street": [
+        318.15,
+        303.15
+      ],
+      "terrain": [
+        318.15,
+        303.15
+      ]
+    },
+    "engine": {
+      "path": "benchmark/streamsim/runs/_engine/histream.exe",
+      "sha256": "2564ea57cab7b0af75bd09960ed32401fed2c1dd6760bad62b311e704fa07d55"
+    }
+  },
+  "02_T2_plane_hom": {
+    "test": "T2",
+    "mode": "eRaytracing",
+    "seed": 1,
+    "samples": 32,
+    "depth": 4,
+    "resolution": 512,
+    "sza": 30,
+    "saa": 0,
+    "bandNm": 10500,
+    "leafSize": 0.15,
+    "leafCount": 26667,
+    "leafAreaIndex": 1.5000187499999997,
+    "canopyHeight": 1,
+    "L": 20,
+    "sceneHeight": 2,
+    "emissivity": {
+      "soil": 0.955,
+      "street": 0.955,
+      "leaf": 0.985,
+      "roof": 0.95,
+      "wall": 0.93,
+      "terrain": 0.95
+    },
+    "temperature": {
+      "soil": [
+        318.15,
+        303.15
+      ],
+      "leaf": [
+        306.15,
+        303.15
+      ],
+      "roof": [
+        318.15,
+        303.15
+      ],
+      "wall": [
+        318.15,
+        303.15
+      ],
+      "street": [
+        318.15,
+        303.15
+      ],
+      "terrain": [
+        318.15,
+        303.15
+      ]
+    },
+    "engine": {
+      "path": "benchmark/streamsim/runs/_engine/histream.exe",
+      "sha256": "2564ea57cab7b0af75bd09960ed32401fed2c1dd6760bad62b311e704fa07d55"
+    }
+  },
+  "04_T3_plane_crown_leaf0.15": {
+    "test": "T3",
+    "mode": "eRaytracing",
+    "seed": 1,
+    "samples": 32,
+    "depth": 4,
+    "resolution": 512,
+    "sza": 30,
+    "saa": 0,
+    "bandNm": 10500,
+    "leafSize": 0.15,
+    "leavesPerCrown": 3333,
+    "crowns": 200,
+    "lad": 0.6631455962162307,
+    "leafAreaIndex": 1.49985,
+    "variants": 4,
+    "L": 100,
+    "sceneHeight": 10,
+    "emissivity": {
+      "soil": 0.955,
+      "street": 0.955,
+      "leaf": 0.985,
+      "roof": 0.95,
+      "wall": 0.93,
+      "terrain": 0.95
+    },
+    "temperature": {
+      "soil": [
+        318.15,
+        303.15
+      ],
+      "leaf": [
+        306.15,
+        303.15
+      ],
+      "roof": [
+        318.15,
+        303.15
+      ],
+      "wall": [
+        318.15,
+        303.15
+      ],
+      "street": [
+        318.15,
+        303.15
+      ],
+      "terrain": [
+        318.15,
+        303.15
+      ]
+    },
+    "engine": {
+      "path": "benchmark/streamsim/runs/_engine/histream.exe",
+      "sha256": "2564ea57cab7b0af75bd09960ed32401fed2c1dd6760bad62b311e704fa07d55"
+    }
+  },
+  "05_T5_row_az0": {
+    "test": "T5az0",
+    "mode": "eRaytracing",
+    "seed": 1,
+    "samples": 32,
+    "depth": 4,
+    "resolution": 512,
+    "sza": 30,
+    "saa": 0,
+    "bandNm": 10500,
+    "rowAzimuth": 0,
+    "rows": 20,
+    "rowWidth": 0.5,
+    "rowGap": 0.5,
+    "rowHeight": 1,
+    "inRowLad": 3,
+    "leafSize": 0.15,
+    "leafPieces": 38009,
+    "leafAreaIndex": 1.5060220951399197,
+    "rowCoverEnvelope": 0.5,
+    "L": 20,
+    "sceneHeight": 2,
+    "emissivity": {
+      "soil": 0.955,
+      "street": 0.955,
+      "leaf": 0.985,
+      "roof": 0.95,
+      "wall": 0.93,
+      "terrain": 0.95
+    },
+    "temperature": {
+      "soil": [
+        318.15,
+        303.15
+      ],
+      "leaf": [
+        306.15,
+        303.15
+      ],
+      "roof": [
+        318.15,
+        303.15
+      ],
+      "wall": [
+        318.15,
+        303.15
+      ],
+      "street": [
+        318.15,
+        303.15
+      ],
+      "terrain": [
+        318.15,
+        303.15
+      ]
+    },
+    "engine": {
+      "path": "benchmark/streamsim/runs/_engine/histream.exe",
+      "sha256": "2564ea57cab7b0af75bd09960ed32401fed2c1dd6760bad62b311e704fa07d55"
+    }
+  },
+  "06_T5_row_az90": {
+    "test": "T5az90",
+    "mode": "eRaytracing",
+    "seed": 1,
+    "samples": 32,
+    "depth": 4,
+    "resolution": 512,
+    "sza": 30,
+    "saa": 0,
+    "bandNm": 10500,
+    "rowAzimuth": 90,
+    "rows": 20,
+    "rowWidth": 0.5,
+    "rowGap": 0.5,
+    "rowHeight": 1,
+    "inRowLad": 3,
+    "leafSize": 0.15,
+    "leafPieces": 38009,
+    "leafAreaIndex": 1.5060220951399197,
+    "rowCoverEnvelope": 0.5,
+    "L": 20,
+    "sceneHeight": 2,
+    "emissivity": {
+      "soil": 0.955,
+      "street": 0.955,
+      "leaf": 0.985,
+      "roof": 0.95,
+      "wall": 0.93,
+      "terrain": 0.95
+    },
+    "temperature": {
+      "soil": [
+        318.15,
+        303.15
+      ],
+      "leaf": [
+        306.15,
+        303.15
+      ],
+      "roof": [
+        318.15,
+        303.15
+      ],
+      "wall": [
+        318.15,
+        303.15
+      ],
+      "street": [
+        318.15,
+        303.15
+      ],
+      "terrain": [
+        318.15,
+        303.15
+      ]
+    },
+    "engine": {
+      "path": "benchmark/streamsim/runs/_engine/histream.exe",
+      "sha256": "2564ea57cab7b0af75bd09960ed32401fed2c1dd6760bad62b311e704fa07d55"
+    }
+  },
+  "07_S1_slope_hom": {
+    "test": "T2",
+    "mode": "eRaytracing",
+    "seed": 1,
+    "samples": 32,
+    "depth": 4,
+    "resolution": 512,
+    "sza": 30,
+    "saa": 0,
+    "bandNm": 10500,
+    "leafSize": 0.15,
+    "leafCount": 26667,
+    "leafAreaIndex": 1.5000187499999997,
+    "canopyHeight": 1,
+    "L": 20,
+    "sceneHeight": 2,
+    "emissivity": {
+      "soil": 0.955,
+      "street": 0.955,
+      "leaf": 0.985,
+      "roof": 0.95,
+      "wall": 0.93,
+      "terrain": 0.95
+    },
+    "temperature": {
+      "soil": [
+        318.15,
+        303.15
+      ],
+      "leaf": [
+        306.15,
+        303.15
+      ],
+      "roof": [
+        318.15,
+        303.15
+      ],
+      "wall": [
+        318.15,
+        303.15
+      ],
+      "street": [
+        318.15,
+        303.15
+      ],
+      "terrain": [
+        318.15,
+        303.15
+      ]
+    },
+    "slope": 30.0,
+    "aspect": 90.0,
+    "local_sza": 41.40962210927085,
+    "local_saa": 319.1066053508691,
+    "base_test": "T2",
+    "engine": {
+      "path": "benchmark/streamsim/runs/_engine/histream.exe",
+      "sha256": "2564ea57cab7b0af75bd09960ed32401fed2c1dd6760bad62b311e704fa07d55"
+    }
+  },
+  "08_S1_slope_crown": {
+    "test": "T3",
+    "mode": "eRaytracing",
+    "seed": 1,
+    "samples": 32,
+    "depth": 4,
+    "resolution": 512,
+    "sza": 30,
+    "saa": 0,
+    "bandNm": 10500,
+    "leafSize": 0.15,
+    "leavesPerCrown": 3333,
+    "crowns": 200,
+    "lad": 0.6631455962162307,
+    "leafAreaIndex": 1.49985,
+    "variants": 4,
+    "L": 100,
+    "sceneHeight": 10,
+    "emissivity": {
+      "soil": 0.955,
+      "street": 0.955,
+      "leaf": 0.985,
+      "roof": 0.95,
+      "wall": 0.93,
+      "terrain": 0.95
+    },
+    "temperature": {
+      "soil": [
+        318.15,
+        303.15
+      ],
+      "leaf": [
+        306.15,
+        303.15
+      ],
+      "roof": [
+        318.15,
+        303.15
+      ],
+      "wall": [
+        318.15,
+        303.15
+      ],
+      "street": [
+        318.15,
+        303.15
+      ],
+      "terrain": [
+        318.15,
+        303.15
+      ]
+    },
+    "slope": 30.0,
+    "aspect": 90.0,
+    "local_sza": 41.40962210927085,
+    "local_saa": 319.1066053508691,
+    "base_test": "T3",
+    "engine": {
+      "path": "benchmark/streamsim/runs/_engine/histream.exe",
+      "sha256": "2564ea57cab7b0af75bd09960ed32401fed2c1dd6760bad62b311e704fa07d55"
+    }
+  },
+  "10_T4_urban_bare": {
+    "test": "T4",
+    "mode": "eRaytracing",
+    "seed": 1,
+    "samples": 32,
+    "depth": 4,
+    "resolution": 512,
+    "sza": 30,
+    "saa": 0,
+    "bandNm": 10500,
+    "buildings": 60,
+    "planDensity": 0.0015,
+    "buildingSize": [
+      10,
+      10,
+      20
+    ],
+    "L": 200,
+    "sceneHeight": 22,
+    "emissivity": {
+      "soil": 0.955,
+      "street": 0.955,
+      "leaf": 0.985,
+      "roof": 0.95,
+      "wall": 0.93,
+      "terrain": 0.95
+    },
+    "temperature": {
+      "soil": [
+        318.15,
+        303.15
+      ],
+      "leaf": [
+        306.15,
+        303.15
+      ],
+      "roof": [
+        318.15,
+        303.15
+      ],
+      "wall": [
+        318.15,
+        303.15
+      ],
+      "street": [
+        318.15,
+        303.15
+      ],
+      "terrain": [
+        318.15,
+        303.15
+      ]
+    },
+    "engine": {
+      "path": "benchmark/streamsim/runs/_engine/histream.exe",
+      "sha256": "2564ea57cab7b0af75bd09960ed32401fed2c1dd6760bad62b311e704fa07d55"
+    }
+  },
+  "11_UV_urban_crown": {
+    "test": "UV",
+    "mode": "eRaytracing",
+    "seed": 1,
+    "samples": 32,
+    "depth": 4,
+    "resolution": 512,
+    "sza": 30,
+    "saa": 0,
+    "bandNm": 10500,
+    "leafSize": 0.15,
+    "leavesPerCrown": 3333,
+    "crowns": 1530,
+    "lad": 0.6631455962162306,
+    "leafAreaIndex": 1.2748724999999999,
+    "variants": 4,
+    "buildings": 135,
+    "planDensity": 0.0015,
+    "buildingSize": [
+      10,
+      10,
+      20
+    ],
+    "streetArea": 76500,
+    "crownsPerStreetArea": 0.02,
+    "leafAreaPerStreetArea": 1.5,
+    "L": 300,
+    "sceneHeight": 22,
+    "emissivity": {
+      "soil": 0.955,
+      "street": 0.955,
+      "leaf": 0.985,
+      "roof": 0.95,
+      "wall": 0.93,
+      "terrain": 0.95
+    },
+    "temperature": {
+      "soil": [
+        318.15,
+        303.15
+      ],
+      "leaf": [
+        304.65,
+        304.65
+      ],
+      "roof": [
+        318.15,
+        303.15
+      ],
+      "wall": [
+        318.15,
+        303.15
+      ],
+      "street": [
+        318.15,
+        303.15
+      ],
+      "terrain": [
+        318.15,
+        303.15
+      ]
+    },
+    "engine": {
+      "path": "benchmark/streamsim/runs/_engine/histream.exe",
+      "sha256": "2564ea57cab7b0af75bd09960ed32401fed2c1dd6760bad62b311e704fa07d55"
+    }
+  }
+}

@@ -5,6 +5,29 @@ import numpy as np
 
 from .leafopt import calctav
 
+#: SCOPE's BSM soil-moisture capacity (reference value 0.25) in m3 m-3.
+BSM_WATER_CAPACITY = 0.25
+#: BSM residual (dry) and maximum (saturated) soil water, in m3 m-3.
+BSM_WATER_RESIDUAL = 0.05
+BSM_WATER_MAX = 0.55
+
+
+def volumetric_water(value):
+    """Normalize soil water to the model's m3 m-3 unit.
+
+    TIRTEB uses volume fractions everywhere, with 0.25 as the BSM reference
+    capacity. Legacy percent inputs are still accepted: a value above 1 is
+    divided by 100.
+    """
+    fraction = float(value)
+    return fraction / 100.0 if fraction > 1.0 else fraction
+
+
+def bsm_water_mu(soil_moisture):
+    """Poisson mu of the BSM water-film model, computed in m3 m-3."""
+    water = min(max(volumetric_water(soil_moisture), BSM_WATER_RESIDUAL), BSM_WATER_MAX)
+    return (water - BSM_WATER_RESIDUAL) / BSM_WATER_CAPACITY
+
 
 def _soil_values(soil_optical):
     if isinstance(soil_optical, dict):
@@ -13,10 +36,13 @@ def _soil_values(soil_optical):
 
 
 def bsm(coeff, soil_optical, soil_moisture):
-    """Calculate wet-soil reflectance as SoilOpt::bsm."""
+    """Calculate wet-soil reflectance as SCOPE's BSM; moisture is m3 m-3."""
     brightness, lat, lon = _soil_values(soil_optical)
-    smc = soil_moisture[5] if isinstance(soil_moisture, (list, tuple)) else soil_moisture
-    smcp = 0.25
+    theta = soil_moisture[5] if isinstance(soil_moisture, (list, tuple)) else soil_moisture
+    # SCOPE's soilwat uses mu = (SMp - 5) / SMC with SMp in volume percent.
+    # TIRTEB keeps both theta and the 0.25 capacity in m3 m-3, so the
+    # equivalent expression is mu = (theta - 0.05) / 0.25.
+    mu = bsm_water_mu(theta)
     film = 0.015
     rd = 3.1415926 / 180.0
     f1 = brightness * math.sin(lat * rd)
@@ -30,11 +56,13 @@ def bsm(coeff, soil_optical, soil_moisture):
         rdry = gsv1 * f1 + gsv2 * f2 + gsv3 * f3
         tw = math.exp(-kw * film)
         tav90_nw = calctav(90.0, nw)
-        rbac = 1.0 - (1.0 - rdry) * (rdry * calctav(90.0, 2.0) / tav90_nw + 1.0 - rdry)
+        # SCOPE: rbac = 1 - (1-rdry) * (rdry * tav(90, 2/nw) / tav(90, 2) + 1-rdry)
+        rbac = 1.0 - (1.0 - rdry) * (
+            rdry * calctav(90.0, 2.0 / nw) / calctav(90.0, 2.0) + 1.0 - rdry)
         p = 1.0 - tav90_nw / (nw * nw)
-        rw = calctav(40.0, nw)
+        # SCOPE: Rw = 1 - tav(40, nw); calctav returns transmittance, not reflectance.
+        rw = 1.0 - calctav(40.0, nw)
         radd = (1.0 - rw) * (1.0 - p) * rbac / (1.0 - p * rbac)
-        mu = (smc - 0.05) / smcp
         fdry = math.exp(-mu)
         fmul = (math.exp(tw * mu) - 1.0) * fdry
         reflectance.append(rdry * fdry + rw * (1.0 - fdry) + radd * fmul)
@@ -98,12 +126,12 @@ def soil_tir_emissivity(
     dry_emissivity=0.955,
     wet_emissivity=0.99,
 ):
-    """Linear soil-water correction for thermal-infrared emissivity."""
-    dry_moisture = float(dry_moisture)
-    wet_moisture = max(float(wet_moisture), dry_moisture + 1.0e-8)
+    """Linear soil-water correction for TIR emissivity; water is m3 m-3."""
+    dry_moisture = volumetric_water(dry_moisture)
+    wet_moisture = max(volumetric_water(wet_moisture), dry_moisture + 1.0e-8)
     if int(enabled) != 1:
         return float(np.clip(dry_emissivity, 0.0, 1.0))
-    fraction = (float(soil_moisture) - dry_moisture) / (wet_moisture - dry_moisture)
+    fraction = (volumetric_water(soil_moisture) - dry_moisture) / (wet_moisture - dry_moisture)
     fraction = min(max(fraction, 0.0), 1.0)
     return float(np.clip(
         float(dry_emissivity) + fraction * (float(wet_emissivity) - float(dry_emissivity)),
@@ -140,7 +168,9 @@ def hapke_thermal_emissivity(
 
 
 __all__ = [
-    "bsm", "soil_emissivity", "hapke_emissivity", "hapke_reflectance",
+    "BSM_WATER_CAPACITY", "BSM_WATER_RESIDUAL", "BSM_WATER_MAX",
+    "volumetric_water", "bsm_water_mu", "bsm",
+    "soil_emissivity", "hapke_emissivity", "hapke_reflectance",
     "hapke_hemispherical_emissivity", "hapke_single_scattering_albedo", "hapke_directional_emissivity",
     "soil_tir_emissivity", "hapke_thermal_emissivity",
 ]

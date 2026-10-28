@@ -3,16 +3,12 @@ from datetime import date, timedelta
 
 from .aerodynamic import aerodynamic_resistance
 from .biochemical import suresist, suresist_urban
-from .eb import RAD_THRESHOLD, rebalance, rebalance_urban
+from .eb import CP, RAD_THRESHOLD, air_density, rebalance, rebalance_urban
 from .evapo import evapotranspiration, urban_evapotranspiration, update_thermal_history
-from .radiation import (
-    merge_radiation,
-    prepare_longwave,
-    prepare_shortwave,
-    radiative_transfer_diagnostics,
-)
 from .solar import slope_direction, solar_angles
 from .structs import FluxStructure
+from .tirteb_radiation import diagnostics, flux_weights, merge_radiation, prepare_longwave, prepare_shortwave
+from .scene_fluxes import horizontal_area_factor, scene_totals
 
 
 def run_node(settings, meteo, node, year, doy, latitude, longitude, dem=0.0, slope=0.0, vza=0.0, vaa=0.0, initial_state=None, max_iter=50, aspect=0.0, utc_offset_hours=0.0):
@@ -27,6 +23,7 @@ def run_node(settings, meteo, node, year, doy, latitude, longitude, dem=0.0, slo
     global_sza, global_saa = solar_angles(
         utc_date.year, utc_doy, utc_time, latitude, longitude, timezone=0.0
     )
+    settings = dict(settings,solar_day_of_year=utc_doy)
     global_vza, global_vaa = float(vza), float(vaa)
     sunlit_surface = True
     if settings.get("surface_model") == "terrain":
@@ -58,21 +55,22 @@ def run_node(settings, meteo, node, year, doy, latitude, longitude, dem=0.0, slo
         "Tss": soil_initial, "Tsh": soil_initial, "Tls": surface_initial, "Tlh": surface_initial,
         "Troof_sunlit": surface_initial, "Troof_shaded": surface_initial,
         "Twall_sunlit": surface_initial, "Twall_shaded": surface_initial,
-        "L": 1e9, "dG_term": math.sqrt(settings["soil_cs"] * settings["soil_rhos"] * settings["soil_lambda"]) * 2 / (math.sqrt(math.pi) * math.sqrt(3600)),
-        "dt_seconds": 3600.0,
+        "L": float('inf'), "dG_term": math.sqrt(settings["soil_cs"] * settings["soil_rhos"] * settings["soil_lambda"]) * 2 / (math.sqrt(math.pi) * math.sqrt(float(settings.get('dtime', 1800.0)))),
+        "dt_seconds": float(settings.get('dtime', 1800.0)),
+        "thermal_history_dt_seconds": [],
         "surface_history_sunlit": [soil_initial], "surface_history_shaded": [soil_initial],
         "surface_history_roof_sunlit": [urban_initial], "surface_history_roof_shaded": [urban_initial],
         "surface_history_wall_sunlit": [urban_initial], "surface_history_wall_shaded": [urban_initial],
         "surface_history_street_sunlit": [soil_initial], "surface_history_street_shaded": [soil_initial],
-        "depth_profile_sunlit": [soil_initial] * 4, "depth_profile_shaded": [soil_initial] * 4,
+        "depth_profile_sunlit": [soil_initial], "depth_profile_shaded": [soil_initial],
         "depth_profile_roof_sunlit": [urban_initial] * 4, "depth_profile_roof_shaded": [urban_initial] * 4,
         "depth_profile_wall_sunlit": wall_profile[:], "depth_profile_wall_shaded": wall_profile[:],
-        "depth_profile_street_sunlit": [soil_initial] * 4, "depth_profile_street_shaded": [soil_initial] * 4,
+        "depth_profile_street_sunlit": [soil_initial], "depth_profile_street_shaded": [soil_initial],
         "cs": settings.get("ca", 380.0), "ci": settings.get("ca", 380.0),
         "es": settings.get("ea", meteo["vapor_pressure"]),
     }
     if initial_state:
-        for key in ("Tss", "Tsh", "Tls", "Tlh", "Troof_sunlit", "Troof_shaded", "Twall_sunlit", "Twall_shaded", "L", "dt_seconds",
+        for key in ("Tss", "Tsh", "Tls", "Tlh", "Troof_sunlit", "Troof_shaded", "Twall_sunlit", "Twall_shaded", "L", "dt_seconds", "thermal_history_dt_seconds", "scene_sensible_heat_W_m2",
                     "surface_history_sunlit", "surface_history_shaded",
                     "surface_history_roof_sunlit", "surface_history_roof_shaded",
                     "surface_history_wall_sunlit", "surface_history_wall_shaded",
@@ -84,24 +82,40 @@ def run_node(settings, meteo, node, year, doy, latitude, longitude, dem=0.0, slo
             if key in initial_state:
                 state[key] = list(initial_state[key]) if isinstance(initial_state[key], (list, tuple)) else initial_state[key]
         if "time" in initial_state:
-            state["dt_seconds"] = max(abs(float(meteo["time"]) - float(initial_state["time"])) * 86400.0, 1.0)
+            state["dt_seconds"] = (float(meteo["time"]) - float(initial_state["time"])) * 86400.0
+            if state['dt_seconds'] <= 0.0:
+                raise ValueError('Meteorological timestamps must increase strictly.')
     # Keep the wall profile shape and its indoor boundary fixed when carrying state forward.
     for profile_key in ("depth_profile_wall_sunlit", "depth_profile_wall_shaded"):
         profile = list(state.get(profile_key, ()))
         state[profile_key] = (profile[:wall_layers + 1] + wall_profile)[:wall_layers + 1]
         state[profile_key][-1] = wall_boundary
     # Wall illumination must be available during the first radiation iteration.
-    state.update(sza=sza, saa=saa, vza=vza, vaa=vaa)
-    shortwave = prepare_shortwave(
-        settings, meteo, sza, saa, vza, vaa, sunlit=sunlit_surface
-    )
+    state.update(sza=sza, saa=saa, vza=vza, vaa=vaa, sunlit_surface=sunlit_surface,
+                 sza_global=global_sza, saa_global=global_saa)
+    areas = flux_weights(settings, global_sza, global_saa, global_sza < 90.0)
+    state.update(zip(('soil_sunlit_fraction','soil_shaded_fraction','lai_sunlit','lai_shaded'), areas))
+    shortwave = prepare_shortwave(settings, meteo, global_sza, global_saa, sunlit=global_sza < 90.0)
+    if is_urban:
+        from .urban_energy import shortwave_inputs
+        urban_shortwave = shortwave_inputs(settings, state, shortwave)
+        shortwave.update(urban_shortwave)
+        shortwave['_urban_shortwave'] = urban_shortwave
     iterations = 0
     closed = False
     netrad = {}
+    rho = air_density(meteo)
+    state['air_density_kg_m3'] = rho
+    # Stability uses H per unit horizontal area; output fluxes keep the scene reference area.
+    area_factor = horizontal_area_factor(settings)
+    state['stability_flux_area_factor'] = area_factor
+    buoyancy_scale = -0.4 * 9.81 / (rho * CP * (float(meteo['air_temperature_c']) + 273.15))
+    fallback_used = False
 
     def evaluate_flux(rebalance_state=True):
         nonlocal netrad
-        longwave = prepare_longwave(settings, meteo, state, sza, saa, vza, vaa)
+        previous_h = float(state.get('scene_sensible_heat_W_m2',0.0))
+        longwave = prepare_longwave(settings, meteo, state, global_sza, global_saa, global_sza < 90.0)
         netrad = merge_radiation(shortwave, longwave)
         aerodynamic_resistance(settings, meteo, state, is_urban)
         if is_urban:
@@ -112,30 +126,116 @@ def run_node(settings, meteo, node, year, doy, latitude, longitude, dem=0.0, slo
             suresist_urban(settings, meteo, state, netrad)
             _ensure_urban_state(state)
             urban_evapotranspiration(settings, meteo, state, netrad)
-            return rebalance_urban(settings, meteo, state) if rebalance_state else False
-        suresist(settings, meteo, state, netrad)
-        evapotranspiration(settings, meteo, state, netrad)
-        return rebalance(settings, meteo, state) if rebalance_state else False
+            result = rebalance_urban(settings, meteo, state) if rebalance_state else False
+        else:
+            suresist(settings, meteo, state, netrad)
+            evapotranspiration(settings, meteo, state, netrad)
+            result = rebalance(settings, meteo, state) if rebalance_state else False
+        state['scene_sensible_heat_W_m2'] = scene_totals(settings, state, is_urban)['H'] * area_factor
+        state['gustiness_heat_residual_W_m2'] = abs(state['scene_sensible_heat_W_m2']-previous_h)
+        return result
 
-    for kiter in range(max_iter):
-        closed = evaluate_flux()
-        if is_urban:
-            _ensure_urban_state(state)
-        iterations = kiter + 1
-        if closed:
-            # rebalance changes temperatures after calculating the fluxes.
-            evaluate_flux(rebalance_state=False)
-            if _maximum_residual(_energy_balance_residuals(settings, state, is_urban)) <= RAD_THRESHOLD:
-                break
-            closed = False
+    # Solve inverse L, which is continuous through neutral conditions. Each
+    # trial re-solves the temperature budgets with that trial's resistances.
+    inverse = 0.0 if not math.isfinite(state['L']) or abs(state['L']) < 1e-14 else 1.0 / state['L']
+    lower, upper = None, None
+    stability_closed = False
+    max_stability = max(1, int(settings.get('max_stability_iter', 60)))
+    target = 0.0
+    joint_iterations = 0
+    for outer in range(max_stability):
+        state['L'] = 1.0 / inverse if abs(inverse) > 1e-14 else float('inf')
+        for kiter in range(max_iter):
+            closed = evaluate_flux()
+            if is_urban:
+                _ensure_urban_state(state)
+            iterations += 1
+            if closed:
+                evaluate_flux(rebalance_state=False)
+                if (_maximum_residual(_energy_balance_residuals(settings, state, is_urban)) <= 1e-4
+                        and state['gustiness_heat_residual_W_m2'] <= 1e-4):
+                    break
+                closed = False
+        evaluate_flux(rebalance_state=False)
+        closed = (_maximum_residual(_energy_balance_residuals(settings, state, is_urban)) <= 1e-4
+                  and state['gustiness_heat_residual_W_m2'] <= 1e-4)
+        if not closed:
+            # Scalar relaxed updates can oscillate at physiological transitions.
+            # The fallback solves temperatures and gustiness heat jointly at L.
+            from .energy_solver import solve_temperatures
+            fallback_used = True
+            iterations += solve_temperatures(
+                state, evaluate_flux,
+                lambda: _energy_balance_residuals(settings,state,is_urban), max_iter)
+            closed = (_maximum_residual(_energy_balance_residuals(settings,state,is_urban)) <= 1e-4
+                      and state['gustiness_heat_residual_W_m2'] <= 1e-4)
+        h = float(state['scene_sensible_heat_W_m2'])
+        ustar = max(float(state['ustar']), 1e-8)
+        target = buoyancy_scale * h / ustar**3
+        error = inverse - target
+        # Half the final acceptance tolerance, so the closing re-evaluation
+        # (one more gustiness fixed-point update) cannot fall just outside it.
+        tolerance = 0.5 * _stability_tolerance(target, buoyancy_scale, ustar)
+        stability_closed = abs(error) <= tolerance
+        if closed and stability_closed:
+            break
+        if not closed:
+            # An unconverged temperature solution is not a valid bracket sample,
+            # but repeating the same L would only reproduce it: relax toward target.
+            inverse = 0.5 * (inverse + target)
+            continue
+        if error < 0:
+            lower = (inverse, error)
+        else:
+            upper = (inverse, error)
+        if lower is not None and upper is not None and lower[0] < upper[0]:
+            lo, flo = lower
+            hi, fhi = upper
+            secant = (lo*fhi-hi*flo)/(fhi-flo)
+            # Keep every trial inside the sign-changing bracket.
+            inverse = min(max(secant, lo+0.1*(hi-lo)), hi-0.1*(hi-lo))
+        else:
+            inverse = 0.5 * (inverse + target)
+    if not (closed and stability_closed):
+        # The sunset physiological transition can change the temperature
+        # equilibrium branch and invalidate old scalar stability brackets.
+        # Solve all residuals jointly instead of accepting a stale bracket.
+        from .energy_solver import solve_coupled
+        fallback_used = True
+        joint_iterations = solve_coupled(state,meteo,evaluate_flux,
+            lambda: _energy_balance_residuals(settings,state,is_urban),max_iter*4)
+        iterations += joint_iterations
+        inverse = 1.0/state['L'] if math.isfinite(state['L']) else 0.0
+        h = float(state['scene_sensible_heat_W_m2'])
+        target = buoyancy_scale*h/max(state['ustar'],1e-8)**3
+        error = inverse-target
+        stability_closed = abs(error)<=_stability_tolerance(target, buoyancy_scale, state['ustar'])
+        closed = (_maximum_residual(_energy_balance_residuals(settings,state,is_urban))<=1e-4
+                  and state['gustiness_heat_residual_W_m2']<=1e-4)
+    state.update(stability_iterations=outer+1, stability_closed=stability_closed,
+                 stability_joint_evaluations=joint_iterations,
+                 stability_residual_m_inv=abs(error),
+                 L_target=1.0/target if abs(target)>1e-14 else float('inf'),
+                 stability_method='coupled_monin_obukhov')
 
     # Export radiation and fluxes evaluated at the actual returned temperatures.
     evaluate_flux(rebalance_state=False)
+    final_h = float(state['scene_sensible_heat_W_m2'])
+    final_target = buoyancy_scale * final_h / max(float(state['ustar']),1e-8)**3
+    final_inverse = 1.0/state['L'] if math.isfinite(state['L']) else 0.0
+    state['stability_residual_m_inv'] = abs(final_inverse-final_target)
+    stability_closed = state['stability_residual_m_inv'] <= _stability_tolerance(
+        final_target, buoyancy_scale, state['ustar'])
+    state['stability_closed'] = stability_closed
+    state['L_target'] = 1.0/final_target if abs(final_target)>1e-14 else float('inf')
+    state['stability_zeta'] = float(state.get('stability_reference_height',settings.get('z',15.0)))*final_inverse
     residuals = _energy_balance_residuals(settings, state, is_urban)
     maximum_residual = _maximum_residual(residuals)
-    closed = bool(closed and maximum_residual <= RAD_THRESHOLD)
+    closed = bool(closed and stability_closed and maximum_residual <= RAD_THRESHOLD
+                  and state['gustiness_heat_residual_W_m2'] <= 1e-4)
     state.update({"EB_residual_" + name: value for name, value in residuals.items()})
     state["energy_balance_residual_W_m2"] = maximum_residual
+    state["fallback_solver_used"] = fallback_used
     update_thermal_history(settings, state)
     state.update(
         time=meteo["time"], sza=sza, saa=saa, vza=vza, vaa=vaa,
@@ -145,7 +245,7 @@ def run_node(settings, meteo, node, year, doy, latitude, longitude, dem=0.0, slo
         sunlit_surface=sunlit_surface,
         iterations=iterations, closed=closed,
     )
-    state.update(radiative_transfer_diagnostics(settings, state, vza, vaa))
+    state.update(diagnostics(settings, state, vza, vaa))
     state.update(
         shortwave_direct=netrad.get("shortwave_direct", 0.0),
         shortwave_diffuse=netrad.get("shortwave_diffuse", 0.0),
@@ -153,21 +253,32 @@ def run_node(settings, meteo, node, year, doy, latitude, longitude, dem=0.0, slo
         shortwave_direct_incident=netrad.get("shortwave_direct_incident", 0.0),
         shortwave_diffuse_incident=netrad.get("shortwave_diffuse_incident", 0.0),
         shortwave_diffuse_fraction=netrad.get("shortwave_diffuse_fraction", 0.0),
+        shortwave_albedo=netrad.get("shortwave_albedo", 0.0),
         longwave_down=netrad.get("longwave_down", 0.0),
         tir_scatter_soil=netrad.get("tir_scatter_soil", 0.0),
         tir_scatter_leaf=netrad.get("tir_scatter_leaf", 0.0),
     )
+    for key in ('shortwave_diffuse_fraction_requested','shortwave_partition_limited',
+                'solar_direct_normal_limit_W_m2','shortwave_direct_normal_W_m2',
+                'clearness_index','clearness_index_exceeds_one'):
+        state[key] = shortwave.get(key)
     if not is_urban:
         for component in ("soil", "leaf"):
-            for suffix, sunlit in (("sunlit", True), ("shaded", False)):
-                direct = float(netrad.get(f"directVrad_{component}", 0.0)) if sunlit else 0.0
-                diffuse = float(netrad.get(f"diffuseVrad_{component}", 0.0))
-                longwave = float(netrad.get(f"diffuseTrad_{component}", 0.0))
+            for suffix in ("sunlit", "shaded"):
+                direct = float(netrad.get(f"directVrad_{component}", 0.0)) if suffix == "sunlit" else 0.0
+                diffuse = float(netrad.get(f"diffuseVrad_{component}_{suffix}", 0.0))
+                longwave = float(netrad.get(f"LW_{component}_{suffix}", 0.0))
                 state[f"SW_direct_{component}_{suffix}"] = direct
                 state[f"SW_diffuse_{component}_{suffix}"] = diffuse
                 state[f"LW_input_{component}_{suffix}"] = longwave
                 state[f"radiation_input_{component}_{suffix}"] = direct + diffuse + longwave
     return FluxStructure.from_mapping(state)
+
+
+def _stability_tolerance(target, buoyancy_scale, ustar):
+    """Accepted |1/L - target| [m-1]; includes the 1/L spread of the 1e-4 W m-2 accepted H residual."""
+    flux_spread = abs(buoyancy_scale) * 1e-4 / max(float(ustar), 1e-8)**3
+    return 1e-7 + 1e-6*abs(target) + flux_spread
 
 
 def _energy_balance_residuals(settings, state, urban=False):

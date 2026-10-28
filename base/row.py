@@ -13,11 +13,18 @@ from .vegetation import vegetation_proportions
 
 class Row():
     thermal_row_geometry = 'parametric'
+    row_closure = None
 
     def set_geometry(self,method='parametric'):
         if method not in ('legacy','conditioned_corridor','parametric'):
             raise ValueError('Unknown thermal row geometry: '+str(method))
         self.thermal_row_geometry = method
+
+    def set_closure(self,method=None):
+        '''None keeps thermal_row_geometry with the homogeneous scattering closure.'''
+        if method not in (None,'legacy','conditioned','reference'):
+            raise ValueError('row_closure must be legacy, conditioned or reference')
+        self.row_closure = method
 
     ### structual variables
     leaf_area_index = 3.0
@@ -124,6 +131,15 @@ class Row():
         Ecom = np.asarray([es,es,el,el])
         Tcom = np.asarray([Tss,Tsh,Tls,Tlh])
         Rcom = planck(self.wavelength, Tcom)
+
+        if self.row_closure is not None:
+            from .row_closure import thermal_weights
+            weights = np.asarray([thermal_weights(
+                self.row_closure, self.row_closure, lai, hspot, row_width, row_blank, row_height,
+                float(np.ravel(el)[0]), float(np.ravel(es)[0]), v, a, s, b, r)
+                for v, a, s, b, r in np.broadcast(vza, vaa, sza, saa, raa)]).T
+            self.radiance = radiance_scatter(weights, Rcom)
+            return self.radiance if ifradiance == 1 else inv_planck(self.wavelength, self.radiance)
 
         Pcom = vegetation_proportions(
             "row", lai, hspot, vza, vaa, sza, saa,

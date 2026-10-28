@@ -1,3 +1,4 @@
+import math
 import numpy
 import numpy as np
 import scipy.integrate as sci
@@ -151,6 +152,43 @@ def hotspot_analytical(lai, hspot, vza, sza, vsa, CIi = 1, CIv = 1, G = 0.5):
     gapvs = (1 - bv_upper + sunlit_fraction_vegetation_bottom * sunlit_fraction_background_upper)
 
     return gapvs
+
+def two_layer_sunlit_leaf(lai, view_gap, sun_gap, sunlit_soil):
+    '''
+    双层近似的光照可见叶片，消光与重叠都由场景的间隙率和（双尺度）光照土壤给出
+    上层按截获比例 0.82 - 0.08 LAI 划分，上层可视叶片全部光照；下层的重叠系数
+    o = ln(P_ss / (P_v P_s)) / LAI，因此冠层底部的联合间隙等于给定的光照土壤
+    '''
+    pv = np.clip(np.asarray(view_gap, float), 1.0e-12, 1.0)
+    ps = np.clip(np.asarray(sun_gap, float), 1.0e-12, 1.0)
+    pss = np.clip(np.asarray(sunlit_soil, float), 1.0e-300, None)
+    kv, ks = -np.log(pv) / lai, -np.log(ps) / lai
+    overlap = np.clip(np.log(pss / (pv * ps)) / lai, 0.0, np.minimum(kv, ks))
+    index = max(0.82 - 0.08 * lai, 0.02)
+    upper = np.sqrt((-np.log(1.0 - (1.0 - pv) * index) / np.maximum(kv * lai, 1.0e-12)) *
+                    (-np.log(1.0 - (1.0 - ps) * index) / np.maximum(ks * lai, 1.0e-12)))
+    lai_upper, lai_bottom = lai * upper, lai * (1.0 - upper)
+    lit_background = np.exp(-(ks + kv - overlap) * lai_upper)
+    lit_bottom = 1.0 - np.exp(-overlap * lai_bottom)
+    return np.clip(1.0 - np.exp(-kv * lai_upper) + lit_bottom * lit_background, 0.0, 1.0 - pv)
+
+
+def two_layer_sunlit_leaf_covered(lai, view_gap, sun_gap, mu_v, mu_s, leaf_correlation, G=0.5):
+    '''
+    团聚冠层的双层近似：叶片只在覆盖相中，空相（行间、林间空地）只属于土壤
+    每个方向用两相替代 (1-c) tau_c = G LAI / mu、c + (1-c) exp(-tau_c) = P，
+    在覆盖相内做双层近似，重叠只取叶片尺度 sqrt(tau_v tau_s) w；c = 0 时退化为 two_layer_sunlit_leaf
+    '''
+    from .row_closure import _phases
+    cv, tv = _phases(float(view_gap), G * lai / mu_v)
+    cs, ts = _phases(float(sun_gap), G * lai / mu_s)
+    if tv <= 0.0:
+        return 0.0
+    shared = min(tv, ts, math.sqrt(tv * ts) * leaf_correlation)
+    covered_lai = lai / max(1.0 - cv, 1.0e-12)
+    leaf = two_layer_sunlit_leaf(covered_lai, math.exp(-tv), math.exp(-ts), math.exp(-(tv + ts - shared)))
+    return float(np.clip((1.0 - cv) * leaf, 0.0, 1.0 - float(view_gap)))
+
 
 def hotspot_numerical(lai, hspot, vza, sza, vsa, CI = 1, G = 0.5):
     '''

@@ -78,3 +78,16 @@ def crown_fractions(lai, std, hspot, hcr, rcr, hcb, vza, sza, raa):
     share = np.minimum((lit + (1.0 - lit) * np.exp(-c_dark * r_s * (1.0 - w))) * depth, 1.0)
     leaf = 1.0 - soil
     return np.vstack([soil_sunlit, soil - soil_sunlit, leaf * share, leaf * (1.0 - share)])
+
+
+def crown_fractions_two_layer(lai, std, hspot, hcr, rcr, hcb, vza, sza, raa):
+    """Dual-scale soil hotspot of crown_fractions with the two-layer sunlit-leaf approximation."""
+    from .hotspot import two_layer_sunlit_leaf
+    vza, sza, raa = (np.asarray(a, float).reshape(-1) for a in np.broadcast_arrays(vza, sza, raa))
+    base = crown_fractions(lai, std, hspot, hcr, rcr, hcb, vza, sza, raa)
+    if lai <= 0.0 or std <= 0.0:
+        return base
+    sun = crown_fractions(lai, std, hspot, hcr, rcr, hcb, sza, sza, np.zeros_like(sza))
+    pv = base[0] + base[1]
+    leaf_sunlit = two_layer_sunlit_leaf(lai, pv, sun[0] + sun[1], base[0])
+    return np.vstack([base[0], base[1], leaf_sunlit, 1.0 - pv - leaf_sunlit])

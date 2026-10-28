@@ -33,6 +33,9 @@ class Urban_Veg(CanopyGeometry):
     thermal_crown_geometry = 'legacy'
     thermal_hotspot_inner = None
     thermal_hotspot_outer = None
+    # Optional crown closures, as in TerrainForest.
+    canopy_fraction_model = None
+    canopy_scatter_model = None
     # (zenith, azimuth) midpoint nodes of the wall-exchange hemisphere; 9 x 12 changes the urban forest
     # scene by at most 0.016 K versus the original 90 x 60 grid
     hemisphere_grid = (9, 12)
@@ -50,6 +53,21 @@ class Urban_Veg(CanopyGeometry):
 
     def canopy_proportions(self, vza, vaa, sza, saa, density=None,
                            crown_height=None, row_azimuth=None, row_geometry=None):
+        if self.canopy_fraction_model is not None and self.vegetation_model in ('hom', 'row', 'crown'):
+            lai, std, radius, height, hspot = self.forestshape[:5]
+            view, view_azimuth, solar, solar_azimuth = (a.ravel() for a in np.broadcast_arrays(
+                np.atleast_1d(vza).astype(float), np.atleast_1d(vaa).astype(float),
+                np.atleast_1d(sza).astype(float), np.atleast_1d(saa).astype(float)))
+            if self.vegetation_model == 'crown':
+                vertical = height if crown_height is None else crown_height
+                shape, azimuth = (std if density is None else density, vertical, radius), 0.0
+                base = getattr(self, 'crown_base', None)
+                base = vertical if base is None else base
+            else:
+                shape, azimuth, base = self.row_shape[:3], self.row_shape[3] if row_azimuth is None else row_azimuth, None
+            return np.asarray([self.canopy_fraction_model(self.vegetation_model, float(lai), float(hspot), shape,
+                                                          v, a, s, sa, float(azimuth), base)
+                               for v, a, s, sa in zip(view, view_azimuth, solar, solar_azimuth)]).T
         if self.vegetation_model != 'crown' or self.thermal_crown_geometry == 'legacy':
             return super().canopy_proportions(vza, vaa, sza, saa, density,
                                                crown_height, row_azimuth, row_geometry)
@@ -641,7 +659,8 @@ class Urban_Veg(CanopyGeometry):
         # It does not depend on the view direction: computed once per sun position and canopy.
         key = (self.vegetation_model, self.thermal_crown_geometry, str(self.thermal_hotspot_inner),
                str(self.thermal_hotspot_outer), str(getattr(self, 'crown_base', None)), tuple(self.row_shape),
-               tuple(np.asarray(forestshape, float)), float(self.sza), float(self.saa), tuple(self.coverage_grid))
+               self.canopy_fraction_model, tuple(np.asarray(forestshape, float)), float(self.sza), float(self.saa),
+               tuple(self.coverage_grid))
         if key not in _COVERAGE_CACHE:
             hz, ha = np.meshgrid((np.arange(self.coverage_grid[0]) + 0.5) * 90.0 / self.coverage_grid[0],
                                  np.arange(self.coverage_grid[1]) * 360.0 / self.coverage_grid[1])
@@ -1036,14 +1055,23 @@ class Urban_Veg(CanopyGeometry):
         return np.asarray(emissivity_ )
 
     def _canopy_scatter(self, kangle):
-        """Leaf-source canopy scattering over the visible street, split by building shadow."""
+        """Canopy scattering over the visible street, split by building shadow.
+
+        Returns street sunlit/shaded (soil-source terms; zero for the leaf-source closure) and leaf sunlit/shaded.
+        """
         sunlit_view, shaded_view = self._street_view
         lai, std, rcr, hcr = self.forestshape[:4]
-        scat = canopy_scatter(self.vegetation_model, lai, self.Eveg, self.Estreat,
-                              np.asarray([self.vza_[kangle]]), np.asarray([self.sza]), std, hcr, rcr)[:, 0]
+        angles = (np.asarray([self.vza_[kangle]]), np.asarray([self.sza]))
+        if self.canopy_scatter_model is None:
+            scat = canopy_scatter(self.vegetation_model, lai, self.Eveg, self.Estreat, *angles, std, hcr, rcr)[:, 0]
+        else:
+            scat = self.canopy_scatter_model(self.vegetation_model, lai, self.Eveg, self.Estreat, *angles, std, hcr, rcr,
+                                             self.vaa_[kangle], self.saa, tuple(self.row_shape))[:, 0]
+        street_sunlit = sunlit_view * scat[0]
+        street_shaded = sunlit_view * scat[1] + shaded_view * (scat[0] + scat[1])
         leaf_sunlit = sunlit_view * scat[2]
         leaf_shaded = sunlit_view * scat[3] + shaded_view * (scat[2] + scat[3])
-        return leaf_sunlit, leaf_shaded
+        return street_sunlit, street_shaded, leaf_sunlit, leaf_shaded
 
     def calculate_effective_component_emissivity(self,ifP = 0):
         emissivity_ = []
@@ -1051,7 +1079,7 @@ class Urban_Veg(CanopyGeometry):
             direct = np.asarray(self.calculate_direct_emissivity(kangle,2), dtype=float)
             scatter = np.asarray(self.calculate_scattering_emissivity(kangle,2), dtype=float)
             canopy = np.zeros_like(direct)
-            canopy[6], canopy[7] = self._canopy_scatter(kangle)
+            canopy[2], canopy[3], canopy[6], canopy[7] = self._canopy_scatter(kangle)
             budget = max(0.0, 1.0 - float(np.sum(direct + scatter)))
             if canopy.sum() > budget:
                 canopy *= budget / canopy.sum()

@@ -1,0 +1,101 @@
+{
+  "source_url": "https://github.com/bianzj/tirt/tree/master",
+  "commit": "86c3829a91ce4ccc4ff1c650b0b77cda4f316582",
+  "source_commit_date": "2026-10-11",
+  "report_date": "2026-10-24",
+  "scenes": 11,
+  "statistical_records": 696,
+  "recomputed": false,
+  "files": [
+    {
+      "source": "README.md",
+      "file": "source_README.md",
+      "sha256": "2eb8e98dfedf02e68d239a82e2172be77f3c19ffcc75ab65a5e4f5a8b6fad577",
+      "git_blob": "241ea1bfd3cb32840c000e4a18edae70cd3db058"
+    },
+    {
+      "source": "benchmark/streamsim/README.md",
+      "file": "source_benchmark_README.md",
+      "sha256": "250889fbe6acef830df0566732d1639a38da4d1b2b67ebf347922b6f367158aa",
+      "git_blob": "c68face928ae9ae3b935605d64e0c908353b4c1a"
+    },
+    {
+      "source": "benchmark/streamsim/overview_plot.py",
+      "file": "source_overview_plot.py",
+      "sha256": "3db58ccc4d946878711701c6f2a46adc7cc23129d0a200572ecc1d850527bf53",
+      "git_blob": "e3e4c1c182c2236082dcc27a06b5c8e4f850ad35"
+    },
+    {
+      "source": "docs/validation/overview.csv",
+      "file": "overview.csv",
+      "sha256": "0b536b6c0d20db71ea6f9589c8738fa4aa1edd06724a1d56d122b210faaae07e",
+      "git_blob": "df3376129b37bd12cce1a6b1363c2f60c9820759"
+    },
+    {
+      "source": "docs/validation/01_T1_plane_bare.png",
+      "file": "01_T1_plane_bare.png",
+      "sha256": "0c19fc2c65b4a87e2a4a8e6752fd49c6242353d45d483f08cb5052ae6cc51f4a",
+      "git_blob": "ecd1f70a5612f1950f512ea8239a924c6500a2c9"
+    },
+    {
+      "source": "docs/validation/02_T2_plane_hom.png",
+      "file": "02_T2_plane_hom.png",
+      "sha256": "548b6f1cfcccc0213e132491e23a5948227fc77b4b4a1a5e30cb19eb3aa4c65f",
+      "git_blob": "f517bde7bc50dfcf9ec91a5cf9b258d9423ba753"
+    },
+    {
+      "source": "docs/validation/03_T3_plane_crown_leaf0.9.png",
+      "file": "03_T3_plane_crown_leaf0.9.png",
+      "sha256": "d2de61737435d63ec4e60f47b49ddd29b777e43ecd3baee1e3e7e1de8db3234c",
+      "git_blob": "3a136487116bd8f94171dbb4ba3bf06359cf85ac"
+    },
+    {
+      "source": "docs/validation/04_T3_plane_crown_leaf0.15.png",
+      "file": "04_T3_plane_crown_leaf0.15.png",
+      "sha256": "1a07c659989c222c59b34abde89de29fbee7b8cefe4fb221ac495b8ce8ab91f5",
+      "git_blob": "c74fb5aa87b78038dfd1282f06077c209c74f2ff"
+    },
+    {
+      "source": "docs/validation/05_T5_row_az0.png",
+      "file": "05_T5_row_az0.png",
+      "sha256": "2a64e90b344850c72e38133a77d04942e27f5b88bc6aee576a2bc65e175c3050",
+      "git_blob": "5adc84c7e37d111303ee4d0ca4d5d77b902bac10"
+    },
+    {
+      "source": "docs/validation/06_T5_row_az90.png",
+      "file": "06_T5_row_az90.png",
+      "sha256": "e536d9fecbde27186b63a6cb245f6ddcbcaf063935f2ee1408f0635ebfa4c7df",
+      "git_blob": "a26bed8514dff7109749f91fb4dd90b5c47e4fe5"
+    },
+    {
+      "source": "docs/validation/07_S1_slope_hom.png",
+      "file": "07_S1_slope_hom.png",
+      "sha256": "2a27766d4890f514bada7f0bbf8662f3388bd44b8528151b0f2752474e4ad7af",
+      "git_blob": "266c686149c4da92d7124873596935027f204a7c"
+    },
+    {
+      "source": "docs/validation/08_S1_slope_crown.png",
+      "file": "08_S1_slope_crown.png",
+      "sha256": "aee8ed4703e3a1c33b1f1de1c7baece57ad08733cc2bf518c6ef1cd5f1c3597b",
+      "git_blob": "2427e2807149de2aa484d216f251bb33d79b2101"
+    },
+    {
+      "source": "docs/validation/09_TV_terrain_crown.png",
+      "file": "09_TV_terrain_crown.png",
+      "sha256": "4a0a8d29c435fec7f48aa6185b3f3ac3c893a736fce558e2f302d453ba146cf0",
+      "git_blob": "aeee32ef9ed20d95a0620889c05198112f10d418"
+    },
+    {
+      "source": "docs/validation/10_T4_urban_bare.png",
+      "file": "10_T4_urban_bare.png",
+      "sha256": "9bb7f9aeae9c6443ed81831bcae6e3e5c4d9b6c17a9690c33e549d79a95dfac9",
+      "git_blob": "3f068b5323b5f874990897b47f0c0d4ca301c251"
+    },
+    {
+      "source": "docs/validation/11_UV_urban_crown.png",
+      "file": "11_UV_urban_crown.png",
+      "sha256": "617098aea1b84abec71f38eb971cdd3feb61e1c48b87eb45f8b40bc4a6d60b33",
+      "git_blob": "96303004791e3c8ebb13969a89ec4de807a73edc"
+    }
+  ]
+}

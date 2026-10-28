@@ -1,11 +1,10 @@
-# observation wavelengths in micrometres
-0.45
-0.55
-0.65
-0.70
-0.86
-1.65
-2.20
-3.90
-10.50
-12.00
+# TIRTEB band table: one row per property, one value per band (separated by ;)
+# "-" = shortwave value from the PROSPECT/BSM (or measured) spectrum; thermal default
+# Thermal bands (>= 2.5 um) use Kirchhoff emissivity: leaf 1 - rho - tau, other surfaces 1 - rho
+wavelength_um      0.45;0.55;0.65;0.70;0.86;1.65;2.20;3.90;10.50;12.00
+leaf_reflectance   -;-;-;-;-;-;-;0.015;0.015;0.015
+leaf_transmittance -;-;-;-;-;-;-;0.0;0.0;0.0
+soil_reflectance   -;-;-;-;-;-;-;0.045;0.045;0.045
+street_reflectance -;-;-;-;-;-;-;0.045;0.045;0.045
+wall_reflectance   -;-;-;-;-;-;-;0.07;0.07;0.07
+roof_reflectance   -;-;-;-;-;-;-;0.05;0.05;0.05

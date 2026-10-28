@@ -1,12 +1,21 @@
 import re
 import csv
+import warnings
 from pathlib import Path
 
 import numpy as np
 
+from .inputio import BAND_PROPERTIES, band_cells, read_band_cells
 from .leafopt import fluspect
-from .soilopt import bsm, soil_tir_emissivity
+from .soilopt import bsm, soil_tir_emissivity, volumetric_water
 from .structs import DefinedStructure
+from .tirteb_tirt import shortwave_optics
+
+# Thermal-band reflectances used when a band-table cell is blank (same defaults as TIRT).
+TIR_DEFAULTS = {
+    "leaf_reflectance": 0.015, "leaf_transmittance": 0.0, "soil_reflectance": 0.045,
+    "street_reflectance": 0.045, "wall_reflectance": 0.07, "roof_reflectance": 0.05,
+}
 
 
 LAND_COVER_TYPES = {
@@ -72,6 +81,55 @@ VEGETATION_MODELS = {
 }
 
 
+INPUT_KEYS = frozenset("""
+meteo esun_file solar_direct_file esky_file solar_sky_file optical_coefficients_file optipar_file
+case_name cases_dir case_result_dir surface_model surface_option vegetation_model vegetation_type
+terrain_type terrain_slope terrain_aspect slope_angle slope_aspect terrain_radius terrain_height terrain_density
+building_density building_length building_width building_height building_azimuth
+urban_roughness_length urban_canyon_roughness_ratio urban_canyon_min_ratio urban_leaf_wind_decay urban_leaf_boundary_factor
+aero_cd aero_cd1 aero_psicor aero_cssoil aero_rbs max_aerodynamic_resistance
+z ea ca oa shortwave_diffuse_fraction shortwave_enforce_solar_limit min_wind_speed
+lai height hspot leaf_width
+row_width row_blank row_height row_azimuth ridge_width ridge_blank ridge_height ridge_azimuth
+crown_rad_a crown_rad_b crown_height crown_density
+vegetation_spectrum_source vegetation_spectral_source vegetation_spectrum_file vegetation_spectral_file leaf_spectrum_file
+soil_spectrum_source soil_spectral_source soil_spectrum_file soil_spectral_file
+hapke_enable hapke_k hapke_optical_enable hapke_thermal_enable
+urban_spectrum_source urban_spectral_source urban_spectrum_file urban_spectral_file
+urban_roof_spectrum_file roof_spectrum_file urban_wall_spectrum_file wall_spectrum_file
+urban_street_spectrum_file street_spectrum_file
+urban_reflectance_roof urban_reflectance_wall urban_reflectance_street
+urban_absorption_roof urban_absorption_wall urban_absorption_street
+cab cw cdm cs n bsm_brightness bsm_latitude bsm_longitude soil_brightness soil_latitude soil_longitude
+vcmax ballberry_m m leaf_type tparam1 tparam2 tparam3 tparam4 tparam5 rdparam tyear beta knpqs qls kv stressfactor
+stomatal_method stomatal_g0
+soil_rss rss soil_rss_method soil_cs cs_soil soil_rhos rhos soil_lambda soil_lambdas soil_rbs rbs
+soil_moisture smc satwater soil_satwater
+soil_tir_water_effect soil_tir_emissivity_wet soil_tir_moisture_dry soil_tir_moisture_wet
+urban_rss urban_cs urban_rhos urban_lambda urban_rbs urban_wall_thickness urban_wall_layers
+urban_internal_temperature_c urban_wall_diffuse_factor
+broadband_leaf_emissivity broadband_leaf_transmittance broadband_soil_emissivity
+broadband_urban_emissivity_roof broadband_urban_emissivity_wall broadband_urban_emissivity_street
+year utc_offset_hours utc_offset start_time end_time latitude longitude dem max_iter max_stability_iter dtime
+soil_heat_method urban_heat_method soil_heat_fraction urban_heat_fraction temperature_method soil_temperature_method
+output_intermediate observation_time_mode observation_times observation_hours
+direction_source observation_direction_mode directions_file vza vaa observation_vza observation_vaa
+spectral_source observation_spectral_mode spectrals_file wavelengths observation_wavelengths
+leaf_reflectance leaf_transmittance soil_reflectance street_reflectance wall_reflectance roof_reflectance
+observation_quantity longwave_quantity
+""".split())
+RENAMED_KEYS = {
+    "crown_radius": "crown_rad_a (horizontal crown radius, m)",
+    "crown_width": "crown_rad_a (horizontal crown radius, m) and crown_rad_b (vertical semiaxis, m)",
+}
+UNSUPPORTED_KEYS = ("geometry_mode", "geometry_file", "geometry_pair_mode", "principal_vza")
+SLOPE_ALIASES = {"slope_angle": "terrain_slope", "slope_aspect": "terrain_aspect"}
+
+
+def _unsupported(key):
+    return key.startswith(UNSUPPORTED_KEYS)
+
+
 def read_input(path):
     """Read grouped input.csv and return a flat key/value configuration."""
     values = {}
@@ -89,8 +147,31 @@ def read_input(path):
                 values[key] = value
             elif len(fields) >= 2 and fields[1]:
                 values[fields[0].lower()] = fields[1]
+    for key in values:
+        if key not in INPUT_KEYS and key not in RENAMED_KEYS and not _unsupported(key):
+            warnings.warn(f"{path}: unknown or unused TIRTEB parameter '{key}' is ignored", stacklevel=2)
     values["_sections"] = sections
     return values
+
+
+def _check_input_keys(overrides):
+    """Reject renamed/unsupported keys and resolve the TiRT slope names."""
+    for key, replacement in RENAMED_KEYS.items():
+        if key in overrides:
+            raise ValueError(f"{key} is no longer accepted; use {replacement}. "
+                             "crown_height is now the crown-base height above ground (m), as in TiRT")
+    for key in overrides:
+        if _unsupported(key):
+            raise ValueError(f"{key} is a TiRT observation-geometry parameter and is not supported by TIRTEB; "
+                             "use direction_source with vza/vaa or directions_file")
+    for alias, key in SLOPE_ALIASES.items():
+        value = _input_value(overrides, alias)
+        if value is None:
+            continue
+        current = _input_value(overrides, key)
+        if current is not None and float(current) != float(value):
+            raise ValueError(f"{alias}={value} conflicts with {key}={current}; give only one of them")
+        overrides[key] = value
 
 
 def _input_number(overrides, key, default):
@@ -117,32 +198,6 @@ def _input_value(overrides, *keys):
         if key in overrides and overrides[key] != "":
             return overrides[key]
     return None
-
-
-def _number_list(value):
-    if value in (None, ""):
-        return []
-    values = []
-    for item in re.split(r"[;,\s]+", str(value)):
-        if item.strip():
-            values.append(float(item))
-    return values
-
-
-def _mean_override(value, default):
-    values = _number_list(value)
-    return float(np.mean(values)) if values else float(default)
-
-
-def _thermal_band_values(overrides, key, wavelengths, default):
-    values = _number_list(_input_value(overrides, key))
-    if not values:
-        return [float(default)] * len(wavelengths)
-    if len(values) == 1:
-        return values * len(wavelengths)
-    if len(values) != len(wavelengths):
-        raise ValueError(f"{key} must contain one value or one value per thermal wavelength")
-    return values
 
 
 def _land_cover_code(value):
@@ -201,14 +256,10 @@ def _apply_input_overrides(canopy, leaf, leafbio, soil_optical, soil_thermal, ae
 
     leaf_keys = {
         0: ("cab",), 1: ("cw",), 2: ("cdm",), 3: ("cs",), 4: ("n",),
-        5: ("leaf_reflectance", "leaf_reflectance_tir"),
-        6: ("leaf_transmittance", "leaf_transmittance_tir"),
     }
     for index, keys in leaf_keys.items():
         value = _input_value(overrides, *keys)
         if value is not None:
-            if index in (5, 6):
-                value = _mean_override(value, leaf[index])
             leaf[index] = float(value)
 
     leafbio_keys = {
@@ -229,13 +280,10 @@ def _apply_input_overrides(canopy, leaf, leafbio, soil_optical, soil_thermal, ae
         0: ("soil_brightness", "bsm_brightness"),
         1: ("soil_latitude", "bsm_latitude"),
         2: ("soil_longitude", "bsm_longitude"),
-        3: ("soil_reflectance", "soil_reflectance_tir"),
     }
     for index, keys in soil_optical_keys.items():
         value = _input_value(overrides, *keys)
         if value is not None:
-            if index == 3:
-                value = _mean_override(value, soil_optical[index])
             soil_optical[index] = float(value)
 
     soil_keys = {
@@ -263,7 +311,7 @@ def _apply_input_overrides(canopy, leaf, leafbio, soil_optical, soil_thermal, ae
 
     meta_keys = {
         0: ("z",), 2: ("ea",), 3: ("ca",), 4: ("oa",),
-        5: ("soil_temperature_c",), 8: ("satwater",),
+        5: ("soil_temperature_c",), 6: ("satwater", "soil_satwater"), 7: ("dtime",),
     }
     for index, keys in meta_keys.items():
         value = _input_value(overrides, *keys)
@@ -318,7 +366,7 @@ def _read_measured_spectrum(path, wavelengths, value_column=1):
             wavelength *= 1000.0
         samples.append((wavelength, value))
     if len(samples) < 2:
-        raise ValueError(f"测量光谱文件至少需要两行波长和数值: {path}")
+        raise ValueError(f"Measured spectrum file needs at least two rows of wavelength and value: {path}")
     samples.sort()
     x = np.asarray([item[0] for item in samples], dtype=float)
     y = np.asarray([item[1] for item in samples], dtype=float)
@@ -361,6 +409,7 @@ def _read_measured_columns(path, wavelengths, columns):
 def read_defined(path=None, overrides=None):
     """Build model settings from input.csv; the legacy defined file is not required."""
     overrides = dict(overrides or {})
+    _check_input_keys(overrides)
     input_base = Path(str(overrides.get("_input_base", ""))) if overrides.get("_input_base") else None
     if input_base is None:
         input_base = Path(path).resolve().parent if path else Path.cwd()
@@ -382,8 +431,6 @@ def read_defined(path=None, overrides=None):
         _input_number(overrides, "cdm", 0.0036),
         _input_number(overrides, "cs", 0.0),
         _input_number(overrides, "n", 1.86),
-        _mean_override(_input_value(overrides, "leaf_reflectance", "leaf_reflectance_tir"), 0.015),
-        _mean_override(_input_value(overrides, "leaf_transmittance", "leaf_transmittance_tir"), 0.01),
     ]
     leafbio = [
         _input_number(overrides, "vcmax", 80.0), _input_number(overrides, "ballberry_m", 9.0),
@@ -399,7 +446,6 @@ def read_defined(path=None, overrides=None):
         _input_number(overrides, "bsm_brightness", 0.25),
         _input_number(overrides, "bsm_latitude", 25.0),
         _input_number(overrides, "bsm_longitude", 45.0),
-        _mean_override(_input_value(overrides, "soil_reflectance", "soil_reflectance_tir"), 0.045),
     ]
     soil_thermal = [
         _input_number(overrides, "soil_rss", 200.0), _input_number(overrides, "soil_cs", 1180.0),
@@ -423,13 +469,21 @@ def read_defined(path=None, overrides=None):
     surface_model = _apply_input_overrides(
         canopy, leaf, leafbio, soil_optical, soil_thermal, aero, meta, overrides,
     )
+    # Soil water has one unit throughout the model: volume fraction (m3 m-3),
+    # with 0.25 as the BSM reference capacity. Convert legacy percent input
+    # once, on entry, so no consumer has to guess the scale.
+    soil_thermal[5] = volumetric_water(soil_thermal[5])
+    soil_thermal[7] = volumetric_water(soil_thermal[7])
+    meta[1] = soil_thermal[5]
+    meta[6] = soil_thermal[7]
     vegetation_model = _vegetation_model(
         _input_value(overrides, "vegetation_model", "vegetation_type") or "hom"
     )
     if vegetation_model == "crown":
         canopy[1] = _input_number(overrides, "crown_density", canopy[1])
-        canopy[2] = _input_number(overrides, "crown_height", canopy[2])
-        canopy[3] = _input_number(overrides, "crown_width", canopy[3])
+        canopy[2] = _input_number(overrides, "crown_rad_b", canopy[2])
+        canopy[3] = _input_number(overrides, "crown_rad_a", canopy[3])
+    crown_base_height = _input_number(overrides, "crown_height", canopy[2])
     if surface_model == "urban" and vegetation_model == "bare":
         canopy[0] = 0.0
 
@@ -484,7 +538,7 @@ def read_defined(path=None, overrides=None):
     if vegetation_source in {"measured", "measurement", "file", "txt"}:
         path = _input_value(overrides or {}, "vegetation_spectrum_file", "vegetation_spectral_file", "leaf_spectrum_file")
         if not path:
-            raise ValueError("vegetation_spectrum_source=measured 时必须设置 vegetation_spectrum_file")
+            raise ValueError("vegetation_spectrum_file must be set when vegetation_spectrum_source=measured")
         spectrum_path = Path(str(path))
         if not spectrum_path.is_absolute():
             spectrum_path = input_base / spectrum_path
@@ -498,7 +552,7 @@ def read_defined(path=None, overrides=None):
     if soil_source in {"measured", "measurement", "file", "txt"}:
         path = _input_value(overrides or {}, "soil_spectrum_file", "soil_spectral_file")
         if not path:
-            raise ValueError("soil_spectrum_source=measured 时必须设置 soil_spectrum_file")
+            raise ValueError("soil_spectrum_file must be set when soil_spectrum_source=measured")
         spectrum_path = Path(str(path))
         if not spectrum_path.is_absolute():
             spectrum_path = input_base / spectrum_path
@@ -509,16 +563,16 @@ def read_defined(path=None, overrides=None):
     ).strip().lower()
     urban_refl_roof_value = _input_number(overrides or {}, "urban_reflectance_roof", 0.05)
     urban_refl_wall_value = _input_number(overrides or {}, "urban_reflectance_wall", 0.08)
-    urban_refl_street_value = _input_number(overrides or {}, "urban_reflectance_street", soil_optical[3])
+    urban_refl_street_value = _input_number(overrides or {}, "urban_reflectance_street", 0.045)
     urban_refl_roof = [urban_refl_roof_value] * len(wavelengths)
     urban_refl_wall = [urban_refl_wall_value] * len(wavelengths)
     urban_refl_street = [urban_refl_street_value] * len(wavelengths)
     urban_abs_roof_value = _input_number(overrides or {}, "urban_absorption_roof", 1.0 - urban_refl_roof_value)
     urban_abs_wall_value = _input_number(overrides or {}, "urban_absorption_wall", 1.0 - urban_refl_wall_value)
     urban_abs_street_value = _input_number(overrides or {}, "urban_absorption_street", 1.0 - urban_refl_street_value)
-    urban_eps_roof = [_input_number(overrides or {}, "urban_emissivity_roof", 0.95)] * len(wavelengths)
-    urban_eps_wall = [_input_number(overrides or {}, "urban_emissivity_wall", 0.92)] * len(wavelengths)
-    urban_eps_street = [_input_number(overrides or {}, "urban_emissivity_street", 0.955)] * len(wavelengths)
+    urban_eps_roof = [1.0 - TIR_DEFAULTS["roof_reflectance"]] * len(wavelengths)
+    urban_eps_wall = [1.0 - TIR_DEFAULTS["wall_reflectance"]] * len(wavelengths)
+    urban_eps_street = [1.0 - TIR_DEFAULTS["street_reflectance"]] * len(wavelengths)
     roof_file = _input_value(overrides or {}, "urban_roof_spectrum_file", "roof_spectrum_file")
     if roof_file:
         roof_path = Path(str(roof_file))
@@ -553,14 +607,6 @@ def read_defined(path=None, overrides=None):
         urban_eps_wall = urban_columns[5]
         urban_eps_street = urban_columns[6]
 
-    observed_wavelengths = _number_list(_input_value(overrides or {}, "observation_wavelengths", "wavelengths"))
-    tir_wavelengths = [wavelength for wavelength in observed_wavelengths if wavelength >= 2.5]
-    if not tir_wavelengths:
-        tir_wavelengths = [10.5]
-    leaf_tir_reflectance = _thermal_band_values(overrides or {}, "leaf_reflectance", tir_wavelengths, leaf[5])
-    leaf_tir_transmittance = _thermal_band_values(overrides or {}, "leaf_transmittance", tir_wavelengths, leaf[6])
-    soil_tir_reflectance = _thermal_band_values(overrides or {}, "soil_reflectance", tir_wavelengths, soil_optical[3])
-
     raw_surface = str(_input_value(overrides or {}, "surface_model", "surface_option") or "plane").strip().lower().replace("-", "_")
     terrain_type = 1 if raw_surface == "slope" else int(round(_input_number(overrides or {}, "terrain_type", 1.0)))
     terrain_slope = _input_number(overrides or {}, "terrain_slope", 0.0)
@@ -569,14 +615,81 @@ def read_defined(path=None, overrides=None):
     terrain_height = _input_number(overrides or {}, "terrain_height", 20.0)
     terrain_density = _input_number(overrides or {}, "terrain_density", 0.001)
     soil_water_enabled = int(round(_input_number(overrides or {}, "soil_tir_water_effect", 0.0)))
-    soil_emissivity_value = soil_tir_emissivity(
-        soil_thermal[5],
+    soil_water = dict(
         enabled=soil_water_enabled,
-        dry_moisture=_input_number(overrides or {}, "soil_tir_moisture_dry", 0.05),
-        wet_moisture=_input_number(overrides or {}, "soil_tir_moisture_wet", soil_thermal[7]),
-        dry_emissivity=_input_number(overrides or {}, "soil_tir_emissivity_dry", 1.0 - soil_optical[3]),
+        dry_moisture=volumetric_water(
+            _input_number(overrides or {}, "soil_tir_moisture_dry", 0.05)),
+        wet_moisture=volumetric_water(
+            _input_number(overrides or {}, "soil_tir_moisture_wet", soil_thermal[7])),
         wet_emissivity=_input_number(overrides or {}, "soil_tir_emissivity_wet", 0.99),
     )
+
+    band_table = _observation_band_table(overrides or {}, input_base)
+    observed_wavelengths = band_table["wavelengths"]
+    urban_eps = {"roof_reflectance": urban_eps_roof, "wall_reflectance": urban_eps_wall,
+                 "street_reflectance": urban_eps_street}
+
+    def thermal_band(index, wavelength):
+        band = {}
+        for key in BAND_PROPERTIES:
+            cell = band_table[key][index] if index is not None else None
+            if cell is None:
+                cell = (1.0 - _grid_value(urban_eps[key], wavelengths, wavelength)) if key in urban_eps else TIR_DEFAULTS[key]
+            band[key] = float(cell)
+        # Dry-soil emissivity comes from the table; soil water raises it toward the wet value.
+        band["soil_reflectance"] = 1.0 - soil_tir_emissivity(
+            soil_thermal[5], dry_emissivity=1.0 - band["soil_reflectance"], **soil_water)
+        return band
+
+    observation_bands = [thermal_band(index, wavelength) if wavelength >= 2.5 else None
+                         for index, wavelength in enumerate(observed_wavelengths)]
+    # A fixed 10.5-um gray reference is an explicit approximation for the
+    # broadband energy budget. Observation rows never determine this operator.
+    gray = thermal_band(None, 10.5)
+
+    def broadband(key, default):
+        value = float(_input_number(overrides, key, default))
+        if not np.isfinite(value) or not 0.0 <= value <= 1.0:
+            raise ValueError(f"{key} must be finite and between 0 and 1")
+        return value
+
+    leaf_tau_tir = broadband("broadband_leaf_transmittance", gray["leaf_transmittance"])
+    leaf_eps = broadband("broadband_leaf_emissivity", 1.0 - gray["leaf_reflectance"] - gray["leaf_transmittance"])
+    if leaf_eps + leaf_tau_tir > 1.0:
+        raise ValueError("broadband_leaf_emissivity + broadband_leaf_transmittance must not exceed 1")
+    leaf_rho_tir = 1.0 - leaf_eps - leaf_tau_tir
+    soil_eps = broadband("broadband_soil_emissivity", 1.0 - gray["soil_reflectance"])
+    soil_rho_tir = 1.0 - soil_eps
+    urban_emissivity = {component: broadband(f"broadband_urban_emissivity_{component}", 1.0 - gray[f"{component}_reflectance"])
+                        for component in ("roof", "wall", "street")}
+
+    soil_rss_method = str(_input_value(overrides, "soil_rss_method") or
+                          ("constant" if _input_value(overrides, "soil_rss", "rss") is not None else "sellers")).strip().lower()
+    if soil_rss_method not in {"sellers", "constant"}:
+        raise ValueError("soil_rss_method must be sellers or constant")
+    if not np.isfinite(soil_thermal[7]) or soil_thermal[7] <= 0.0:
+        raise ValueError("satwater must be positive and finite")
+
+    model_spectra = {
+        "wavelengths": wavelengths, "leaf_reflectance_spectrum": leaf_refl,
+        "leaf_transmittance_spectrum": leaf_trans, "soil_reflectance_spectrum": soil_refl,
+        "urban_reflectance_roof_spectrum": urban_refl_roof, "urban_reflectance_wall_spectrum": urban_refl_wall,
+        "urban_reflectance_street_spectrum": urban_refl_street,
+        "leaf_reflectance": leaf_rho_tir, "leaf_transmittance": leaf_tau_tir, "soil_reflectance": soil_rho_tir,
+        "urban_reflectance_roof": urban_refl_roof_value, "urban_reflectance_wall": urban_refl_wall_value,
+        "urban_reflectance_street": urban_refl_street_value,
+    }
+    for index, wavelength in enumerate(observed_wavelengths):
+        if observation_bands[index] is None:
+            modelled = shortwave_optics(model_spectra, wavelength)
+            observation_bands[index] = {
+                key: float(modelled[key] if band_table[key][index] is None else band_table[key][index])
+                for key in BAND_PROPERTIES
+            }
+        band = observation_bands[index]
+        if band["leaf_reflectance"] + band["leaf_transmittance"] > 1.0 + 1.0e-12:
+            raise ValueError(f"leaf_reflectance + leaf_transmittance must not exceed 1 at {wavelength:g} um")
+
     legacy_hapke = max(
         _input_number(overrides or {}, "hapke_optical_enable", 0.0),
         _input_number(overrides or {}, "hapke_thermal_enable", 0.0),
@@ -588,17 +701,15 @@ def read_defined(path=None, overrides=None):
         "surface_model": surface_model or "plane",
         "surface_option": surface_model or "plane",
         "vegetation_model": vegetation_model,
-        "thermal_crown_geometry": str(_input_value(overrides or {}, "thermal_crown_geometry") or "parametric").strip().lower(),
-        "thermal_hotspot_inner": _input_value(overrides or {}, "thermal_hotspot_inner"),
-        "thermal_hotspot_outer": _input_value(overrides or {}, "thermal_hotspot_outer"),
+        "canopy_closure": "standard",
         "lai": canopy[0], "stand_density": canopy[1],
         "height": canopy[2], "width": canopy[3],
         "gleaf": canopy[4], "lidfa": canopy[5],
         "lidfb": canopy[6], "hspot": canopy[7],
         "leaf_width": canopy[8],
-        "leaf_reflectance": leaf[5],
-        "leaf_transmittance": leaf[6],
-        "leaf_emissivity": 1.0 - leaf[5] - leaf[6],
+        "leaf_reflectance": leaf_rho_tir,
+        "leaf_transmittance": leaf_tau_tir,
+        "leaf_emissivity": leaf_eps,
         "vcmax": leafbio[0], "ballberry_m": leafbio[1],
         "leaf_type": leafbio[2], "kv": leafbio[4],
         "rdparam": leafbio[8], "tparam": leafbio[3:8],
@@ -607,8 +718,8 @@ def read_defined(path=None, overrides=None):
         "stressfactor": leafbio[14],
         "stomatal_method": str(_input_value(overrides or {}, "stomatal_method") or "farquhar").strip().lower(),
         "stomatal_g0": _input_number(overrides or {}, "stomatal_g0", 0.01),
-        "soil_reflectance": 1.0 - soil_emissivity_value if soil_water_enabled == 1 else soil_optical[3],
-        "soil_emissivity": soil_emissivity_value,
+        "soil_reflectance": soil_rho_tir,
+        "soil_emissivity": soil_eps,
         "hapke_enable": int(round(_input_number(overrides or {}, "hapke_enable", legacy_hapke))),
         "hapke_K": _input_number(overrides or {}, "hapke_k", 1.0),
         "urban_spectrum_source": urban_source,
@@ -623,40 +734,41 @@ def read_defined(path=None, overrides=None):
         "urban_emissivity_wall_spectrum": urban_eps_wall,
         "urban_emissivity_street_spectrum": urban_eps_street,
         "soil_tir_water_effect": soil_water_enabled,
-        "soil_tir_emissivity_dry": _input_number(overrides or {}, "soil_tir_emissivity_dry", 1.0 - soil_optical[3]),
-        "soil_tir_emissivity_wet": _input_number(overrides or {}, "soil_tir_emissivity_wet", 0.99),
-        "soil_tir_moisture_dry": _input_number(overrides or {}, "soil_tir_moisture_dry", 0.05),
-        "soil_tir_moisture_wet": _input_number(overrides or {}, "soil_tir_moisture_wet", soil_thermal[7]),
+        "soil_tir_emissivity_wet": soil_water["wet_emissivity"],
+        "soil_tir_moisture_dry": soil_water["dry_moisture"],
+        "soil_tir_moisture_wet": soil_water["wet_moisture"],
         "urban_rss": _input_number(overrides or {}, "urban_rss", 3662.8562),
         "urban_cs": _input_number(overrides or {}, "urban_cs", 1000000.0),
         "urban_rhos": _input_number(overrides or {}, "urban_rhos", 1800.0),
         "urban_lambda": _input_number(overrides or {}, "urban_lambda", 1.5),
         "urban_rbs": _input_number(overrides or {}, "urban_rbs", 10.0),
         "urban_temperature_c": _input_number(overrides or {}, "urban_temperature_c", 20.0),
-        "urban_depth_step": _input_number(overrides or {}, "urban_depth_step", 0.05),
         "urban_wall_thickness": max(_input_number(overrides or {}, "urban_wall_thickness", 0.5), 1.0e-3),
         "urban_wall_layers": max(1, int(round(_input_number(overrides or {}, "urban_wall_layers", 3)))),
         "urban_internal_temperature_c": _input_number(overrides or {}, "urban_internal_temperature_c", 24.0),
         "urban_wall_diffuse_factor": min(max(_input_number(overrides or {}, "urban_wall_diffuse_factor", 0.5), 0.0), 1.0),
-        "urban_emissivity_roof": _input_number(overrides or {}, "urban_emissivity_roof", 0.95),
-        "urban_emissivity_wall": _input_number(overrides or {}, "urban_emissivity_wall", 0.92),
-        "urban_emissivity_street": _input_number(overrides or {}, "urban_emissivity_street", 0.955),
+        "urban_emissivity_roof": urban_emissivity["roof"],
+        "urban_emissivity_wall": urban_emissivity["wall"],
+        "urban_emissivity_street": urban_emissivity["street"],
         "urban_street_radiation_factor": _input_number(overrides or {}, "urban_street_radiation_factor", 1.0),
         "soil_rss": _input_number(overrides or {}, "soil_rss", soil_thermal[0]), "soil_cs": soil_thermal[1],
+        "soil_rss_method": soil_rss_method,
         "soil_rbs": soil_thermal[4],
         "soil_rhos": soil_thermal[2], "soil_lambda": soil_thermal[3],
         "soil_heat_method": str(_input_value(overrides or {}, "soil_heat_method") or "surface").strip().lower(),
         "urban_heat_method": str(_input_value(overrides or {}, "urban_heat_method") or "depth").strip().lower(),
         "temperature_method": str(_input_value(overrides or {}, "temperature_method") or "robust").strip().lower(),
+        "max_stability_iter": max(1, int(_input_number(overrides or {}, "max_stability_iter", 60))),
         "soil_heat_fraction": _input_number(overrides or {}, "soil_heat_fraction", 0.25),
         "urban_heat_fraction": _input_number(overrides or {}, "urban_heat_fraction", 0.4),
-        "soil_depth_step": _input_number(overrides or {}, "soil_depth_step", 0.05),
         "soil_temperature_method": str(_input_value(overrides or {}, "soil_temperature_method", "temperature_method") or "robust").strip().lower(),
-        "urban_temperature_method": str(_input_value(overrides or {}, "temperature_method") or "robust").strip().lower(),
-        "soil_moisture": min(max(float(soil_thermal[5]), 0.0), 0.45), "soil_temperature_c": meta[5],
-        "satwater": 0.45,
+        "urban_temperature_method": str(_input_value(overrides or {}, "urban_temperature_method", "temperature_method") or "robust").strip().lower(),
+        "soil_moisture": min(max(float(soil_thermal[5]), 0.0), soil_thermal[7]), "soil_temperature_c": meta[5],
+        "satwater": soil_thermal[7], "dtime": meta[7],
         "z": meta[0], "ea": meta[2], "ca": meta[3], "oa": meta[4],
-        "shortwave_diffuse_fraction": min(max(_input_number(overrides or {}, "shortwave_diffuse_fraction", -1.0), -1.0), 1.0),
+        "shortwave_diffuse_fraction": min(max(_input_number(overrides or {}, "shortwave_diffuse_fraction", 0.2), -1.0), 1.0),
+        "shortwave_enforce_solar_limit": int(_input_number(overrides or {}, "shortwave_enforce_solar_limit", 1)),
+        "min_wind_speed": max(_input_number(overrides or {}, "min_wind_speed", 0.05), 0.0),
         "aero_zo": aero[0], "aero_d": aero[1], "aero_rbc": aero[2],
         "aero_cr": aero[3], "aero_cd": aero[4], "aero_cd1": aero[5],
         "aero_psicor": aero[6], "aero_cssoil": aero[7],
@@ -673,29 +785,25 @@ def read_defined(path=None, overrides=None):
         "row_blank": _input_number(overrides or {}, "row_blank", _input_number(overrides or {}, "ridge_blank", canopy[3])),
         "row_height": _input_number(overrides or {}, "row_height", _input_number(overrides or {}, "ridge_height", canopy[2])),
         "row_azimuth": _input_number(overrides or {}, "row_azimuth", _input_number(overrides or {}, "ridge_azimuth", 0.0)),
-        "crown_radius": _input_number(overrides or {}, "crown_radius", 1.5),
-        "crown_height": _input_number(overrides or {}, "crown_height", canopy[2]),
-        "crown_width": _input_number(overrides or {}, "crown_width", canopy[3]),
+        "crown_base_height": crown_base_height,
         "crown_density": _input_number(overrides or {}, "crown_density", canopy[1]),
         "urban_density": _input_number(overrides or {}, "building_density", 0.0015),
         "urban_building_length": _input_number(overrides or {}, "building_length", 10.0),
         "urban_building_width": _input_number(overrides or {}, "building_width", 10.0),
         "urban_building_height": _input_number(overrides or {}, "building_height", 20.0),
         "urban_building_azimuth": _input_number(overrides or {}, "building_azimuth", 0.0),
-        "urban_vegetation_fraction": min(max(_input_number(overrides or {}, "urban_vegetation_fraction", 0.30), 0.0), 1.0),
         "urban_roughness_length": max(_input_number(overrides or {}, "urban_roughness_length", 0.15), 0.01),
         "urban_canyon_roughness_ratio": max(_input_number(overrides or {}, "urban_canyon_roughness_ratio", 0.05), 0.005),
         "urban_canyon_min_ratio": max(_input_number(overrides or {}, "urban_canyon_min_ratio", 1.25), 1.0),
         "urban_leaf_wind_decay": max(_input_number(overrides or {}, "urban_leaf_wind_decay", 0.5), 0.0),
         "urban_leaf_boundary_factor": max(_input_number(overrides or {}, "urban_leaf_boundary_factor", 70.0), 0.0),
+        "max_aerodynamic_resistance": _input_number(overrides or {}, "max_aerodynamic_resistance", 400.0),
         "wavelengths": wavelengths, "fesun": fesun, "fesky": fesky,
         "leaf_reflectance_spectrum": leaf_refl,
         "leaf_transmittance_spectrum": leaf_trans,
         "soil_reflectance_spectrum": soil_refl,
-        "tir_wavelengths": tir_wavelengths,
-        "leaf_reflectance_tir_spectrum": leaf_tir_reflectance,
-        "leaf_transmittance_tir_spectrum": leaf_tir_transmittance,
-        "soil_reflectance_tir_spectrum": soil_tir_reflectance,
+        "observation_wavelengths": list(observed_wavelengths),
+        "observation_bands": observation_bands,
     })
 
 
@@ -710,25 +818,25 @@ def read_meteo(path):
                 try:
                     values.append(float(token))
                 except ValueError as exc:
-                    raise ValueError(f"{path}:{line_number} 存在非数值字段") from exc
+                    raise ValueError(f"{path}:{line_number} contains a non-numeric field") from exc
         if values:
             rows.append(values)
     if len(rows) < 2:
-        raise ValueError("meteo.txt 数据不足")
+        raise ValueError("meteo.txt contains too little data")
 
     expected = int(round(rows[0][0]))
     data = []
     for row in rows[1:]:
         if len(row) < 7:
-            raise ValueError("meteo.txt 每行至少需要 7 列")
+            raise ValueError("Each meteo.txt row needs at least 7 columns")
         data.append({
             "time": row[0], "air_temperature_c": row[1],
             "vapor_pressure": row[2], "pressure": row[3],
-            "wind_speed": max(row[4], 0.2),
+            "wind_speed": row[4],
             "shortwave": row[5], "longwave": row[6],
         })
     if expected != len(data):
-        raise ValueError(f"meteo.txt 声明 {expected} 行，实际读取 {len(data)} 行")
+        raise ValueError(f"meteo.txt declares {expected} rows but {len(data)} rows were read")
     return data
 
 
@@ -745,33 +853,40 @@ def read_directions(path):
         try:
             vza, vaa = float(fields[0]), float(fields[1])
         except (IndexError, ValueError) as exc:
-            raise ValueError(f"{path}:{line_number} 观测方向必须包含 vza vaa 两个数值") from exc
+            raise ValueError(f"{path}:{line_number} a viewing direction must contain two numbers, vza and vaa") from exc
         if not 0.0 <= vza <= 180.0:
-            raise ValueError(f"{path}:{line_number} vza 必须在 0 到 180 度之间")
+            raise ValueError(f"{path}:{line_number} vza must be between 0 and 180 degrees")
         if not 0.0 <= vaa <= 360.0:
-            raise ValueError(f"{path}:{line_number} vaa 必须在 0 到 360 度之间")
+            raise ValueError(f"{path}:{line_number} vaa must be between 0 and 360 degrees")
         directions.append((vza, vaa))
     if not directions:
-        raise ValueError(f"{path} 没有有效的观测方向")
+        raise ValueError(f"{path} contains no valid viewing directions")
     return tuple(directions)
 
 
-def read_spectrals(path):
-    """Read observation wavelengths in micrometres, one value per line."""
-    wavelengths = []
-    for line_number, line in enumerate(
-        Path(path).read_text(encoding="utf-8-sig").splitlines(), 1
-    ):
-        text = line.strip()
-        if not text or text.startswith("#"):
-            continue
-        try:
-            wavelength = float(re.split(r"[\s,;]+", text)[0])
-        except (IndexError, ValueError) as exc:
-            raise ValueError(f"{path}:{line_number} 波段必须是微米数值") from exc
-        if wavelength <= 0.0:
-            raise ValueError(f"{path}:{line_number} 波段必须大于 0")
-        wavelengths.append(wavelength)
-    if not wavelengths:
-        raise ValueError(f"{path} 没有有效的观测波段")
-    return tuple(wavelengths)
+def _observation_band_table(overrides, input_base):
+    """Observation bands and per-band optical cells; None means "use the model or measured spectrum"."""
+    source = str(_input_value(overrides, "spectral_source", "observation_spectral_mode") or "direct").strip().lower()
+    if source in {"file", "txt", "read"}:
+        raw_path = Path(str(_input_value(overrides, "spectrals_file") or "data/spectrals/observation_spectrals_tirteb.txt"))
+        rows = read_band_cells(raw_path if raw_path.is_absolute() else input_base / raw_path, 1 + len(BAND_PROPERTIES))
+    else:
+        rows = [band_cells(_input_value(overrides, "wavelengths", "observation_wavelengths") or "0.67;0.86;10.5")]
+        rows += [band_cells(_input_value(overrides, key)) for key in BAND_PROPERTIES]
+    wavelengths = rows[0]
+    if not wavelengths or any(item is None or item <= 0.0 for item in wavelengths):
+        raise ValueError("wavelengths must contain positive values")
+    table = {"wavelengths": [float(item) for item in wavelengths]}
+    for key, cells in zip(BAND_PROPERTIES, rows[1:]):
+        cells = cells or [None] * len(wavelengths)
+        if len(cells) != len(wavelengths):
+            raise ValueError(f"{key} must have one value (or '-') per wavelength: {len(cells)} != {len(wavelengths)}")
+        if any(cell is not None and not 0.0 <= cell <= 1.0 for cell in cells):
+            raise ValueError(f"{key} must be between 0 and 1")
+        table[key] = cells
+    return table
+
+
+def _grid_value(spectrum, grid_nm, wavelength_um):
+    index = int(np.argmin(np.abs(np.asarray(grid_nm, dtype=float) - float(wavelength_um) * 1000.0)))
+    return float(spectrum[index])

@@ -25,14 +25,13 @@ urban,building_length,10,building length m
 urban,building_width,10,building width m
 urban,building_height,20,building height m
 urban,building_azimuth,0,building direction degrees
+urban,urban_transport,,thermal multiple scattering: empty=radiosity with canopy_closure=standard (same street + four-wall radiosity as the optics) or legacy otherwise; legacy=single-bounce exchange; radiosity=street + four-wall radiosity (all orders; one building class)
 ,,,
 [vegetation_structure],,,
 vegetation_structure,lai,1.5,leaf area index
 vegetation_structure,height,3,vegetation height m (TIRTEB only; not used by run.py)
-vegetation_structure,G,0.5,leaf projection parameter (TIRTEB only; run.py uses G=0.5)
-vegetation_structure,lidfa,-0.35,leaf angle distribution parameter a (TIRTEB only; not used by run.py)
-vegetation_structure,lidb,-0.15,leaf angle distribution parameter b (TIRTEB only; not used by run.py)
 vegetation_structure,hspot,0.15,hotspot parameter = leaf size / canopy height; for crowns use leaf size / crown height
+vegetation_structure,canopy_closure,standard,standard=CI transmittance + dual-scale hotspot (two-layer + compensation) + node radiosity; upgrade=exact geometric optics (K-integral hom / row cross-section / FRT-type crowns) + the same node radiosity; both apply to hom/row/crown on plane/slope/terrain/urban in thermal and optical bands; legacy=earlier closures (thermal_*_geometry and optical methods below apply only with legacy)
 vegetation_structure,leaf_width,0.2,leaf width m (TIRTEB only; not used by run.py)
 ,,,
 [row_structure],,,
@@ -41,6 +40,7 @@ row_structure,row_blank,0.5,row gap m
 row_structure,row_height,1.0,row height m
 row_structure,row_azimuth,0,row direction degrees
 row_structure,thermal_row_geometry,parametric,parametric=closed-form row cross-section (standard); conditioned_corridor or legacy=earlier closures
+row_structure,row_closure,,plane rows; empty=standard model; legacy=CI transmittance + CI layer hotspot + equivalent-homogeneous scattering; conditioned=legacy + hotspot correlation compensation; reference=parametric geometry + cross-section radiosity (thermal and shortwave)
 ,,,
 [crown_structure],,,
 crown_structure,crown_rad_a,3.0,crown horizontal radius m
@@ -48,30 +48,26 @@ crown_structure,crown_rad_b,3.0,crown vertical semiaxis m
 crown_structure,crown_height,3.0,crown base height above ground m (sets the crown-centre height of the parametric crowns)
 crown_structure,crown_density,0.02,crown density per m2
 crown_structure,thermal_crown_geometry,parametric,parametric=closed-form Poisson spheroid crowns (standard); clumping_dual or legacy=earlier closures
-crown_structure,forest_transport,legacy,terrain forests: legacy=terrain interreflection + canopy scatter (standard); reciprocal_exchange=4-state exchange (requires clumping_dual)
+crown_structure,forest_transport,legacy,terrain forests: legacy=terrain interreflection + canopy scatter (standard); reciprocal_exchange=4-state exchange (requires canopy_closure=legacy)
+,,,
+[optical],,,
+optical,optical_terrain_method,reciprocal_exchange,terrain crown method with canopy_closure=legacy: reciprocal_exchange (default; 4-state project closure) or facet_exchange (explicit facets); with canopy_closure=standard or upgrade terrain forests use the standard terrain closure and this key is ignored (except effective_slab)
+optical,shortwave_diffuse_fraction,0.2,0.2 = 80% direct + 20% diffuse (default); 0-1 allowed
 ,,,
 [spectral],,,
-spectral,spectral_source,direct,direct=use wavelengths; file=read spectrals_file
-spectral,wavelengths,8.0;10.5;12.0,observation wavelengths um
-spectral,spectrals_file,data/spectrals/observation_spectrals.txt,wavelength file when spectral_source=file
-spectral,vegetation_spectrum_source,direct,direct=constant arrays; file=read vegetation_spectrum_file
-spectral,vegetation_spectrum_file,data/spectrals/vegetation_spectrum.txt,wavelength leaf_emissivity
-spectral,soil_spectrum_source,direct,direct=constant arrays; file=read soil_spectrum_file
-spectral,soil_spectrum_file,data/spectrals/soil_spectrum.txt,wavelength soil_emissivity
-spectral,emissivity_leaf,0.975;0.985;0.980,one value per wavelength (8;10.5;12 um)
-spectral,emissivity_soil,0.920;0.955;0.965,one value per wavelength (8;10.5;12 um)
-spectral,emissivity_terrain,0.920;0.950;0.960,one value per wavelength (8;10.5;12 um)
+spectral,spectral_source,direct,direct=use the six rows below; file=read spectrals_file (7 rows in the same order)
+spectral,spectrals_file,data/spectrals/optical_properties.txt,band table used when spectral_source=file
+spectral,wavelengths,0.67;0.86;10.5,band centres um; <2.5 um gives BRF and >=2.5 um gives brightness temperature
+spectral,leaf_reflectance,0.05;0.45;0.015,leaf reflectance per band
+spectral,leaf_transmittance,0.03;0.40;0.0,leaf transmittance per band; thermal leaf emissivity = 1 - reflectance - transmittance
+spectral,soil_reflectance,0.12;0.25;0.045,soil (and terrain facet) reflectance per band; thermal emissivity = 1 - reflectance
+spectral,street_reflectance,0.12;0.18;0.045,street reflectance per band; thermal emissivity = 1 - reflectance
+spectral,wall_reflectance,0.20;0.25;0.07,wall reflectance per band; thermal emissivity = 1 - reflectance
+spectral,roof_reflectance,0.15;0.20;0.05,roof reflectance per band; thermal emissivity = 1 - reflectance
 ,,,
 [soil_anisotropy],,,
 soil_anisotropy,hapke_enable,0,0=use soil emissivity directly; 1=use Hapke directional correction
 soil_anisotropy,hapke_K,1.0,Hapke directional anisotropy coefficient
-,,,
-[urban_spectrum],,,
-urban_spectrum,urban_spectrum_source,direct,direct=constant arrays; file=read urban_spectrum_file
-urban_spectrum,urban_spectrum_file,data/spectrals/urban_spectrum.txt,wavelength roof_emissivity wall_emissivity street_emissivity
-urban_spectrum,emissivity_roof,0.920;0.950;0.940,one value per wavelength (8;10.5;12 um)
-urban_spectrum,emissivity_wall,0.900;0.930;0.920,one value per wavelength (8;10.5;12 um)
-urban_spectrum,emissivity_street,0.940;0.955;0.950,one value per wavelength (8;10.5;12 um)
 ,,,
 [thermal],,,
 thermal,soil_sunlit_c,45,sunlit soil temperature C
@@ -89,7 +85,7 @@ thermal,street_shaded_c,30,shaded street temperature C
 thermal,sky_temperature_k,,optional equivalent sky brightness temperature K; empty = black sky (emission only); set to add (1-emissivity) x B(T_sky)
 ,,,
 [geometry],,,
-geometry,geometry_mode,0,0=given vza/vaa lists; 1=solar principal and perpendicular planes; 2=read geometry_file TXT
+geometry,geometry_mode,0,0=given vza/vaa lists; 1=solar principal and perpendicular planes; 2=read geometry_file TXT; 3=both principal planes from principal_vza_step/principal_vza_max plus optional hemisphere/file/manual directions
 geometry,geometry_source,direct,legacy alias when geometry_mode is omitted: direct or file
 geometry,geometry_file,data/directions/observation_directions.txt,vza vaa or vza vaa sza saa per line
 geometry,vza,0;10;20;30;40;50;60,view zenith degrees
@@ -98,5 +94,5 @@ geometry,sza,30,solar zenith degrees
 geometry,saa,0,solar azimuth degrees
 geometry,geometry_pair_mode,cross,cross=cartesian product; zip=pair lists by row
 geometry,principal_vza,0;10;20;30;40;50;60;70;80,mode 1 view zenith degrees
-geometry,principal_vza_step,10,mode 1 generated view zenith interval degrees when principal_vza is empty
-geometry,principal_vza_max,75,mode 1 generated maximum view zenith degrees
+geometry,principal_vza_step,10,view zenith interval degrees for mode 3 and for mode 1 when principal_vza is empty
+geometry,principal_vza_max,75,maximum view zenith degrees for mode 3 and for mode 1 when principal_vza is empty

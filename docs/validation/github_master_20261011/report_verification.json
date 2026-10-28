@@ -1,0 +1,30 @@
+{
+  "source_commit": "86c3829a91ce4ccc4ff1c650b0b77cda4f316582",
+  "report_date": "2026-10-24",
+  "pages": 8,
+  "source_figures": 11,
+  "statistical_records": 696,
+  "source_hashes_verified": true,
+  "local_markdown_links_verified": 13,
+  "pages_visually_reviewed": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ],
+  "model_recomputed": false,
+  "outputs": [
+    {
+      "path": "docs\\TiRT_validation.md",
+      "sha256": "d0066ef492494a3d4a7bfeb027b497de09635b5673a886550ca93569c581f0d8"
+    },
+    {
+      "path": "docs\\TIRT_热红外验证报告.pdf",
+      "sha256": "3769d1891b89947adfafd5338ea9773b9d817573252f4761c52b9d39239ca890"
+    }
+  ]
+}

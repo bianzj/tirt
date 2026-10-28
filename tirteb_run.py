@@ -7,28 +7,38 @@ from pathlib import Path
 
 import numpy as np
 
+from base import tirteb_radiation
 from base.brightness import urban_canopy_fraction, urban_component_fractions, urban_directional_reflectance
-from base.tirteb_tirt import tir_band_settings, tir_spectral_value, tirt_brightness
-from base.modelio import read_defined, read_directions, read_input, read_meteo, read_spectrals
+from base.tirteb_tirt import band_optics, tir_band_settings, tirt_brightness, tirt_emissivity
+from base.modelio import read_defined, read_directions, read_input, read_meteo
 from base.model import run_node
 from base.solar import slope_direction
 from base.structs import InputStructure, ObservationStructure, RTStructure
-from base.radiation import component_proportions, directional_reflectance, legacy_directional_reflectance
+from base.radiation import clearness_index_warning, directional_reflectance
 
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_INPUT = ROOT / "input_tirteb.csv"
-FEATURE_BANDS = ((0.55, "optical"), (0.86, "infrared"), (10.5, "thermal_infrared"))
 DEFAULT_OBSERVATION_VZA = (0.0, 30.0, 60.0)
 DEFAULT_OBSERVATION_VAA = (0.0, 90.0, 180.0)
 OUTPUT_FIELDS = (
     "node", "time", "veg", "surface", "Ta_C",
-    "Tss_C", "Tsh_C", "Tls_C", "Tlh_C", "LE", "H", "G",
+    "Tss_C", "Tsh_C", "Tls_C", "Tlh_C", "Rn", "LE", "H", "G",
     "Troof_sunlit_C", "Troof_shaded_C", "Twall_sunlit_C", "Twall_shaded_C",
     "Tstreet_sunlit_C", "Tstreet_shaded_C", "Tleaf_sunlit_C", "Tleaf_shaded_C",
-    "Tv_C", "red", "nir",
+    "frac_soil_sunlit", "frac_leaf_sunlit", "frac_roof_sunlit", "frac_wall_sunlit", "frac_street_sunlit",
+    "Tv_C", "green", "nir",
     "closed", "iterations", "energy_balance_residual_W_m2",
+    "L", "ustar", "stability_closed", "stability_iterations", "stability_residual_m_inv",
+    "stability_limited", "stability_flux_area_factor", "fallback_solver_used", "temperature_solver",
+    "clearness_index", "clearness_index_exceeds_one", "solar_direct_normal_limit_W_m2",
+    "shortwave_direct_normal_W_m2", "air_density_kg_m3",
+    "aerodynamic_roughness_length", "aerodynamic_displacement", "aerodynamic_canopy_weight",
 )
+BOOLEAN_DIAGNOSTICS = ("stability_limited", "fallback_solver_used", "clearness_index_exceeds_one")
+NUMERIC_DIAGNOSTICS = ("stability_flux_area_factor", "clearness_index", "solar_direct_normal_limit_W_m2",
+                       "shortwave_direct_normal_W_m2", "air_density_kg_m3")
+AERODYNAMIC_DIAGNOSTICS = ("aerodynamic_roughness_length", "aerodynamic_displacement", "aerodynamic_canopy_weight")
 OBSERVATION_BASE_FIELDS = (
     "node", "time", "veg", "surface", "vza", "vaa", "sza", "saa",
 )
@@ -70,48 +80,17 @@ def _config_path(config, base, key, default):
     return path if path.is_absolute() else base / path
 
 
-def _config_numbers(config, key, default):
-    value = config.get(key)
-    if value in (None, ""):
-        return tuple(default)
-    text = str(value).replace(";", ",")
-    return tuple(float(item.strip()) for item in text.split(",") if item.strip())
-
-
 def _spectral_values(settings, wavelength, model=""):
-    wavelength_nm = float(wavelength) * 1000.0
-    index = int(round(wavelength_nm - 400.0))
-    leaf_rho = settings.get("leaf_reflectance", 0.0)
-    leaf_tau = settings.get("leaf_transmittance", 0.0)
-    soil_rho = settings.get("soil_reflectance", 0.0)
-    leaf_spectrum = settings.get("leaf_reflectance_spectrum", [])
-    tau_spectrum = settings.get("leaf_transmittance_spectrum", [])
-    soil_spectrum = settings.get("soil_reflectance_spectrum", [])
-    if 0 <= index < 2001:
-        if len(leaf_spectrum) == 2001:
-            leaf_rho = leaf_spectrum[index]
-        if len(tau_spectrum) == 2001:
-            leaf_tau = tau_spectrum[index]
-        if len(soil_spectrum) == 2001:
-            soil_rho = soil_spectrum[index]
-        if model == "urban":
-            urban_street = settings.get("urban_reflectance_street_spectrum", [])
-            if len(urban_street) == len(settings.get("wavelengths", [])):
-                urban_index = int(round(wavelength_nm - 400.0))
-                if 0 <= urban_index < len(urban_street):
-                    soil_rho = urban_street[urban_index]
-    if float(wavelength) >= 2.5:
-        leaf_rho = _tir_spectral_value(settings, "leaf_reflectance_tir_spectrum", "leaf_reflectance", wavelength)
-        leaf_tau = _tir_spectral_value(settings, "leaf_transmittance_tir_spectrum", "leaf_transmittance", wavelength)
-        soil_rho = _tir_spectral_value(settings, "soil_reflectance_tir_spectrum", "soil_reflectance", wavelength)
-    return float(leaf_rho), float(leaf_tau), float(soil_rho)
+    optics = band_optics(settings, wavelength)
+    # Urban streets replace the soil background in the shortwave.
+    background = "street_reflectance" if model == "urban" and float(wavelength) < 2.5 else "soil_reflectance"
+    return float(optics["leaf_reflectance"]), float(optics["leaf_transmittance"]), float(optics[background])
 
 
-_tir_spectral_value = tir_spectral_value
 _tir_band_settings = tir_band_settings
 
 
-def _band_observation(settings, meteo, state, name, wavelength, vza, vaa):
+def _band_observation(settings, meteo, state, name, wavelength, vza, vaa, tir_reflectance=False):
     # A solar reflectance is undefined without incident daylight. In particular,
     # never pass below-horizon solar angles into the crown hotspot geometry.
     # Thermal emission and the energy-balance time stepping remain active.
@@ -128,70 +107,81 @@ def _band_observation(settings, meteo, state, name, wavelength, vza, vaa):
             "brightness_temperature_K": float("nan"),
         })
     if settings.get("surface_model") == "terrain" and int(settings.get("terrain_type", 1)) == 1:
-        local_vza, local_vaa, _ = slope_direction(
+        local_vza, local_vaa, visible = slope_direction(
             vza,
             vaa,
-            state.get("terrain_slope", 0.0),
-            state.get("terrain_aspect", 0.0),
+            settings.get("terrain_slope", 0.0),
+            settings.get("terrain_aspect", 0.0),
         )
+        # A direction behind the slope (or exactly grazing it) sees no surface.
+        # TiRT leaves these rows empty; keep the same convention here.
+        if not visible or local_vza >= 90.0:
+            return RTStructure.from_mapping({
+                "wavelength_um": wavelength,
+                "reflectance": float("nan"),
+                "transmittance": float("nan"),
+                "reflected_shortwave": float("nan"),
+                "radiance": float("nan"),
+                "brightness_temperature_K": float("nan"),
+            })
     else:
         local_vza, local_vaa = float(vza), float(vaa)
-    sunlit = state.get("sunlit_surface", True)
+    sunlit = bool(state.get("sunlit_surface", True))
     leaf_rho, leaf_tau, soil_rho = _spectral_values(settings, wavelength, name)
-    if name == "urban" and float(wavelength) < 2.5:
+    radiance = brightness_temperature = reflected = float("nan")
+    if float(wavelength) >= 2.5:
+        band_settings = _tir_band_settings(settings, wavelength)
+        # Thermal observations use the TiRT directional model at the energy-balance temperatures;
+        # the thermal reflectance is 1 - directional emissivity (Kirchhoff).
+        radiance, brightness_temperature = tirt_brightness(band_settings, state, wavelength, vza, vaa)
+        reflectance = (1.0 - tirt_emissivity(band_settings, state, wavelength, vza, vaa)
+                       if tir_reflectance else float("nan"))
+    else:
         # The state holds the meteorology-derived diffuse fraction; settings
         # may still contain -1 (automatic partition), which is not a fraction.
         from base.radiation import _shortwave_diffuse_fraction
         diffuse = state.get("shortwave_diffuse_fraction")
         if diffuse is None:
             diffuse = _shortwave_diffuse_fraction(settings, meteo["shortwave"], state["sza"])
-        reflectance = urban_directional_reflectance(
-            dict(settings, shortwave_diffuse_fraction=diffuse),
-            wavelength,
-            local_vza,
-            local_vaa,
-            state["sza"],
-            state["saa"],
-        )
-    else:
-        observation_reflectance = directional_reflectance if float(wavelength) < 2.5 else legacy_directional_reflectance
-        illumination = ({'diffuse_fraction': state.get('shortwave_diffuse_fraction',0.0)}
-                        if float(wavelength) < 2.5 else {})
-        reflectance = observation_reflectance(
-            settings,
-            state["sza"],
-            state["saa"],
-            local_vza,
-            local_vaa,
-            leaf_rho,
-            leaf_tau,
-            soil_rho,
-            sunlit=sunlit,
-            use_hapke=(
-                float(wavelength) < 2.5
-                and int(settings.get("hapke_enable", settings.get("hapke_optical_enable", 0))) == 1
-            ),
-            **illumination,
-        )
-    proportions = component_proportions(
-        settings, state["sza"], state["saa"], local_vza, local_vaa, sunlit=sunlit
-    )
-    leaf_fraction = float(proportions[2] + proportions[3])
+        if name == "urban":
+            optics = band_optics(settings, wavelength)
+            urban_settings = dict(
+                settings, shortwave_diffuse_fraction=diffuse,
+                urban_reflectance_roof=optics["roof_reflectance"], urban_reflectance_wall=optics["wall_reflectance"],
+                urban_reflectance_street=optics["street_reflectance"],
+                leaf_reflectance=leaf_rho, leaf_transmittance=leaf_tau)
+            for key in ("urban_reflectance_roof_spectrum", "urban_reflectance_wall_spectrum",
+                        "urban_reflectance_street_spectrum", "leaf_reflectance_spectrum", "leaf_transmittance_spectrum"):
+                urban_settings.pop(key, None)
+            reflectance = urban_directional_reflectance(
+                urban_settings, wavelength, local_vza, local_vaa, state["sza"], state["saa"])
+        elif settings.get("surface_model") == "terrain" and int(settings.get("terrain_type", 1)) == 2:
+            reflectance = directional_reflectance(
+                settings, state["sza"], state["saa"], local_vza, local_vaa, leaf_rho, leaf_tau, soil_rho,
+                sunlit=sunlit, use_hapke=False, diffuse_fraction=diffuse)
+        else:
+            soil_direct = None
+            if int(settings.get("hapke_enable", settings.get("hapke_optical_enable", 0))) == 1:
+                from base.soilopt import hapke_reflectance
+                soil_direct = hapke_reflectance(local_vza, settings.get("hapke_K", 1.0), soil_rho)
+            if settings.get("surface_model") == "terrain":
+                reflectance = tirteb_radiation.slope_reflectance(
+                    settings, state.get("sza_global", state["sza"]), state.get("saa_global", state["saa"]),
+                    state["sza"], state["saa"], local_vza, local_vaa, leaf_rho, leaf_tau, soil_rho,
+                    diffuse, sunlit, soil_direct)
+            else:
+                reflectance = tirteb_radiation.reflectance(
+                    settings, state["sza"], state["saa"], local_vza, local_vaa, leaf_rho, leaf_tau, soil_rho,
+                    diffuse, sunlit, soil_direct)
+        reflected = max(float(meteo["shortwave"]), 0.0) * reflectance
+    fractions = tirteb_radiation.view_fractions(settings, local_vza, local_vaa, state["sza"], state["saa"], sunlit)
+    leaf_fraction = float(fractions[2] + fractions[3])
     if name == "urban":
         urban_fractions = urban_component_fractions(settings, local_vza, local_vaa, state["sza"], state["saa"])
         street_fraction = float(urban_fractions[2] + urban_fractions[3])
         transmittance = street_fraction * urban_canopy_fraction(settings, local_vza, local_vaa) * leaf_fraction * leaf_tau
     else:
         transmittance = leaf_fraction * leaf_tau
-    if wavelength >= 2.5:
-        band_settings = _tir_band_settings(settings, wavelength)
-        # Thermal observations use the TiRT directional model at the energy-balance temperatures.
-        radiance, brightness_temperature = tirt_brightness(band_settings, state, wavelength, vza, vaa)
-        reflected = float("nan")
-    else:
-        radiance = float("nan")
-        brightness_temperature = float("nan")
-        reflected = max(float(meteo["shortwave"]), 0.0) * reflectance
     return RTStructure.from_mapping({
         "wavelength_um": wavelength,
         "reflectance": reflectance,
@@ -212,7 +202,7 @@ def _band_name(wavelength):
 
 def _observation_band_name(wavelength):
     if abs(float(wavelength) - 0.55) < 1e-6:
-        return "red"
+        return "green"
     if abs(float(wavelength) - 0.86) < 1e-6:
         return "nir"
     return _band_name(wavelength)
@@ -223,29 +213,47 @@ def _wavelength_tag(wavelength):
 
 
 def _urban_surface_totals(settings, state):
-    density = max(float(settings.get("urban_density", 0.0015)), 0.0)
-    length = max(float(settings.get("urban_building_length", 10.0)), 0.0)
-    width = max(float(settings.get("urban_building_width", 10.0)), 0.0)
-    height = max(float(settings.get("urban_building_height", 20.0)), 0.0)
-    roof = density * length * width
-    wall = density * 2.0 * height * (length + width)
-    street = max(1.0 - roof, 0.0)
-    total = max(roof + wall + street, 1.0e-12)
-    weights = {"roof": roof / total, "wall": wall / total, "street": street / total}
-    canopy = urban_canopy_fraction(settings, 0.0)
-    canopy_weight = weights["street"] * canopy
-    weights["street"] *= 1.0 - canopy
-    totals = {"LE": 0.0, "H": 0.0, "G": 0.0}
-    for component, weight in weights.items():
-        for suffix in ("sunlit", "shaded"):
-            totals["LE"] += weight * 0.5 * state.get("LE_" + component + suffix, 0.0)
-            totals["H"] += weight * 0.5 * state.get("H_" + component + suffix, 0.0)
-            totals["G"] += weight * 0.5 * state.get("G_" + component + suffix, 0.0)
-    for suffix in ("sunlit", "shaded"):
-        totals["LE"] += canopy_weight * 0.5 * state.get("LE_leaf" + suffix, 0.0)
-        totals["H"] += canopy_weight * 0.5 * state.get("H_leaf" + suffix, 0.0)
-        totals["G"] += canopy_weight * 0.5 * state.get("G_leaf" + suffix, 0.0)
-    return totals
+    from base.scene_fluxes import scene_totals
+    return scene_totals(settings, state, urban=True)
+
+
+def _flux_weights(settings, state):
+    """Scene weights of the soil (per soil area) and big-leaf (per ground) sunlit and shaded fluxes."""
+    lai = float(settings.get("lai", 0.0))
+    leaf = (state["lai_sunlit"] / lai, state["lai_shaded"] / lai) if lai > 0.0 else (0.0, 0.0)
+    return state["soil_sunlit_fraction"], state["soil_shaded_fraction"], *leaf
+
+
+def _diagnostics(state, model):
+    nan = float("nan")
+    row = {key: int(bool(state.get(key, False))) for key in BOOLEAN_DIAGNOSTICS}
+    row.update({key: state.get(key, nan) for key in NUMERIC_DIAGNOSTICS})
+    row.update({key: nan if model == "urban" else state.get(key, nan) for key in AERODYNAMIC_DIAGNOSTICS})
+    row["temperature_solver"] = state.get("temperature_solver", "relaxation")
+    return row
+
+
+def _sunlit_shares(settings, state, model):
+    """Sunlit share of each surface's energy-balance area weight (shaded share = 1 - value); NaN if absent."""
+    def share(sunlit, shaded):
+        total = float(sunlit) + float(shaded)
+        return float(sunlit) / total if total > 0.0 else float("nan")
+
+    nan = float("nan")
+    if model == "urban":
+        from base.scene_fluxes import component_weights
+        w = component_weights(settings, state, urban=True)
+        street = share(w["streetsunlit"], w["streetshaded"])
+        shares = {"frac_soil_sunlit": street, "frac_leaf_sunlit": share(w["leafsunlit"], w["leafshaded"]),
+                  "frac_roof_sunlit": share(w["roofsunlit"], w["roofshaded"]),
+                  "frac_wall_sunlit": share(w["wallsunlit"], w["wallshaded"]), "frac_street_sunlit": street}
+    else:
+        soil_sun, soil_shade, leaf_sun, leaf_shade = _flux_weights(settings, state)
+        shares = {"frac_soil_sunlit": share(soil_sun, soil_shade), "frac_leaf_sunlit": share(leaf_sun, leaf_shade),
+                  "frac_roof_sunlit": nan, "frac_wall_sunlit": nan, "frac_street_sunlit": nan}
+    if float(settings.get("lai", 0.0)) <= 0.0:
+        shares["frac_leaf_sunlit"] = nan
+    return shares
 
 
 def _observation_quantity(config, wavelength):
@@ -269,27 +277,27 @@ def _observation_columns(wavelength, values, quantity):
 
 
 def _observation_hour_fractions(config):
-    """Parse hour selectors as fractions of a day; *.5 means every time ending in .5."""
-    raw = config.get("observation_hours", config.get("observation_times", ""))
+    """Parse observation_hours as local clock hours 0-24 (decimals allowed) and return day fractions."""
+    raw = config.get("observation_hours", "")
     fractions = []
     for item in str(raw).replace(";", ",").split(","):
         item = item.strip()
         if not item:
             continue
-        if item.startswith("*"):
-            item = item[1:]
         try:
-            value = float(item)
+            hour = float(item)
         except ValueError:
-            continue
-        fraction = value if abs(value) <= 1.0 else value / 24.0
-        fractions.append(fraction % 1.0)
+            hour = float("nan")
+        if not 0.0 <= hour <= 24.0:
+            raise ValueError(f"observation_hours must be clock hours between 0 and 24 (e.g. 12 or 13.5); got {item!r}")
+        fractions.append((hour / 24.0) % 1.0)
     return tuple(fractions)
 
 
-def _matches_observation_hour(time_value, fractions, tolerance=1.0e-7):
+def _matches_observation_hour(time_value, fractions, tolerance=0.5 / 1440.0):
+    # Meteorological DOY values carry only ~4 decimals (about 9 s), so match to the half minute.
     fraction = float(time_value) % 1.0
-    return any(abs(fraction - target) <= tolerance for target in fractions)
+    return any(min(abs(fraction - target), 1.0 - abs(fraction - target)) <= tolerance for target in fractions)
 
 
 def _csv_value(value):
@@ -300,13 +308,27 @@ def _csv_value(value):
     return value
 
 
-def _intermediate_row(state, node, time_value, model, proportions, totals):
+def _intermediate_row(state, node, time_value, model, totals):
     row = {"node": node, "time": time_value, "model": model}
     row.update({key: _csv_value(value) for key, value in state.as_dict().items()})
-    for index, value in enumerate(proportions):
-        row[f"component_fraction_{index}"] = value
     row.update({f"{key}_total": value for key, value in totals.items()})
     return row
+
+
+SNAPSHOT_MARKER = "# Effective TIRTEB input"
+
+
+def _is_input_snapshot(path):
+    text = path.read_text(encoding="utf-8-sig", errors="replace")
+    return text.startswith(SNAPSHOT_MARKER) or any(line.strip().startswith("[resolved_inputs]") for line in text.splitlines())
+
+
+def _snapshot_path(input_path, output_dir):
+    """input.csv beside the results, unless that would overwrite the source or a user file."""
+    snapshot = output_dir / "input.csv"
+    if snapshot.resolve() == input_path.resolve() or (snapshot.is_file() and not _is_input_snapshot(snapshot)):
+        return output_dir / "input_used.csv"
+    return snapshot
 
 
 def _write_input_snapshot(input_path, snapshot, config, overrides, input_data):
@@ -314,8 +336,9 @@ def _write_input_snapshot(input_path, snapshot, config, overrides, input_data):
     original = input_path.read_bytes()
     snapshot.parent.mkdir(parents=True, exist_ok=True)
     source_snapshot = snapshot.with_name("source_input.csv")
+    default_snapshot = snapshot.with_name("input.csv")
     if source_snapshot.resolve() != input_path.resolve() and (
-        input_path.resolve() != snapshot.resolve() or not source_snapshot.exists()
+        input_path.resolve() != default_snapshot.resolve() or not source_snapshot.exists()
     ):
         source_snapshot.write_bytes(original)
     references = {key: config[key] for key in INPUT_FILE_KEYS if config.get(key) not in (None, "")}
@@ -353,7 +376,10 @@ def _write_input_snapshot(input_path, snapshot, config, overrides, input_data):
             resolved_references[key] = str(source)
 
     text = original.decode("utf-8-sig")
+    if text.startswith(SNAPSHOT_MARKER):
+        text = text.split("\n", 1)[1] if "\n" in text else ""
     with snapshot.open("w", newline="", encoding="utf-8") as file:
+        file.write(f"{SNAPSHOT_MARKER} written by tirteb_run.py; overwritten on rerun,,,\n")
         file.write(text)
         if text and not text.endswith("\n"):
             file.write("\n")
@@ -369,7 +395,7 @@ def _write_input_snapshot(input_path, snapshot, config, overrides, input_data):
             writer.writerow(["resolved_inputs", key, value, "resolved input reference"])
 
 
-def run(input_path=DEFAULT_INPUT, output_path=None, **overrides):
+def _run_csv(input_path=DEFAULT_INPUT, output_path=None, **overrides):
     input_path = Path(input_path).resolve()
     config = read_input(input_path)
     base = input_path.parent
@@ -388,10 +414,6 @@ def run(input_path=DEFAULT_INPUT, output_path=None, **overrides):
     year, doy = input_data.year, input_data.doy
     latitude, longitude = input_data.latitude, input_data.longitude
     dem, max_iter = input_data.dem, input_data.max_iter
-    observation_wavelengths = _config_numbers(
-        config, "observation_wavelengths", [band[0] for band in FEATURE_BANDS]
-    )
-    observation_wavelengths = input_data.observation_wavelengths or observation_wavelengths
     observation_vza = input_data.observation_vza or DEFAULT_OBSERVATION_VZA
     observation_vaa = input_data.observation_vaa or DEFAULT_OBSERVATION_VAA
     observation_times = input_data.observation_times
@@ -403,8 +425,6 @@ def run(input_path=DEFAULT_INPUT, output_path=None, **overrides):
             for view_zenith in observation_vza
             for view_azimuth in observation_vaa
         )
-    if input_data.observation_spectral_mode in {"file", "txt", "read"}:
-        observation_wavelengths = read_spectrals(input_data.spectrals_file)
     observation_time_mode = input_data.observation_time_mode
     if observation_time_mode in {"all", "every", "full"}:
         selected_times = None
@@ -418,7 +438,7 @@ def run(input_path=DEFAULT_INPUT, output_path=None, **overrides):
         selected_times = None
         selected_fractions = _observation_hour_fractions(config)
         if not selected_fractions:
-            raise ValueError("observation_time_mode=hour requires observation_hours or *.5 in observation_times")
+            raise ValueError("observation_time_mode=hour requires observation_hours (clock hours 0-24, e.g. 12;13.5)")
     else:
         raise ValueError("observation_time_mode must be all, time, or hour")
 
@@ -429,7 +449,7 @@ def run(input_path=DEFAULT_INPUT, output_path=None, **overrides):
     ]
     if not records:
         raise ValueError(
-            f"start_time={input_data.start_time:g} 和 end_time={input_data.end_time:g} 未选中气象数据"
+            f"start_time={input_data.start_time:g} and end_time={input_data.end_time:g} select no meteorological data"
         )
     observation_selected = [
         (selected_times is None and selected_fractions is None)
@@ -438,19 +458,29 @@ def run(input_path=DEFAULT_INPUT, output_path=None, **overrides):
         for record in records
     ]
     if not any(observation_selected):
-        selector = config.get("observation_hours", config.get("observation_times", "")) if selected_fractions is not None else config.get("observation_times", "")
+        selector = config.get("observation_hours", "") if selected_fractions is not None else config.get("observation_times", "")
         available_times = [float(record["time"]) for record in records]
+        if selected_fractions is not None:
+            nearest = sorted({
+                min(available_times, key=lambda value: min(abs(value % 1.0 - target), 1.0 - abs(value % 1.0 - target))) % 1.0
+                for target in selected_fractions
+            })
+            raise ValueError(
+                f"observation_hours {selector!r} match no meteorological record; nearest record clock hours: "
+                + ";".join(f"{value * 24.0:.4g}" for value in nearest)
+            )
         suggestions = sorted({
             min(available_times, key=lambda value: abs(value - target))
             for target in selected_times
         })[:5] if selected_times is not None else available_times[:5]
         available = ";".join(f"{value:.12g}" for value in suggestions)
         raise ValueError(
-            f"观测时间 {selector!r} 未命中模拟区间内的气象记录 "
-            f"({float(records[0]['time']):.12g}–{float(records[-1]['time']):.12g})；"
-            f"可选实际时间：{available}。请指定已有气象时间或使用 observation_time_mode=all"
+            f"Observation time {selector!r} matches no meteorological record in the simulation interval "
+            f"({float(records[0]['time']):.12g}–{float(records[-1]['time']):.12g}); "
+            f"available times: {available}. Specify an existing meteorological time or use observation_time_mode=all"
         )
     settings = read_defined(None, config)
+    observation_wavelengths = tuple(settings["observation_wavelengths"])
     if model_name(settings) == "urban":
         scene_height = max(
             float(settings.get("urban_building_height", 0.0)),
@@ -496,34 +526,26 @@ def run(input_path=DEFAULT_INPUT, output_path=None, **overrides):
             input_data.utc_offset_hours,
         )
         vertical_rt = _band_observation(settings, meteo, state, name, 10.5, vertical_vza, vertical_vaa)
-        red_rt = _band_observation(settings, meteo, state, name, 0.55, vertical_vza, vertical_vaa)
+        green_rt = _band_observation(settings, meteo, state, name, 0.55, vertical_vza, vertical_vaa)
         nir_rt = _band_observation(settings, meteo, state, name, 0.86, vertical_vza, vertical_vaa)
-        proportions = component_proportions(
-            settings,
-            state["sza"],
-            state["saa"],
-            state["vza"],
-            state["vaa"],
-            sunlit=state.get("sunlit_surface", True),
-        )
         if name == "urban":
             urban_totals = _urban_surface_totals(settings, state)
-            le_total, h_total, g_soil = urban_totals["LE"], urban_totals["H"], urban_totals["G"]
+            rn_total, le_total, h_total, g_soil = (urban_totals[key] for key in ("Rn", "LE", "H", "G"))
         else:
-            le_total = sum(weight * state.get(key, 0.0) for weight, key in zip(
-                proportions, ("LE_soilsunlit", "LE_soilshaded", "LE_leafsunlit", "LE_leafshaded"),
-            ))
-            h_total = sum(weight * state.get(key, 0.0) for weight, key in zip(
-                proportions, ("H_soilsunlit", "H_soilshaded", "H_leafsunlit", "H_leafshaded"),
-            ))
-            g_soil = proportions[0] * state.get("G_sunlit", 0.0) + proportions[1] * state.get("G_shaded", 0.0)
-        totals = {"LE": le_total, "H": h_total, "G": g_soil}
-        leaf_temperature_sunlit = (
-            float("nan") if name == "bare" else state["Tls"] - 273.15
-        )
-        leaf_temperature_shaded = (
-            float("nan") if name == "bare" else state["Tlh"] - 273.15
-        )
+            # Soil fluxes are per unit soil area, leaf fluxes per unit ground of the big leaf.
+            weights = _flux_weights(settings, state)
+            totals_by_prefix = {
+                prefix: sum(weight * state.get(prefix + key, 0.0) for weight, key in zip(
+                    weights, ("soilsunlit", "soilshaded", "leafsunlit", "leafshaded")))
+                for prefix in ("N_", "LE_", "H_")
+            }
+            rn_total, le_total, h_total = totals_by_prefix["N_"], totals_by_prefix["LE_"], totals_by_prefix["H_"]
+            g_soil = weights[0] * state.get("G_sunlit", 0.0) + weights[1] * state.get("G_shaded", 0.0)
+        totals = {"Rn": rn_total, "LE": le_total, "H": h_total, "G": g_soil}
+        # No leaves exist without LAI (bare soil, urban bare): leave their temperatures empty.
+        has_leaves = float(settings.get("lai", 0.0)) > 0.0
+        leaf_temperature_sunlit = state["Tls"] - 273.15 if has_leaves else float("nan")
+        leaf_temperature_shaded = state["Tlh"] - 273.15 if has_leaves else float("nan")
         component_temperature_keys = (
             "Troof_sunlit", "Troof_shaded", "Twall_sunlit", "Twall_shaded",
             "Tstreet_sunlit", "Tstreet_shaded",
@@ -547,15 +569,21 @@ def run(input_path=DEFAULT_INPUT, output_path=None, **overrides):
             "Tstreet_shaded_C": urban_temperatures["Tstreet_shaded"],
             "Tleaf_sunlit_C": leaf_temperature_sunlit if name == "urban" else float("nan"),
             "Tleaf_shaded_C": leaf_temperature_shaded if name == "urban" else float("nan"),
-            "LE": le_total, "H": h_total, "G": g_soil,
+            **_sunlit_shares(settings, state, name),
+            "Rn": rn_total, "LE": le_total, "H": h_total, "G": g_soil,
             "Tv_C": vertical_rt["brightness_temperature_K"] - 273.15,
-            "red": red_rt["reflectance"],
+            "green": green_rt["reflectance"],
             "nir": nir_rt["reflectance"],
             "closed": state["closed"],
+            "L": state["L"], "ustar": state["ustar"],
+            "stability_closed": state["stability_closed"],
+            "stability_iterations": state["stability_iterations"],
+            "stability_residual_m_inv": state["stability_residual_m_inv"],
             "iterations": state["iterations"],
             "energy_balance_residual_W_m2": state["energy_balance_residual_W_m2"],
+            **_diagnostics(state, name),
         })
-        intermediate.append(_intermediate_row(state, node, meteo["time"], name, proportions, totals))
+        intermediate.append(_intermediate_row(state, node, meteo["time"], name, totals))
         final_states.append(state)
         previous = state
 
@@ -563,14 +591,17 @@ def run(input_path=DEFAULT_INPUT, output_path=None, **overrides):
     if unclosed:
         maximum_residual = max(row["energy_balance_residual_W_m2"] for row in unclosed)
         warnings.warn(
-            f"{len(unclosed)}/{len(output)} 个时间点的能量平衡未闭合；"
-            f"最大组分残差 {maximum_residual:g} W/m²，详见 output.csv 的 closed 和 energy_balance_residual_W_m2",
+            f"Energy balance did not close at {len(unclosed)}/{len(output)} time steps; "
+            f"maximum component residual {maximum_residual:g} W/m²; see the closed and energy_balance_residual_W_m2 columns in output.csv",
             RuntimeWarning,
             stacklevel=2,
         )
+    message = clearness_index_warning(final_states)
+    if message:
+        warnings.warn(message, RuntimeWarning, stacklevel=2)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    input_snapshot = output_path.parent / "input.csv"
+    input_snapshot = _snapshot_path(input_path, output_path.parent)
     _write_input_snapshot(input_path, input_snapshot, config, overrides, input_data)
     with output_path.open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=OUTPUT_FIELDS)
@@ -601,8 +632,9 @@ def run(input_path=DEFAULT_INPUT, output_path=None, **overrides):
                 continue
             results = {}
             for wavelength in observation_wavelengths:
-                values = _band_observation(settings, meteo, state, name, wavelength, view_zenith, view_azimuth)
                 quantity = _observation_quantity(config, wavelength)
+                values = _band_observation(settings, meteo, state, name, wavelength, view_zenith, view_azimuth,
+                                           tir_reflectance=quantity == "reflectance")
                 results.update(_observation_columns(wavelength, values, quantity))
             observations.append(ObservationStructure(
                 node=node, time=meteo["time"], model=name,
@@ -621,6 +653,21 @@ def run(input_path=DEFAULT_INPUT, output_path=None, **overrides):
     return output_path
 
 
+def run(input_path=DEFAULT_INPUT, output_path=None, *, output_dir=None,
+        plots=True, show=False, **overrides):
+    """JSON jobs export two time-series figures/CSVs; legacy CSV calls are preserved."""
+    source = Path(input_path).resolve()
+    if source.suffix.lower() == ".json":
+        if output_path is not None:
+            raise ValueError("JSON jobs use output_dir/--output-dir, not --output")
+        from base.energy_runner import run_job
+        return run_job(source, _run_csv, INPUT_FILE_KEYS, output_dir=output_dir,
+                       plots=plots, show=show, overrides=overrides)
+    if output_dir is not None or show:
+        raise ValueError("CSV inputs use output_path/--output; JSON jobs support output_dir and plots")
+    return _run_csv(source, output_path, **overrides)
+
+
 SOIL_METHODS = ("direct", "surface", "depth")
 STOMATAL_METHODS = ("farquhar", "ballberry")
 SOIL_TEMPERATURE_METHODS = ("direct", "robust")
@@ -629,6 +676,8 @@ SOIL_TEMPERATURE_METHODS = ("direct", "robust")
 def run_comparison(input_path=DEFAULT_INPUT, output_root=None, start_time=None, end_time=None, max_iter=None):
     """Compare soil heat, stomatal and soil temperature methods for this scene."""
     input_path = Path(input_path).resolve()
+    if input_path.suffix.lower() == ".json":
+        raise ValueError("--compare uses CSV: first run the JSON, then pass its generated input.csv")
     config = read_input(input_path)
     input_data = InputStructure.from_config(config, input_path.parent)
     output_root = Path(output_root).resolve() if output_root else input_data.case_dir.resolve()
@@ -662,21 +711,36 @@ def run_comparison(input_path=DEFAULT_INPUT, output_root=None, start_time=None, 
     return summary_path
 
 
-def main():
+def main(argv=None, *, default_input=None, default_output_dir=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
+    parser.add_argument("--input", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--compare", action="store_true")
     parser.add_argument("--output-root", type=Path)
     parser.add_argument("--start-time", type=float)
     parser.add_argument("--end-time", type=float)
     parser.add_argument("--max-iter", type=int)
-    args = parser.parse_args()
+    parser.add_argument("--output-dir", type=Path, help="JSON output directory")
+    parser.add_argument("--no-plots", action="store_true")
+    parser.add_argument("--show", action="store_true")
+    args = parser.parse_args(argv)
+    # Preserve the old CSV default for --compare; normal runs use input_tirteb.csv
+    # unless --input points to a JSON scene.
+    input_path = args.input or default_input or DEFAULT_INPUT
+    if args.show and args.no_plots:
+        parser.error("--show cannot be combined with --no-plots")
     if args.compare:
-        print(run_comparison(args.input, args.output_root, args.start_time, args.end_time, args.max_iter))
+        if args.output_dir is not None or args.show:
+            parser.error("--compare uses --output-root and does not plot")
+        print(run_comparison(input_path, args.output_root, args.start_time, args.end_time, args.max_iter))
     else:
-        run(args.input, args.output)
+        if args.output_dir is None and Path(input_path).suffix.lower() == ".json":
+            args.output_dir = default_output_dir
+        print(run(input_path, args.output, output_dir=args.output_dir,
+                  plots=not args.no_plots, show=args.show,
+                  start_time=args.start_time, end_time=args.end_time, max_iter=args.max_iter))
 
 
 if __name__ == "__main__":
+    # 默认读取 input_tirteb.csv；JSON 场景用 --input 指定。
     main()

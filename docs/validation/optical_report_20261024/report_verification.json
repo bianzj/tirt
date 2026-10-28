@@ -1,0 +1,30 @@
+{
+  "pdf_pages": 14,
+  "scene_charts": 10,
+  "figures": 13,
+  "optical_pairs": 1204,
+  "source_hashes_verified": true,
+  "metrics_recalculated": true,
+  "outputs": {
+    "docs/TIRT_光学验证报告.md": "0f8d4818f890564edf295d26df8f04a8e0cb0ce49627269c3cbfb72751ee0812",
+    "docs/TIRT_光学验证报告.pdf": "ec18bb9e76b79d142c0fa0c4c926be1f7ebfbd67d390d00e62f6597493710fec"
+  },
+  "visual_review": "passed",
+  "pages_visually_reviewed": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14
+  ],
+  "markdown_local_links_verified": 16
+}

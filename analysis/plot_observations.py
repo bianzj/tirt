@@ -2,7 +2,7 @@
 
 Examples:
     python analysis/plot_observations.py
-    python analysis/plot_observations.py --time 172.0 --bands 0p55 0p86 10p5
+    python analysis/plot_observations.py --time 172.0 --bands 0p67 0p86 10p5
     python analysis/plot_observations.py --result-dir cases/homogeneous_multispectral_rt
 """
 
@@ -46,7 +46,7 @@ def read_observations(path: Path) -> list[dict[str, float | str]]:
                     converted[key] = value
             rows.append(converted)
     if not rows:
-        raise ValueError(f"没有读取到观测数据: {path}")
+        raise ValueError(f"No observation data read from: {path}")
     return rows
 
 
@@ -81,7 +81,7 @@ def select_rows(rows: list[dict[str, float | str]], selected_time: float | None)
         return times
     nearest = min(times, key=lambda value: abs(value - selected_time))
     if not math.isclose(nearest, selected_time, rel_tol=0.0, abs_tol=1e-8):
-        raise ValueError(f"时间 {selected_time} 不在 observations.csv 中，可选时间: {times}")
+        raise ValueError(f"Time {selected_time} is not in observations.csv; available times: {times}")
     return [nearest]
 
 
@@ -217,7 +217,7 @@ def main() -> None:
     parser.add_argument(
         "--bands",
         nargs="+",
-        help="wavelength tags, for example 0p55 0p86 10p5",
+        help="wavelength tags, for example 0p67 0p86 10p5",
     )
     args = parser.parse_args()
 
@@ -228,7 +228,7 @@ def main() -> None:
         requested = set(args.bands)
         fields = [field for field in fields if field_stem(field) in requested]
         if not fields:
-            raise ValueError(f"没有匹配的波段: {sorted(requested)}")
+            raise ValueError(f"No matching bands: {sorted(requested)}")
 
     case_name = safe_name(args.result_dir.resolve().name)
     output_root = args.output_dir.resolve() if args.output_dir else ANALYSIS_DIR / case_name

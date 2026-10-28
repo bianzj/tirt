@@ -28,40 +28,14 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from run import run  # noqa: E402
 from base.inputio import read_input  # noqa: E402
 from base.version import __version__  # noqa: E402
-from gui.tirteb_server import _time_request, _json_safe  # noqa: E402
-
-
-FILE_INPUTS = {
-    "wavelengths": ("spectral_source", "spectrals_file", "wavelengths.txt"),
-    "leaf_spectrum": ("vegetation_spectrum_source", "vegetation_spectrum_file", "leaf_spectrum.txt"),
-    "soil_spectrum": ("soil_spectrum_source", "soil_spectrum_file", "soil_spectrum.txt"),
-    "terrain_spectrum": ("terrain_spectrum_source", "terrain_spectrum_file", "terrain_spectrum.txt"),
-    "roof_spectrum": ("roof_spectrum_source", "roof_spectrum_file", "roof_spectrum.txt"),
-    "wall_spectrum": ("wall_spectrum_source", "wall_spectrum_file", "wall_spectrum.txt"),
-    "street_spectrum": ("street_spectrum_source", "street_spectrum_file", "street_spectrum.txt"),
-}
+from gui.tirteb_server import _check_paths, _time_request, _json_safe  # noqa: E402
 
 
 def _prepare_overrides(payload: dict, work_dir: Path) -> dict:
     raw_overrides = payload.get("overrides", {})
-    uploaded_files = payload.get("files")
-    if uploaded_files is None:
-        uploaded_files = {}
-    if not isinstance(raw_overrides, dict) or not isinstance(uploaded_files, dict):
-        raise ValueError("overrides and files must be objects")
+    if not isinstance(raw_overrides, dict):
+        raise ValueError("overrides must be an object")
     overrides = {str(key): value for key, value in raw_overrides.items()}
-    for key, (source_key, path_key, filename) in FILE_INPUTS.items():
-        contents = uploaded_files.get(key)
-        if not contents:
-            continue
-        if not isinstance(contents, str):
-            raise ValueError(f"{key} must contain text")
-        file_path = work_dir / filename
-        file_path.write_text(contents, encoding="utf-8")
-        overrides[source_key] = "file"
-        overrides[path_key] = str(file_path)
-        if key == "wavelengths":
-            overrides["observation_spectral_mode"] = "file"
     geometry_text = payload.get("geometry_text")
     if geometry_text:
         if not isinstance(geometry_text, str):
@@ -77,6 +51,7 @@ def _prepare_overrides(payload: dict, work_dir: Path) -> dict:
             else:
                 overrides["geometry_file"] = str(geometry_file)
                 overrides["geometry_mode"] = 2
+    _check_paths(overrides, work_dir)
     return overrides
 
 
@@ -142,7 +117,20 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
         super().end_headers()
 
+    def _trusted_request(self) -> bool:
+        """Block DNS rebinding and cross-site requests to the local API."""
+        bound, port = self.server.server_address[:2]
+        names = {"127.0.0.1", "localhost", "[::1]", f"[{bound}]" if ":" in bound else bound}
+        hosts = {f"{name}:{port}".lower() for name in names}
+        if self.headers.get("Host", "").strip().lower() not in hosts:
+            return False
+        origin = self.headers.get("Origin")
+        return origin is None or origin.strip().lower() in {f"http://{host}" for host in hosts}
+
     def do_GET(self):  # noqa: N802
+        if urlparse(self.path).path.startswith("/api/") and not self._trusted_request():
+            self._json(403, {"ok": False, "error": "Forbidden: request must come from the local TiRT page"})
+            return
         if urlparse(self.path).path == "/api/version":
             info_path = PROJECT_ROOT / 'build_info.json'
             info = json.loads(info_path.read_text(encoding='utf-8')) if info_path.exists() else {}
@@ -155,6 +143,9 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):  # noqa: N802
         path = urlparse(self.path).path
+        if path.startswith("/api/") and not self._trusted_request():
+            self._json(403, {"ok": False, "error": "Forbidden: request must come from the local TiRT page"})
+            return
         if path == "/api/shutdown":
             self._json(200, {"ok": True, "message": "TiRT is shutting down"})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
@@ -183,11 +174,25 @@ class Handler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
-            report = {}
-            output = run(PROJECT_ROOT / "input.csv", work_dir / "output.csv", report=report, **overrides)
-            rows = _read_csv(output)
+            lai_text = str(overrides.pop("lai", "")).strip()
+            lai_values = [float(item) for item in lai_text.replace(",", ";").split(";") if item.strip()]
+            if not lai_values:
+                raise ValueError("LAI must contain at least one positive number")
+            if any(not 0 <= item <= 20 for item in lai_values):
+                raise ValueError("LAI values must be in 0..20")
+            rows = []
+            omitted = 0
+            for index, lai in enumerate(lai_values):
+                report = {}
+                output = work_dir / f"output_lai_{index}.csv"
+                run(PROJECT_ROOT / "input.csv", output, report=report,
+                    **dict(overrides, lai=str(lai)))
+                omitted += int(report.get("omitted_backface", 0))
+                for row in _read_csv(output):
+                    row["lai"] = lai
+                    rows.append(row)
             self._json(200, {"ok": True, "rows": rows, "count": len(rows),
-                             "omitted_backface": report.get("omitted_backface", 0)})
+                             "lai_count": len(lai_values), "omitted_backface": omitted})
         except Exception as exc:
             self._json(400, {"ok": False, "error": str(exc)})
         finally:

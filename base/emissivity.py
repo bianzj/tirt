@@ -25,7 +25,7 @@ def emissivity_direct(Pcom,Ecom):
 
 
 
-def emissivity_scatter_analytical(lai, emis_l, emis_s, vza, sza, view_gap=None, hemi_gap=None):
+def emissivity_scatter_analytical(lai, emis_l, emis_s, vza, sza, view_gap=None, hemi_gap=None, sunlit_volume=None):
     '''
     组分有效发射率，组分观测比例*组分发射率 + 多次散射项
     :param lai:  叶面积指数
@@ -35,13 +35,14 @@ def emissivity_scatter_analytical(lai, emis_l, emis_s, vza, sza, view_gap=None, 
     :param sza:    太阳天顶角
     :param view_gap: 实际冠层的视向间隙率；缺省为均质冠层
     :param hemi_gap: 实际冠层的半球间隙率；缺省为均质冠层
+    :param sunlit_volume: 实际冠层的光照叶片比例；缺省为均质冠层
     :return:
     '''
 
     refl_s = 1-emis_s
     refl_l = 1-emis_l
     Mleaf_sunlit, Mleaf_shaded = multiple_scattering_analytical_sunlit(
-        lai, vza, sza, refl_s, refl_l, bv=view_gap, M=hemi_gap)
+        lai, vza, sza, refl_s, refl_l, bv=view_gap, M=hemi_gap, Vsunlit=sunlit_volume)
     number_angle = np.size(vza)
     eemis_ss = np.zeros(number_angle)
     eemis_sh = np.zeros(number_angle)

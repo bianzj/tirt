@@ -1,9 +1,9 @@
 {
   "name": "tirt",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
-  "description": "TiRT thermal infrared radiative transfer simulator",
+  "description": "TiRT terrestrial inhomogeneous radiative transfer simulator",
   "type": "module",
   "main": "desktop/main.mjs",
   "scripts": {

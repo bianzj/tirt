@@ -1,31 +1,11 @@
 import math
 import numpy as np
 
-from .gap import gap_probability_hom_analytical
-from .hotspot import hotspot_analytical, hotspot_layer, hotspot_vegetation_volume
 from .proportion import proportion_bidirectional_crown_one, proportion_bidirectional_hom_one, proportion_bidirectional_row_one
-from .rt_transfer import (
-    diffuse_scatter_tir,
-    diffuse_scatter_vnir,
-    directional_single_scatter,
-    tirt_direct,
-    tirt_scatter,
-)
 from .terrain_rt import compound_terrain_proportions
 from .soilopt import hapke_reflectance
 
-
-SIGMA = 5.67e-8
-
-
-def _shade_components(values):
-    components = np.asarray(values, dtype=float).reshape(4, -1)
-    return np.vstack((
-        np.zeros_like(components[0]),
-        components[0] + components[1],
-        np.zeros_like(components[0]),
-        components[2] + components[3],
-    ))
+SOLAR_CONSTANT = 1361.0
 
 
 def relative_azimuth(saa, vaa):
@@ -37,7 +17,8 @@ def relative_azimuth(saa, vaa):
 def _vegetation_proportions(settings, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
     lai = max(float(settings["lai"]), 0.0)
     if lai <= 0.0:
-        return np.asarray([1.0, 0.0, 0.0, 0.0])
+        # Bare ground still has to honour the illumination state: a shaded facet is not sunlit soil.
+        return np.asarray([0.0, 1.0, 0.0, 0.0]) if not sunlit else np.asarray([1.0, 0.0, 0.0, 0.0])
     sza_ = np.asarray([min(max(float(sza), 0.0), 89.9)])
     vza_ = np.asarray([min(max(float(vza), 0.0), 89.9)])
     saa_ = np.asarray([float(saa)])
@@ -91,46 +72,11 @@ def _component_proportions(settings, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
     return _vegetation_proportions(settings, sza, saa, vza, vaa, sunlit)
 
 
-def component_proportions(settings, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
-    return _component_proportions(settings, sza, saa, vza, vaa, sunlit)
-
-
 def optical_properties(settings):
     rho = min(max(float(settings["leaf_reflectance"]), 0.0), 0.99)
     tau = min(max(float(settings["leaf_transmittance"]), 0.0), 0.99 - rho)
     soil = min(max(float(settings["soil_reflectance"]), 0.0), 0.99)
     return rho, tau, soil, 1.0 - rho - tau, 1.0 - soil
-
-
-def legacy_directional_reflectance(
-    settings, sza, saa, vza, vaa, leaf_rho, leaf_tau, soil_rho,
-    sunlit=True, use_hapke=None,
-):
-    """Calculate a view-direction reflectance with the same RT angular terms."""
-    proportions = _component_proportions(settings, sza, saa, vza, vaa, sunlit)
-    soil_fraction = float(proportions[0] + proportions[1])
-    leaf_fraction = float(proportions[2] + proportions[3])
-    if use_hapke is None:
-        use_hapke = int(settings.get("hapke_enable", settings.get("hapke_optical_enable", 0))) == 1
-    if use_hapke:
-        soil_direct = hapke_reflectance(
-            vza,
-            settings.get("hapke_K", 1.0),
-            soil_rho,
-        )
-    else:
-        soil_direct = float(soil_rho)
-    base = soil_fraction * soil_direct + leaf_fraction * float(leaf_rho)
-    if leaf_fraction <= 1.0e-12 or float(settings.get("lai", 0.0)) <= 0.0:
-        return float(np.clip(base, 0.0, 1.0))
-    raa = float(relative_azimuth(saa, vaa))
-    directional = directional_single_scatter(
-        settings["lai"], leaf_rho, leaf_tau, sza, vza, raa,
-    )
-    reference = directional_single_scatter(
-        settings["lai"], leaf_rho, leaf_tau, sza, vza, 90.0,
-    )
-    return float(np.clip(base + directional - reference, 0.0, 1.0))
 
 
 def directional_reflectance(
@@ -139,17 +85,29 @@ def directional_reflectance(
 ):
     """Optical BRF/HDRF with direct shadows and a diffuse transport field.
 
-    The legacy thermal angular correction has its own explicit entry point.
-    An unspecified sky fraction means direct-only BRF; TIRTEB passes the
-    resolved meteorological fraction explicitly for mixed illumination.
+    Mixed illumination defaults to 80% direct + 20% diffuse, matching the shared
+    shortwave convention; pass ``diffuse_fraction`` explicitly to override it.
     """
     from .vnir import canopy_reflectance
     model = str(settings.get('vegetation_model','hom')).lower()
     if diffuse_fraction is None:
-        diffuse_fraction = max(float(settings.get('shortwave_diffuse_fraction',0)),0)
+        configured = float(settings.get('shortwave_diffuse_fraction', 0.2))
+        diffuse_fraction = 0.2 if configured < 0.0 else configured
     if use_hapke is None:
         use_hapke = int(settings.get('hapke_enable',settings.get('hapke_optical_enable',0))) == 1
     is_crown = (model in ('crown','forest') or settings.get('surface_type',0) in (1,2,3,4,5))
+    from . import canopy_closure
+    bare_terrain = (canopy_closure.closure(settings) != 'legacy' and not use_hapke
+                    and settings.get('surface_model','plane') == 'terrain'
+                    and int(settings.get('terrain_type', 1)) == 2
+                    and not is_crown and float(settings.get('lai',0)) <= 0.0)
+    if (canopy_closure.closure(settings) != 'legacy' and settings.get('surface_model','plane') == 'terrain'
+            and int(settings.get('terrain_type', 1)) == 2 and not use_hapke and model in ('hom','row','raw')
+            and float(settings.get('lai',0)) > 0):
+        from .optical_terrain_standard import reflectance
+        return reflectance(dict(settings, vegetation_model='row' if model in ('row','raw') else 'hom'),
+                           float(sza),float(saa),float(vza),float(vaa),
+                           float(leaf_rho),float(leaf_tau),float(soil_rho),diffuse_fraction,sunlit)
     if (is_crown and settings.get('surface_model','plane') == 'terrain'
             and int(settings.get('terrain_type', 1)) == 2 and not use_hapke):
         method = settings.get('optical_terrain_method', 'facet_exchange')
@@ -160,6 +118,11 @@ def directional_reflectance(
             method='reciprocal_exchange'
         if method not in ('facet_exchange', 'effective_slab', 'finite_crown_ports', 'reciprocal_exchange'):
             raise ValueError('Unknown optical terrain method: '+str(method))
+        from . import canopy_closure
+        if canopy_closure.closure(settings) != 'legacy' and method != 'effective_slab':
+            from .optical_terrain_standard import reflectance
+            return reflectance(settings,float(sza),float(saa),float(vza),float(vaa),
+                               float(leaf_rho),float(leaf_tau),float(soil_rho),diffuse_fraction,sunlit)
         if method == 'reciprocal_exchange':
             from .optical_terrain_reciprocal import reflectance
             return reflectance(settings,float(sza),float(saa),float(vza),float(vaa),
@@ -173,23 +136,29 @@ def directional_reflectance(
             return terrain_crown_reflectance(settings, float(sza), float(saa), float(vza), float(vaa),
                                               float(leaf_rho), float(leaf_tau), float(soil_rho),
                                               diffuse_fraction, sunlit)
+    # The generic path below computes illumination from the joint integral;
+    # the thermal two-layer hotspot approximation is not used for VNIR.
     homogeneous = (model not in ('row','raw','crown','forest')
                    and settings.get('surface_type',0) not in (1,2,3,4,5,12,14)
                    and settings.get('distribution',0) != 2
                    and not (settings.get('surface_model') == 'terrain'
                             and int(settings.get('terrain_type',1)) == 2))
-    if homogeneous:
-        view_gap = math.exp(-0.5*float(settings.get('lai',0))/max(math.cos(math.radians(vza)),1e-6))
-        # The optical joint integral computes illumination below; do not call
-        # the thermal two-layer hotspot approximation for homogeneous VNIR.
-        fractions = np.asarray([view_gap,0,1-view_gap,0])
-        solar = fractions
-    else:
-        fractions = _component_proportions(settings,sza,saa,vza,vaa,sunlit)
-        solar = _component_proportions(settings,sza,saa,sza,saa,True)
+    if bare_terrain:
+        # Bare compound terrain: the terrain already supplies the sunlit/shaded soil fractions,
+        # so the Lambertian soil reflects the beam only where the surface is both seen and lit.
+        parts = np.asarray(_component_proportions(settings, sza, saa, vza, vaa, sunlit), float).reshape(4)
+        if not sunlit:
+            parts = np.asarray([0.0, parts[0] + parts[1], 0.0, parts[2] + parts[3]])
+        visible_soil = float(parts[0] + parts[1])
+        sunlit_soil = float(parts[0]) / visible_soil if visible_soil > 1.0e-12 else 0.0
+        direct = (0.0 if diffuse_fraction >= 1.0 else (1.0 - diffuse_fraction) * soil_rho * sunlit_soil)
+        return float(direct + diffuse_fraction * soil_rho)
     # Optical-only dispatch. Thermal observations call the separate legacy
     # function above; shared component and emissivity functions are unchanged.
     is_crown = (model in ('crown','forest') or settings.get('surface_type',0) in (1,2,3,4,5))
+    is_row = (model in ('row','raw') or settings.get('distribution',0) == 2
+              or settings.get('surface_type',0) in (12,14)) and not is_crown
+    closure = str(settings.get('row_closure') or '').strip().lower()
     if is_crown and settings.get('surface_model','plane') == 'plane' and not use_hapke:
         method = settings.get('optical_crown_method','component_exchange')
         if method not in ('component_exchange','effective_slab'):
@@ -201,14 +170,33 @@ def directional_reflectance(
                                      diffuse_fraction,sunlit)
     soil_direct = (hapke_reflectance(vza,settings.get('hapke_K',1),soil_rho)
                    if use_hapke else soil_rho)
+    if is_row and closure and settings.get('surface_model','plane') == 'plane':
+        from .row_closure import optical_reflectance
+        return optical_reflectance(closure, closure, settings, sza, saa, vza, vaa, float(leaf_rho),
+                                   float(leaf_tau), float(soil_rho), diffuse_fraction, sunlit, soil_direct)
+    from . import canopy_closure
+    if (canopy_closure.closure(settings) != 'legacy' and settings.get('surface_model','plane') == 'plane'
+            and not is_crown and (homogeneous or is_row)):
+        kind = 'row' if is_row else 'hom'
+        shape = tuple(float(settings[key]) for key in ('row_width','row_blank','row_height')) if is_row else None
+        return canopy_closure.reflectance(
+            kind, float(settings.get('lai',0)), float(settings.get('hspot',0.1)), shape, float(leaf_rho),
+            float(leaf_tau), float(soil_rho), float(vza), float(vaa), float(sza), float(saa),
+            float(settings.get('row_azimuth',0.0)) if is_row else 0.0, None, diffuse_fraction, sunlit, float(soil_direct),
+            canopy_closure.closure(settings))
+    if homogeneous:
+        view_gap = math.exp(-0.5*float(settings.get('lai',0))/max(math.cos(math.radians(vza)),1e-6))
+        fractions = np.asarray([view_gap,0,1-view_gap,0])
+        solar = fractions
+    else:
+        fractions = _component_proportions(settings,sza,saa,vza,vaa,sunlit)
+        solar = _component_proportions(settings,sza,saa,sza,saa,True)
     value = canopy_reflectance(
         float(settings.get('lai',0)),float(settings.get('hspot',0.1)),
         float(leaf_rho),float(leaf_tau),float(soil_rho),float(sza),float(vza),
         float(relative_azimuth(saa,vaa)),fractions,float(solar[0]+solar[1]),
         homogeneous,diffuse_fraction,sunlit,soil_direct,
     )
-    is_row = (model in ('row','raw') or settings.get('distribution',0) == 2
-              or settings.get('surface_type',0) in (12,14)) and not is_crown
     if is_row and not use_hapke and sunlit and diffuse_fraction < 1:
         method = settings.get('optical_row_method', 'conditioned_corridor')
         if method not in ('conditioned_corridor', 'effective_slab'):
@@ -221,27 +209,13 @@ def directional_reflectance(
     return float(value)
 
 
-def _empty_shortwave():
-    return {
-        "directVrad_incident": 0.0, "directVrad_incident_spectrum": [],
-        "diffuseVrad_incident": 0.0, "diffuseVrad_incident_spectrum": [],
-        "directVrad_leaf": 0.0, "diffuseVrad_leaf": 0.0,
-        "directVrad_soil": 0.0, "diffuseVrad_soil": 0.0,
-        "diffuseVrad_soil_spectrum": [], "diffuseVrad_soil_incident_spectrum": [],
-        "directPrad_leaf": 0.0, "diffusePrad_leaf": 0.0,
-        "shortwave_global": 0.0, "shortwave_direct_incident": 0.0,
-        "shortwave_diffuse_incident": 0.0, "shortwave_diffuse_fraction": 0.0,
-        "fractions": np.zeros(4),
-    }
-
-
-def _shortwave_diffuse_fraction(settings, global_shortwave, sza):
+def _requested_shortwave_diffuse_fraction(settings, global_shortwave, sza):
     """Partition horizontal global shortwave with Erbs when no fraction is supplied."""
     configured = float(settings.get("shortwave_diffuse_fraction", -1.0))
     if 0.0 <= configured <= 1.0:
         return configured
     cos_sza = max(math.cos(math.radians(float(sza))), 1.0e-6)
-    extraterrestrial_horizontal = 1361.0 * cos_sza
+    extraterrestrial_horizontal = SOLAR_CONSTANT * cos_sza
     clearness = min(max(float(global_shortwave) / extraterrestrial_horizontal, 0.0), 1.2)
     if clearness <= 0.22:
         diffuse_fraction = 1.0 - 0.09 * clearness
@@ -255,148 +229,58 @@ def _shortwave_diffuse_fraction(settings, global_shortwave, sza):
     return min(max(diffuse_fraction, 0.0), 1.0)
 
 
-def prepare_shortwave(settings, meteo, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
-    result = _empty_shortwave()
-    rin = float(meteo["shortwave"])
-    if rin < 20.0 or sza >= 89.9:
-        return result
-    diffuse_fraction = _shortwave_diffuse_fraction(settings, rin, sza)
-    direct_horizontal = rin * (1.0 - diffuse_fraction)
-    diffuse_horizontal = rin * diffuse_fraction
-    result["shortwave_global"] = rin
-    result["shortwave_direct_incident"] = direct_horizontal
-    result["shortwave_diffuse_incident"] = diffuse_horizontal
-    result["shortwave_diffuse_fraction"] = diffuse_fraction
-    rho, tau, soil, leaf_abs, soil_abs = optical_properties(settings)
-    leaf_rho_spectrum = settings.get("leaf_reflectance_spectrum", [])
-    leaf_tau_spectrum = settings.get("leaf_transmittance_spectrum", [])
-    soil_spectrum = settings.get("soil_reflectance_spectrum", [])
-    street_spectrum = settings.get("urban_reflectance_street_spectrum", [])
-    urban_street = str(settings.get("surface_model", "")).strip().lower() == "urban"
-    wavelengths = settings.get("wavelengths", [])[:2001]
-    fesun = settings.get("fesun", [])[:2001]
-    fesky = settings.get("fesky", [])[:2001]
-    if len(fesun) != 2001 or len(fesky) != 2001:
-        fesun = np.full(2001, 1.0 / 2001.0)
-        fesky = np.full(2001, 1.0 / 2001.0)
-        wavelengths = np.arange(400.0, 2401.0)
-    for index in range(2001):
-        lrho = leaf_rho_spectrum[index] if len(leaf_rho_spectrum) == 2001 else rho
-        ltau = leaf_tau_spectrum[index] if len(leaf_tau_spectrum) == 2001 else tau
-        rs = (street_spectrum[index] if urban_street and len(street_spectrum) == 2001 else soil_spectrum[index] if len(soil_spectrum) == 2001 else soil)
-        labs = 1.0 - lrho - ltau
-        sabs = 1.0 - rs
-        esun = direct_horizontal * float(fesun[index]) * 0.001
-        esky = diffuse_horizontal * float(fesky[index]) * 0.001
-        try:
-            if settings["lai"] > 0.0:
-                diffuse_leaf, diffuse_soil, diffuse_soil_incident = diffuse_scatter_vnir(
-                    settings["lai"], lrho, ltau, rs, sza, esun, esky, vza,
-                    float(relative_azimuth(saa, vaa)), return_incident=True,
-                )
-            else:
-                diffuse_leaf, diffuse_soil, diffuse_soil_incident = 0.0, esky * sabs, esky
-        except (FloatingPointError, IndexError, ValueError, ZeroDivisionError, OverflowError):
-            diffuse_leaf, diffuse_soil, diffuse_soil_incident = 0.0, 0.0, 0.0
-        # The meteorological shortwave driver is the incoming horizontal
-        # irradiance.  Converting it back to normal irradiance with 1/cos(SZA)
-        # creates an artificial sunrise/sunset singularity near 90 degrees.
-        result["directVrad_incident"] += esun if sunlit else 0.0
-        result["directVrad_incident_spectrum"].append(esun if sunlit else 0.0)
-        result["diffuseVrad_incident"] += esky
-        result["diffuseVrad_incident_spectrum"].append(esky)
-        direct_leaf = esun * labs if sunlit else 0.0
-        direct_soil = esun * sabs if sunlit else 0.0
-        result["directVrad_leaf"] += direct_leaf
-        result["directVrad_soil"] += direct_soil
-        result["diffuseVrad_leaf"] += diffuse_leaf
-        result["diffuseVrad_soil"] += diffuse_soil
-        result["diffuseVrad_soil_spectrum"].append(diffuse_soil)
-        result["diffuseVrad_soil_incident_spectrum"].append(diffuse_soil_incident)
-        wl = wavelengths[index]
-        if 400.0 <= wl <= 700.0:
-            result["directPrad_leaf"] += direct_leaf * wl * 1e-3 / (6.02214e23 * 6.6262e-34 * 299792458.0)
-            result["diffusePrad_leaf"] += diffuse_leaf * wl * 1e-3 / (6.02214e23 * 6.6262e-34 * 299792458.0)
-    result["fractions"] = _component_proportions(settings, sza, saa, vza, vaa, sunlit)
-    result.update({"rho_leaf": rho, "tau_leaf": tau, "rho_soil": soil})
-    return result
+def _orbital_factor(settings):
+    day = settings.get('solar_day_of_year')
+    # Without a date use the perihelion value, the largest admissible factor.
+    return 1.0+0.033*math.cos(2.0*math.pi*float(day)/365.0) if day is not None else 1.033
 
 
-def prepare_longwave(settings, meteo, state, sza=0.0, saa=0.0, vza=0.0, vaa=0.0):
-    result = {"directTrad_leaf": 0.0, "diffuseTrad_leaf": 0.0, "directTrad_soil": 0.0, "diffuseTrad_soil": 0.0}
-    sky = float(meteo["longwave"])
-    lai = float(settings["lai"])
-    shortwave = max(float(meteo.get("shortwave", 0.0)), 0.0)
-    leaf_emissivity = max(1.0 - float(settings["leaf_reflectance"]), 0.0)
-    # The upper leaf side sees the sky, while the lower side sees the
-    # vegetation/soil boundary.  Treating both sides as sky was the main
-    # reason for unrealistically cold leaves at night.
-    lower_surface = 0.5 * SIGMA * (state["Tss"] ** 4 + state["Tsh"] ** 4)
-    sky_leaf = leaf_emissivity * (sky + lower_surface)
-    sky_soil = sky * (1.0 - settings["soil_reflectance"])
-    # The TIR transfer approximation uses the solar direction as its source
-    # direction and becomes ill-conditioned at the horizon.  Fade it out
-    # before that limit and use the sky boundary when the shortwave driver
-    # says that the sun is effectively absent.
-    tir_weight = max(0.0, min(1.0, (80.0 - float(sza)) / 10.0))
-    if lai > 0.0 and shortwave >= 20.0 and sza < 89.0 and tir_weight > 0.0:
-        lai_rt = lai
-        if settings["surface_type"] in (1, 2, 3, 4, 5):
-            lai_rt = lai
-        # diffuse_scatter_tir returns (soil, leaf); keep the component order
-        # explicit here so the hotter leaf emission cannot heat shaded soil.
-        tir_soil, tir_leaf = diffuse_scatter_tir(lai_rt, settings["leaf_reflectance"], 0.0, settings["soil_reflectance"], sza, sky, state["Tss"], state["Tsh"], state["Tls"], state["Tlh"], vza, float(relative_azimuth(saa, vaa)))
-        result["diffuseTrad_leaf"] = tir_weight * max(float(tir_leaf), 0.0) + (1.0 - tir_weight) * sky_leaf
-        result["diffuseTrad_soil"] = tir_weight * max(float(tir_soil), 0.0) + (1.0 - tir_weight) * sky_soil
-    elif lai > 0.0:
-        # At night (or with the sun below the local horizon), the canopy still
-        # exchanges longwave radiation with the sky.  Returning zero here made
-        # every leaf lose two-sided emission without an atmospheric input.
-        result["diffuseTrad_leaf"] = sky_leaf
-        result["diffuseTrad_soil"] = sky_soil
-    else:
-        result["diffuseTrad_soil"] = sky_soil
-    result["longwave_down"] = sky
-    result["tir_scatter_soil"] = result["diffuseTrad_soil"]
-    result["tir_scatter_leaf"] = result["diffuseTrad_leaf"]
-    return result
+def _solar_direct_normal_limit(settings, sza):
+    """Clear-sky direct normal irradiance [W m-2] used as the beam upper bound."""
+    sza = float(sza)
+    if sza >= 90.0:
+        return 0.0
+    # Meinel & Meinel (1976) DNI = 1367*E0*0.7**(AM**0.678); air mass from Kasten & Young (1989).
+    air_mass = 1.0/(math.cos(math.radians(sza))+0.50572*(96.07995-sza)**-1.6364)
+    return 1367.0*_orbital_factor(settings)*0.7**(air_mass**0.678)
 
 
-def merge_radiation(shortwave, longwave):
-    result = dict(shortwave)
-    result.update(longwave)
-    result["shortwave_direct"] = shortwave.get("directVrad_leaf", 0.0) + shortwave.get("directVrad_soil", 0.0)
-    result["shortwave_diffuse"] = shortwave.get("diffuseVrad_leaf", 0.0) + shortwave.get("diffuseVrad_soil", 0.0)
-    result["soil_sunlit"] = shortwave.get("directVrad_soil", 0.0) + shortwave.get("diffuseVrad_soil", 0.0) + longwave.get("diffuseTrad_soil", 0.0)
-    result["soil_shaded"] = shortwave.get("diffuseVrad_soil", 0.0) + longwave.get("diffuseTrad_soil", 0.0)
-    result["leaf_sunlit"] = shortwave.get("directVrad_leaf", 0.0) + shortwave.get("diffuseVrad_leaf", 0.0) + longwave.get("diffuseTrad_leaf", 0.0)
-    result["leaf_shaded"] = shortwave.get("diffuseVrad_leaf", 0.0) + longwave.get("diffuseTrad_leaf", 0.0)
-    return result
+def clearness_index(settings, global_shortwave, sza):
+    """Global horizontal over top-of-atmosphere horizontal irradiance; nan with the sun down."""
+    cos_sza = math.cos(math.radians(float(sza)))
+    if cos_sza <= 0.0:
+        return float('nan')
+    return float(global_shortwave)/(SOLAR_CONSTANT*_orbital_factor(settings)*cos_sza)
 
 
-def radiative_transfer_diagnostics(settings, state, vza=0.0, vaa=0.0):
-    lai = max(float(settings["lai"]), 0.0)
-    if lai <= 0.0:
-        return {"gap_view": 1.0, "gap_sun": 1.0, "hotspot_leaf": 0.0, "hotspot_soil": 1.0, "tirt_direct_soil_sun": 1.0, "tirt_direct_soil_shade": 0.0, "tirt_direct_leaf_sun": 0.0, "tirt_direct_leaf_shade": 0.0, "tirt_scatter_soil_sun": 0.0, "tirt_scatter_soil_shade": 0.0, "tirt_scatter_leaf_sun": 0.0, "tirt_scatter_leaf_shade": 0.0}
-    sza, saa = state["sza"], state["saa"]
-    if sza >= 89.0:
-        return {"gap_view": float(gap_probability_hom_analytical(lai, vza)), "gap_sun": 0.0, "hotspot_leaf": 0.0, "hotspot_soil": 0.0, "sunlit_volume": 0.0, "tirt_direct_soil_sun": 0.0, "tirt_direct_soil_shade": 0.0, "tirt_direct_leaf_sun": 0.0, "tirt_direct_leaf_shade": 0.0, "tirt_scatter_soil_sun": 0.0, "tirt_scatter_soil_shade": 0.0, "tirt_scatter_leaf_sun": 0.0, "tirt_scatter_leaf_shade": 0.0}
-    direct = tirt_direct(lai, settings["hspot"], sza, saa, vza, vaa)
-    scatter = tirt_scatter(lai, settings["soil_reflectance"], settings["leaf_reflectance"], sza)
-    if not state.get("sunlit_surface", True):
-        direct = _shade_components(direct)
-        scatter = _shade_components(scatter)
-    return {
-        "gap_view": float(gap_probability_hom_analytical(lai, vza)),
-        "gap_sun": float(gap_probability_hom_analytical(lai, sza)),
-        "hotspot_leaf": float(np.asarray(hotspot_analytical(lai, settings["hspot"], np.asarray([vza]), np.asarray([sza]), relative_azimuth(saa, vaa)).reshape(-1)[0])),
-        "hotspot_soil": float(np.asarray(hotspot_layer(lai, settings["hspot"], np.asarray([vza]), np.asarray([sza]), relative_azimuth(saa, vaa)).reshape(-1)[0])),
-        "sunlit_volume": float(np.asarray(hotspot_vegetation_volume(lai, np.asarray([sza]))).reshape(-1)[0]),
-        "tirt_direct_soil_sun": direct[0], "tirt_direct_soil_shade": direct[1],
-        "tirt_direct_leaf_sun": direct[2], "tirt_direct_leaf_shade": direct[3],
-        "tirt_scatter_soil_sun": scatter[0], "tirt_scatter_soil_shade": scatter[1],
-        "tirt_scatter_leaf_sun": scatter[2], "tirt_scatter_leaf_shade": scatter[3],
-    }
+def clearness_index_warning(states):
+    """Summary of steps whose measured shortwave exceeds the top-of-atmosphere value."""
+    exceeded = [(float(state['time']), float(state['clearness_index'])) for state in states
+                if state.get('clearness_index_exceeds_one')]
+    if not exceeded:
+        return None
+    listed = '; '.join(f'{time:.4f} (kt={value:.2f})' for time, value in exceeded)
+    return (f'Clearness index kt>1 at {len(exceeded)}/{len(states)} time steps: {listed}. '
+            'Meteorological values are used as instantaneous values at their timestamps, including '
+            'period means; near sunrise/sunset a period mean can exceed the instantaneous top-of-atmosphere '
+            'irradiance. Total shortwave is kept and direct power above the clear-sky limit is treated as diffuse.')
 
 
-__all__ = ["relative_azimuth", "component_proportions", "optical_properties", "directional_reflectance", "prepare_shortwave", "prepare_longwave", "merge_radiation", "radiative_transfer_diagnostics"]
+def _shortwave_diffuse_fraction(settings, global_shortwave, sza):
+    """Admissible horizontal partition; excess direct power stays as diffuse.
+
+    This preserves measured total shortwave. The limit can be disabled for
+    deliberately artificial forcing with shortwave_enforce_solar_limit=0.
+    """
+    requested = _requested_shortwave_diffuse_fraction(settings, global_shortwave, sza)
+    if not int(settings.get('shortwave_enforce_solar_limit',1)):
+        return requested
+    total = max(float(global_shortwave),0.0)
+    if total <= 0.0:
+        return requested
+    horizontal_limit = _solar_direct_normal_limit(settings, sza)*max(math.cos(math.radians(sza)),0.0)
+    return max(requested,1.0-min(horizontal_limit/total,1.0))
+
+
+__all__ = ["relative_azimuth", "optical_properties", "directional_reflectance",
+           "clearness_index", "clearness_index_warning"]

@@ -17,12 +17,18 @@ COLUMNS = ("node", "time", "veg", "surface", "Ta_C", "Tss_C", "Tsh_C", "Tls_C", 
 
 def run_single(input_path, output_path, vza=0.0, vaa=0.0, wavelength=10.5, **overrides):
     import tirteb_run
+    from .io import _observation_band_table, read_input
+
+    overrides = {key: str(item) for key, item in overrides.items() if item is not None}
+    # The band table also sets the energy-balance emissivities, so it is used unchanged.
+    config = dict(read_input(input_path), **overrides)
+    bands = _observation_band_table(config, Path(input_path).resolve().parent)["wavelengths"]
+    if not any(abs(band - float(wavelength)) < 1.0e-9 for band in bands):
+        raise ValueError(f"wavelength {wavelength:g} um is not in the band table ({';'.join(f'{band:g}' for band in bands)}); add it to wavelengths")
     result = Path(output_path)
     full = tirteb_run.run(
         input_path, result.parent / "_tirteb" / "output.csv",
-        direction_source="direct", vza=str(vza), vaa=str(vaa),
-        spectral_source="direct", wavelengths=str(wavelength), observation_time_mode="all",
-        **{key: str(item) for key, item in overrides.items() if item is not None})
+        direction_source="direct", vza=str(vza), vaa=str(vaa), observation_time_mode="all", **overrides)
     with full.open(encoding="utf-8") as file:
         steps = list(csv.DictReader(file))
     with (full.parent / "observations.csv").open(encoding="utf-8") as file:

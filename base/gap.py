@@ -172,7 +172,7 @@ def gap_probability_row_analytical(lai, row_width, row_blank, row_height, xza, x
             bv[ind] = gap_probability_row_part36(row_width_[ind], row_blank_[ind], row_height, number[ind], density,
                                                  xza[ind])
 
-    return bv
+    return np.clip(bv, 0.0, 1.0)
 
 
 def gap_probability_row_zero(row_width, row_blank, row_height, density, xza, CI=1.0, G=0.5):
@@ -193,6 +193,11 @@ def gap_probability_row_zero(row_width, row_blank, row_height, density, xza, CI=
     return bv
 
 
+def _strip_pair(c1, x1, c2, x2, k):
+    """c1 e^-x1 + c2 e^-x2 + k (e^-x2 - e^-x1); k ~ 1/density, so the difference uses expm1."""
+    return c1 * np.exp(-x1) + c2 * np.exp(-x2) - k * np.exp(-x2) * np.expm1(x2 - x1)
+
+
 def gap_probability_row_part14(row_width_, row_blank_, row_height, number, density, xza, G=0.5):
     '''
     条带1/4
@@ -210,11 +215,11 @@ def gap_probability_row_part14(row_width_, row_blank_, row_height, number, densi
     tv = np.tan(np.deg2rad(xza))
     sv = np.sin(np.deg2rad(xza))
     ctg = 1.0 / tv
-    p1 = (number * row_spacing_ + row_width_ - row_height * tv - 2 * sv / G / density) * \
-         np.exp(-G * density * (row_height - number * row_blank_ * ctg) / uv)
-    p2 = (number * row_spacing_ + row_blank_ - row_height * tv + 2 * sv / G / density) * \
-         np.exp(-number * G * density * row_width_ * ctg / uv)
-    return (p1 + p2) / row_spacing_
+    k = 2 * sv / G / density
+    return _strip_pair(number * row_spacing_ + row_width_ - row_height * tv,
+                       G * density * (row_height - number * row_blank_ * ctg) / uv,
+                       number * row_spacing_ + row_blank_ - row_height * tv,
+                       number * G * density * row_width_ * ctg / uv, k) / row_spacing_
 
 
 def gap_probability_row_part2(row_width_, row_blank_, row_height, number, density, xza, G=0.5):
@@ -234,11 +239,11 @@ def gap_probability_row_part2(row_width_, row_blank_, row_height, number, densit
     tv = np.tan(np.deg2rad(xza))
     sv = np.sin(np.deg2rad(xza))
     ctg = 1.0 / tv
-    p1 = (-number * row_spacing_ - row_width_ + row_height * tv - 2 * sv / G / density) * \
-         np.exp(-(number + 1) * G * density * row_width_ * ctg / uv)
-    p2 = (number * row_spacing_ + row_blank_ - row_height * tv + 2 * sv / G / density) * \
-         np.exp(-number * G * density * row_width_ * ctg / uv)
-    return (p1 + p2) / row_spacing_
+    k = 2 * sv / G / density
+    return _strip_pair(-number * row_spacing_ - row_width_ + row_height * tv,
+                       (number + 1) * G * density * row_width_ * ctg / uv,
+                       number * row_spacing_ + row_blank_ - row_height * tv,
+                       number * G * density * row_width_ * ctg / uv, k) / row_spacing_
 
 
 def gap_probability_row_part36(row_width_, row_blank_, row_height, number, density, xza, G=0.5):
@@ -258,11 +263,11 @@ def gap_probability_row_part36(row_width_, row_blank_, row_height, number, densi
     tv = np.tan(np.deg2rad(xza))
     sv = np.sin(np.deg2rad(xza))
     ctg = 1.0 / tv
-    p1 = (-number * row_spacing_ - row_width_ + row_height * tv - 2 * sv / G / density) * \
-         np.exp(-(number + 1) * G * density * row_width_ * ctg / uv)
-    p2 = (-number * row_spacing_ - row_blank_ + row_height * tv + 2 * sv / G / density) * \
-         np.exp(-G * density * (row_height - (number + 1) * row_blank_ * ctg) / uv)
-    return (p1 + p2) / row_spacing_
+    k = 2 * sv / G / density
+    return _strip_pair(-number * row_spacing_ - row_width_ + row_height * tv,
+                       (number + 1) * G * density * row_width_ * ctg / uv,
+                       -number * row_spacing_ - row_blank_ + row_height * tv,
+                       G * density * (row_height - (number + 1) * row_blank_ * ctg) / uv, k) / row_spacing_
 
 
 def gap_probability_row_part5(row_width_, row_blank_, row_height, number, density, xza, G=0.5):
@@ -282,11 +287,11 @@ def gap_probability_row_part5(row_width_, row_blank_, row_height, number, densit
     tv = np.tan(np.deg2rad(xza))
     sv = np.sin(np.deg2rad(xza))
     ctg = 1.0 / tv
-    p1 = (-number * row_spacing_ - row_blank_ + row_height * tv + 2 * sv / G / density) * \
-         np.exp(- G * density * (row_height - (number + 1) * row_blank_ * ctg) / uv)
-    p2 = (number * row_spacing_ + row_width_ - row_height * tv - 2 * sv / G / density) * \
-         np.exp(- G * density * (row_height - number * row_blank_ * ctg) / uv)
-    return (p1 + p2) / row_spacing_
+    k = 2 * sv / G / density
+    return _strip_pair(number * row_spacing_ + row_width_ - row_height * tv,
+                       G * density * (row_height - number * row_blank_ * ctg) / uv,
+                       -number * row_spacing_ - row_blank_ + row_height * tv,
+                       G * density * (row_height - (number + 1) * row_blank_ * ctg) / uv, k) / row_spacing_
 
 
 ### 树干结构

@@ -80,6 +80,8 @@ h3 { font-size: 13px; font-weight: 650; margin-top: 5px; }
 .spectrum-row input, .temperature-row input { margin: 0; height: 29px; padding: 0 6px; font-size: 10px; min-width: 0; }
 .spectrum-row input[type="file"] { height: 29px; padding: 5px 3px; font-size: 9px; }
 .spectrum-head, .temperature-head { color: var(--muted); font-size: 9px; line-height: 1.3; text-transform: uppercase; letter-spacing: .05em; }
+.spectrum-derived { margin: 0; padding: 7px 6px; border-top: 1px solid var(--line); }
+.spectrum-row { grid-template-columns: 88px minmax(0, 1fr) 50px; }
 .temperature-row { grid-template-columns: 108px minmax(0, 1fr) minmax(0, 1fr); }
 .component-head { color: var(--muted); font-size: 9px; line-height: 1.3; text-transform: uppercase; letter-spacing: .05em; }
 .component-head small { font-size: 8px; letter-spacing: 0; text-transform: none; }
@@ -152,7 +154,7 @@ input[type="file"] { padding: 6px; color: var(--muted); }
 .results-panel { min-height: 0; overflow: auto; }
 .results-toolbar { position: sticky; top: 0; z-index: 2; background: rgba(17, 26, 25, .96); }
 .result-tools { display: flex; align-items: center; gap: 13px; }
-.result-tools label { display: flex; align-items: center; gap: 7px; margin: 0; }.result-tools select { width: 105px; height: 28px; margin: 0; }
+.result-tools label { display: flex; align-items: center; gap: 7px; margin: 0; }.result-tools select { width: 105px; height: 28px; margin: 0; }.result-tools #scene-select { width: auto; min-width: 105px; max-width: 260px; }
 #scenario-select { width: 160px; }
 .result-view-controls { display: flex; align-items: center; gap: 10px; }
 .result-view-controls .check-label { gap: 5px; color: var(--soft); white-space: nowrap; }
@@ -175,7 +177,7 @@ input[type="file"] { padding: 6px; color: var(--muted); }
 @media (max-width: 760px) { .topbar { height: auto; min-height: 70px; padding: 12px 15px; gap: 10px; align-items: flex-start; }.topbar-actions { flex-direction: column-reverse; align-items: flex-end; gap: 7px; }.workspace { display: block; padding: 10px; }.control-panel { max-height: none; margin-bottom: 10px; }.main-stage { display: block; }.scene-panel { height: 390px; margin-bottom: 10px; }.results-panel { min-height: 620px; }.metric-strip { grid-template-columns: 1fr 1fr; }.scene-legend { display: none; }.scene-readout { flex-wrap: wrap; } }
 
 
-/* STREAM TIRT light theme */
+/* RTLab TIRT light theme */
 :root {
   color-scheme: light;
   --ink: #173044;

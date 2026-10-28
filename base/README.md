@@ -15,4 +15,4 @@
 
 ## 参数化标准与 TIRTEB 衔接
 
-`crown_parametric.py`、`row_parametric.py` 为默认的树冠、垄行闭式四组分比例；`thermal_crown.py`、`thermal_row.py` 保留此前的 `clumping_dual`、`conditioned_corridor` 可选分支；`terrain_forest.py`、`urban_veg.py` 为地形与城市植被；`tirteb_tirt.py` 把 TIRTEB 的参数和组分温度映射到 `run._surface_result`；`single_point.py` 是单场景能量平衡入口。公式见[理论说明](../docs/TiRT_theory_and_methods.md)，与 HiSTREAM 的对比见[测试文档](../docs/TiRT_validation.md)。
+`crown_parametric.py`、`row_parametric.py` 为默认的树冠、垄行闭式四组分比例；`thermal_crown.py`、`thermal_row.py` 保留此前的 `clumping_dual`、`conditioned_corridor` 可选分支；`terrain_forest.py`、`urban_veg.py` 为地形与城市植被；`tirteb_tirt.py` 把 TIRTEB 的参数和组分温度映射到 `run._surface_result`（固定 `canopy_closure=standard`）；`tirteb_radiation.py` 是 TIRTEB 的辐射收支与平面/单坡观测，全部基于 `canopy_closure` 标准版和 `node_radiosity`；`single_point.py` 是单场景能量平衡入口。公式见[理论说明](../docs/TiRT_theory_and_methods.md)，与 HiSTREAM 的对比见[测试文档](../docs/TiRT_validation.md)。

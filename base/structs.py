@@ -127,9 +127,9 @@ class InputStructure:
     utc_offset_hours: float = 0.0
     start_time: float = float("-inf")
     end_time: float = float("inf")
-    latitude: float = 39.9
-    longitude: float = 116.4
-    dem: float = 0.0
+    latitude: float = 38.8555
+    longitude: float = 100.3722
+    dem: float = 1556.0
     slope: float = 0.0
     aspect: float = 0.0
     vza: float = 0.0
@@ -143,7 +143,6 @@ class InputStructure:
     stomatal_g0: float = 0.01
     soil_heat_fraction: float = 0.25
     urban_heat_fraction: float = 0.4
-    soil_depth_step: float = 0.05
     soil_temperature_method: str = "robust"
     urban_temperature_method: str = "robust"
     urban_rss: float = 3662.8562
@@ -152,7 +151,6 @@ class InputStructure:
     urban_lambda: float = 1.5
     urban_rbs: float = 10.0
     urban_temperature_c: float = 20.0
-    urban_depth_step: float = 0.05
     urban_emissivity_roof: float = 0.95
     urban_emissivity_wall: float = 0.92
     urban_emissivity_street: float = 0.955
@@ -167,9 +165,9 @@ class InputStructure:
     row_blank: float = 0.8
     row_height: float = 1.5
     row_azimuth: float = 0.0
-    crown_radius: float = 1.5
+    crown_rad_a: float = 3.0
+    crown_rad_b: float = 3.0
     crown_height: float = 3.0
-    crown_width: float = 3.0
     crown_density: float = 1.0
     building_density: float = 0.0015
     building_length: float = 10.0
@@ -214,7 +212,7 @@ class InputStructure:
                 case_name = "homogeneous"
             result_dir = cases_root / case_name
         direction_source = config.get("direction_source", config.get("observation_direction_mode", "file"))
-        spectral_source = config.get("spectral_source", config.get("observation_spectral_mode", "file"))
+        spectral_source = config.get("spectral_source", config.get("observation_spectral_mode", "direct"))
         return cls(
             surface_model=model,
             vegetation_model=vegetation,
@@ -236,9 +234,9 @@ class InputStructure:
             utc_offset_hours=_number(config, "utc_offset_hours", _number(config, "utc_offset", 0.0)),
             start_time=_number(config, "start_time", float("-inf")),
             end_time=_number(config, "end_time", float("inf")),
-            latitude=_number(config, "latitude", 39.9),
-            longitude=_number(config, "longitude", 116.4),
-            dem=_number(config, "dem"),
+            latitude=_number(config, "latitude", 38.8555),
+            longitude=_number(config, "longitude", 100.3722),
+            dem=_number(config, "dem", 1556.0),
             slope=_number(config, "slope"),
             aspect=_number(config, "aspect", _number(config, "slope_aspect")),
             vza=(numbers("vza", "observation_vza") or (0.0,))[0],
@@ -252,16 +250,14 @@ class InputStructure:
             stomatal_g0=_number(config, "stomatal_g0", 0.01),
             soil_heat_fraction=_number(config, "soil_heat_fraction", 0.25),
             urban_heat_fraction=_number(config, "urban_heat_fraction", 0.4),
-            soil_depth_step=_number(config, "soil_depth_step", 0.05),
             soil_temperature_method=str(config.get("soil_temperature_method") or config.get("temperature_method") or "robust").strip().lower(),
-            urban_temperature_method=str(config.get("temperature_method", config.get("urban_temperature_method", "robust"))).strip().lower(),
+            urban_temperature_method=str(config.get("urban_temperature_method") or config.get("temperature_method") or "robust").strip().lower(),
             urban_rss=_number(config, "urban_rss", 3662.8562),
             urban_cs=_number(config, "urban_cs", 1000000.0),
             urban_rhos=_number(config, "urban_rhos", 1800.0),
             urban_lambda=_number(config, "urban_lambda", 1.5),
             urban_rbs=_number(config, "urban_rbs", 10.0),
             urban_temperature_c=_number(config, "urban_temperature_c", 20.0),
-            urban_depth_step=_number(config, "urban_depth_step", 0.05),
             urban_emissivity_roof=_number(config, "urban_emissivity_roof", 0.95),
             urban_emissivity_wall=_number(config, "urban_emissivity_wall", 0.92),
             urban_emissivity_street=_number(config, "urban_emissivity_street", 0.955),
@@ -277,9 +273,9 @@ class InputStructure:
             row_blank=_number(config, "row_blank", _number(config, "ridge_blank", 0.8)),
             row_height=_number(config, "row_height", _number(config, "ridge_height", 1.5)),
             row_azimuth=_number(config, "row_azimuth", _number(config, "ridge_azimuth")),
-            crown_radius=_number(config, "crown_radius", 1.5),
+            crown_rad_a=_number(config, "crown_rad_a", 3.0),
+            crown_rad_b=_number(config, "crown_rad_b", 3.0),
             crown_height=_number(config, "crown_height", 3.0),
-            crown_width=_number(config, "crown_width", 3.0),
             crown_density=_number(config, "crown_density", 1.0),
             building_density=_number(config, "building_density", 0.0015),
             building_length=_number(config, "building_length", 10.0),
@@ -293,7 +289,7 @@ class InputStructure:
             observation_direction_mode=str(direction_source).strip().lower(),
             directions_file=path("directions_file", "data/directions/observation_directions.txt"),
             observation_spectral_mode=str(spectral_source).strip().lower(),
-            spectrals_file=path("spectrals_file", "data/spectrals/observation_spectrals.txt"),
+            spectrals_file=path("spectrals_file", "data/spectrals/observation_spectrals_tirteb.txt"),
             raw=dict(config),
         )
 
@@ -308,8 +304,8 @@ class InputStructure:
             return {**common, "row_width": self.row_width, "row_blank": self.row_blank,
                     "row_height": self.row_height, "row_azimuth": self.row_azimuth}
         if self.vegetation_model == "crown":
-            return {**common, "crown_radius": self.crown_radius, "crown_height": self.crown_height,
-                    "crown_width": self.crown_width, "crown_density": self.crown_density,
+            return {**common, "crown_rad_a": self.crown_rad_a, "crown_rad_b": self.crown_rad_b,
+                    "crown_height": self.crown_height, "crown_density": self.crown_density,
                     "gleaf": self.gleaf, "lidfa": self.lidfa, "lidfb": self.lidfb}
         if self.surface_model == "terrain":
             return {**common, "terrain_type": self.terrain_type,
@@ -348,8 +344,8 @@ class DefinedStructure(MappingStruct):
             "leaf": ("leaf_reflectance", "leaf_transmittance", "leaf_emissivity"),
             "biochemistry": ("vcmax", "ballberry_m", "leaf_type", "kv", "rdparam", "tparam", "tyear", "beta", "knpqs", "qls", "stressfactor", "stomatal_method", "stomatal_g0"),
             "soil_optical": ("soil_reflectance", "soil_emissivity", "hapke_enable", "hapke_K"),
-            "soil_thermal": ("soil_rss", "soil_cs", "soil_rhos", "soil_lambda", "soil_rbs", "soil_moisture", "soil_temperature_c", "satwater", "soil_depth_step", "soil_tir_water_effect", "soil_tir_emissivity_dry", "soil_tir_emissivity_wet", "soil_tir_moisture_dry", "soil_tir_moisture_wet"),
-            "urban_thermal": ("urban_rss", "urban_cs", "urban_rhos", "urban_lambda", "urban_rbs", "urban_temperature_c", "urban_depth_step", "urban_wall_thickness", "urban_wall_layers", "urban_internal_temperature_c", "urban_wall_diffuse_factor", "urban_emissivity_roof", "urban_emissivity_wall", "urban_emissivity_street"),
+            "soil_thermal": ("soil_rss", "soil_cs", "soil_rhos", "soil_lambda", "soil_rbs", "soil_moisture", "soil_temperature_c", "satwater", "soil_tir_water_effect", "soil_tir_emissivity_wet", "soil_tir_moisture_dry", "soil_tir_moisture_wet"),
+            "urban_thermal": ("urban_rss", "urban_cs", "urban_rhos", "urban_lambda", "urban_rbs", "urban_temperature_c", "urban_wall_thickness", "urban_wall_layers", "urban_internal_temperature_c", "urban_wall_diffuse_factor", "urban_emissivity_roof", "urban_emissivity_wall", "urban_emissivity_street"),
             "urban_spectrum": ("urban_spectrum_source", "urban_spectrum_file", "urban_reflectance_roof_spectrum", "urban_reflectance_wall_spectrum", "urban_reflectance_street_spectrum", "urban_emissivity_roof_spectrum", "urban_emissivity_wall_spectrum", "urban_emissivity_street_spectrum"),
             "run": ("soil_heat_method", "urban_heat_method", "soil_temperature_method", "urban_temperature_method", "soil_heat_fraction", "urban_heat_fraction", "temperature_method"),
             "aerodynamic": ("aero_zo", "aero_d", "aero_rbc", "aero_cr", "aero_cd", "aero_cd1", "aero_psicor", "aero_cssoil", "aero_rwc", "aero_rbs"),

@@ -12,7 +12,7 @@
 | `data/defined/` | 定义参数、太阳/天空光谱、光学系数、气象数据 | 能量平衡功能需要 |
 | `data/directions/` | 观测方向输入 | 文件角度模式需要 |
 | `data/spectrals/` | TiRT 示例光谱 | 文件光谱模式需要 |
-| `cases/` | 案例输入和本地生成结果 | 运行时按需生成 |
+| `cases/` | 案例输入和本地生成结果（CSV 运行默认写入 `cases/<case_name>/`） | 运行时按需生成 |
 | `gui/` | TiRT 统一页面、静态资源和本地服务 | GUI 使用时需要 |
 | `desktop/` | Electron 桌面窗口、服务启动和退出清理 | 桌面窗口需要 |
 | `plot/` | TiRT 输出绘图 | 绘图时需要 |
@@ -24,13 +24,16 @@
 
 ## 根目录入口
 
-- `run.py`：TiRT 主入口，读取 `input.csv`。
-- `tirteb_run.py`：TiRT 能量平衡时间序列兼容入口，读取 `input_tirteb.csv`。
+- `optical_run.py`：TiRT 光学运行入口，用 `--input <场景>.json` 指定案例；输出多光谱/多角度 CSV 和两张图。
+- `thermal_run.py`：读取热红外 JSON，默认多 LAI、多光谱和多角度 CSV 与两张图；直接指定组分温度，不求能量平衡，不带 `--input` 时读取 `input.csv`。
+- `run.py`：方向性兼容入口与共用后端，同一张 `output.csv` 可同时包含短波 `reflectance_brf` 和 10.5 µm 亮温，已有调用保持可用。
+- `base/scenario_runner.py`：多 LAI、光谱/角度扫描、结果导出与可选绘图；不依赖 GUI 或案例脚本。
+- `tirteb_run.py`：能量平衡入口，默认温度/通量时间序列 CSV 与两张图；不带 `--input` 时读取 `input_tirteb.csv`。
+- `base/energy_runner.py`：能量平衡 JSON 转换、引用路径解析、时间序列导出和绘图；数值求解仍使用原后端。
 - `base/single_point.py`：单场景能量平衡（一个方向、一个波段），`python -m base.single_point`。
 - `input.csv`、`input_tirteb.csv`：两个输入模板，使用同一套参数名称和含义（共有参数由 `base/inputio.py` 解析）。`input.csv` 额外给出组分温度，`input_tirteb.csv` 额外给出气象、能量平衡和短波光学参数。
 - `start_tirt.*`：TiRT 桌面窗口启动脚本；只需启动它。
-- `build_tirt_exe.bat`、`electron-builder.yml`：Windows 桌面版打包配置，生成安装包和 `TiRT.exe`。
-- `build/TiRT-service.spec`：由构建脚本自动生成的后台服务配置，不需要手工维护。
+- `scripts/build_installer.py`、`electron-builder.yml`、`desktop/installer.nsh`：Windows 安装包构建；中间文件写入 `build/installer/`，安装包写入 `release/v<版本>/`。
 
 ## 推荐工作流
 
@@ -48,9 +51,10 @@
 
 ## 验证
 
+项目不再附带 `examples/` 场景示例；模型复算与精度检查统一使用 `validation/`。
 与 HiSTREAM 的对比见[测试文档](docs/TiRT_validation.md)，复算命令：
 
 ```bat
 cd /d C:\work\tirt
-python scripts\validate_current_model.py --plots
+python validation\validate_current_model.py --plots
 ```

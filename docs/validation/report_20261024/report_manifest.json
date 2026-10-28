@@ -1,0 +1,28 @@
+{
+  "date": "2026-10-24",
+  "pdf_pages": 7,
+  "rendered_pages_checked": 7,
+  "optical_research_source": "闻建光团队",
+  "thermal_research_source": "杜永明团队",
+  "files_sha256": {
+    "docs\\TiRT_validation.md": "f5db9c6aaff65de905ee13ed2e4be1cc46b558ce62394534f51d40e04005567c",
+    "docs\\TIRT_光学与热红外测试报告.pdf": "7a98a4f12f7da47fcf1c559ff41de540147ecd5be00b9364a9051cd511aefc32",
+    "docs\\validation\\report_20261024\\accuracy.csv": "d29bd8b2d3544714f0f1453550727b62e59eec84b50d189a21fcf8a9d6915762",
+    "docs\\validation\\report_20261024\\all_results.csv": "d68d81e09bb6156c0328a1c0644255d95ca031dac7620f16f8ee561fe351c224",
+    "docs\\validation\\report_20261024\\coverage.csv": "d92cfa993bf314a9dc1cb8ea78cf6f143a3b0dd17e9e3dcdf5918ea17b98e609",
+    "docs\\validation\\report_20261024\\optical_lai_angles.csv": "9c0b8472db0a328689b51b031d6c4e89d8716cae3fe48624ca4ae5b7079cd003",
+    "docs\\validation\\report_20261024\\optical_lai_spectrum.csv": "f5652ccbb4ea07dd5eb8ad5b257ae6feec4344866e6ebc9635e04cbba4138102",
+    "docs\\validation\\report_20261024\\reference_comparison.csv": "2f5d2fadc666674dbf120f255e5c82f24b3e1d66150b34d647508e9e703437d7",
+    "docs\\validation\\report_20261024\\thermal_lai_angles.csv": "852e4c41033213455d6462c506f691e1b4a35b4b9791e58343ddf70ed1115b2b",
+    "docs\\validation\\report_20261024\\thermal_lai_spectrum.csv": "76c16a241bb8591f903b2ff310c6fd0b909a4bb095c4ab0536a41ff5e19cf90f",
+    "docs\\validation\\report_20261024\\optical_lai_angles.png": "90a75a1618cbd77ab90ff79b0e18547e584624a88d027ee5088c4e0a40238b27",
+    "docs\\validation\\report_20261024\\optical_lai_spectrum.png": "8d2135925447bfba174c73ac408ca9ef5ac345ae19031bb4f95984c45e81fab3",
+    "docs\\validation\\report_20261024\\optical_rmse.png": "7eb1cb65fd26802632c7e03fd56a6ff6cea1952b998686d0a69760beb9d27924",
+    "docs\\validation\\report_20261024\\thermal_lai_angles.png": "c063d5970e146fd9e504e07ecec274970e898e62b1c26d06474bf866e478d51f",
+    "docs\\validation\\report_20261024\\thermal_lai_spectrum.png": "b41903b0ebc01a4584a268f6758743f606ee9c708856110ea2f1efda399bbd70",
+    "docs\\validation\\report_20261024\\thermal_rmse.png": "3f38f5906cbfb9b3069166b8c16dc3b6dd897004807c8f76a07b8222ddd8e409",
+    "docs\\validation\\report_20261024\\scenario_verification.json": "97dff81c5c0e607dc8a1a1e9c2bdc19a7bcffad55fb3513fbca650ae32656c19",
+    "docs\\validation\\report_20261024\\verification.json": "f9770f8b2dc33ba6806c16de7a731cb1afa71582b77362c27c8bce1a3e0a2c34",
+    "docs\\validation\\report_20261024\\scenario_batch.json": "5a83e34cb9ec88a7150514484828babdf229649aa5110d8a5b5fcba735745d34"
+  }
+}

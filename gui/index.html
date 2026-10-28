@@ -1,11 +1,12 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TIRT-Static 1.1.2 — 静态场景</title>
-  <link rel="stylesheet" href="styles.css?v=stream-tirt-light-3">
-  <link rel="stylesheet" href="model_identity.css?v=1.1.2">
+  <title>TIRT-Static 1.2.0 — Static scene</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="styles.css?v=stream-tirt-light-4">
+  <link rel="stylesheet" href="model_identity.css?v=1.2.0">
   <script type="importmap">
     {
       "imports": {
@@ -19,12 +20,12 @@
   <div class="app-shell">
     <header class="topbar">
       <div class="brand-lockup">
-        <div class="brand-logo model-static" aria-label="STREAM TIRT">
-          <span class="logo-stream">STREAM</span><span class="logo-slash" aria-hidden="true"></span><span class="logo-tirt">TIRT</span>
-          <span class="app-version" aria-label="Version 1.1.2">v1.1.2</span>
+        <div class="brand-logo model-static" aria-label="RTLab TIRT">
+          <span class="logo-stream">RTLab</span><span class="logo-slash" aria-hidden="true"></span><span class="logo-tirt">TIRT</span>
+          <span class="app-version" aria-label="Version 1.2.0">v1.2.0</span>
         </div>
         <div>
-          <div class="eyebrow">THERMAL INFRARED RADIATIVE TRANSFER</div>
+          <div class="eyebrow">TERRESTRIAL INHOMOGENEOUS RADIATIVE TRANSFER</div>
           <h1>TIRT-Static · <span>Static scene</span></h1>
         </div>
       </div>
@@ -34,7 +35,7 @@
         <span id="status-pill" class="status-pill idle"><i></i><span>Ready</span></span>
         <button id="run-button" class="button button-primary" aria-busy="false"><span class="button-icon run-icon" aria-hidden="true">&#9654;</span><span class="button-label">Run simulation</span></button>
         <button id="save-output-button" class="button button-secondary" disabled><span class="button-icon">&#8595;</span>Save observations.csv</button>
-        <button id="export-button" class="button button-secondary"><span class="button-icon">&#8595;</span>Save input.csv</button>
+        <button id="export-button" class="button button-secondary"><span class="button-icon">&#8595;</span>Save inputs (.zip)</button>
         <button id="exit-button" class="button button-danger" title="Exit TiRT"><span class="button-icon">&#10005;</span>Exit</button>
       </div>
     </header>
@@ -87,8 +88,8 @@
           <div class="subsection-title">Vegetation structure</div>
           <div id="vegetation-common-fields" class="conditional-fields">
             <div class="field-grid">
-              <label>LAI<input id="lai" type="number" min="0" step="0.1" value="1.5" required></label>
-              <label>Hotspot<input id="hspot" type="number" min="0" step="0.01" value="0.15" required></label>
+              <label>LAI<input id="lai" type="text" value="1;3;5" placeholder="1;3;5" title="One value or a semicolon-separated list, e.g. 1;3;5"></label>
+              <label>Hotspot<input id="hspot" type="text" value="0.15" placeholder="0.1;0.2" title="One value or a semicolon-separated list, e.g. 0.1;0.2"></label>
             </div>
           </div>
           <div id="row-structure-fields" class="conditional-fields is-hidden">
@@ -144,14 +145,15 @@
         <details class="form-section accordion">
           <summary class="section-title"><span class="section-number">03</span><span>Spectra</span><span class="accordion-mark">⌄</span></summary>
           <div class="spectrum-list">
-            <div class="spectrum-row spectrum-head"><span>Component</span><span>Emissivity</span><span>File</span></div>
-            <div class="spectrum-row"><strong>Wavelength bands</strong><input id="wavelengths" value="8;10.5;12" spellcheck="false"><span class="file-picker"><input id="wavelength-file" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Wavelength file"><label class="file-trigger" for="wavelength-file" title="Select wavelength file">...</label><span id="wavelength-file-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></span></div>
-            <div id="leaf-component-row" class="spectrum-row"><strong>Leaf</strong><input id="emissivity-leaf" value="0.975;0.985;0.980" spellcheck="false"><span class="file-picker"><input id="leaf-spectrum-file" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Leaf spectrum file"><label class="file-trigger" for="leaf-spectrum-file" title="Select leaf spectrum file">...</label><span id="leaf-spectrum-file-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></span></div>
-            <div id="soil-component-row" class="spectrum-row"><strong>Soil</strong><input id="emissivity-soil" value="0.920;0.955;0.965" spellcheck="false"><span class="file-picker"><input id="soil-spectrum-file" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Soil spectrum file"><label class="file-trigger" for="soil-spectrum-file" title="Select soil spectrum file">...</label><span id="soil-spectrum-file-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></span></div>
-            <div id="terrain-component-row" class="spectrum-row is-hidden"><strong>Terrain</strong><input id="emissivity-terrain" value="0.920;0.950;0.960" spellcheck="false"><span class="file-picker"><input id="terrain-spectrum-file" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Terrain spectrum file"><label class="file-trigger" for="terrain-spectrum-file" title="Select terrain spectrum file">...</label><span id="terrain-spectrum-file-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></span></div>
-            <div id="roof-component-row" class="spectrum-row is-hidden"><strong>Roof</strong><input id="emissivity-roof" value="0.920;0.950;0.940" spellcheck="false"><span class="file-picker"><input id="roof-spectrum-file" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Roof spectrum file"><label class="file-trigger" for="roof-spectrum-file" title="Select roof spectrum file">...</label><span id="roof-spectrum-file-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></span></div>
-            <div id="wall-component-row" class="spectrum-row is-hidden"><strong>Wall</strong><input id="emissivity-wall" value="0.900;0.930;0.920" spellcheck="false"><span class="file-picker"><input id="wall-spectrum-file" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Wall spectrum file"><label class="file-trigger" for="wall-spectrum-file" title="Select wall spectrum file">...</label><span id="wall-spectrum-file-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></span></div>
-            <div id="street-component-row" class="spectrum-row is-hidden"><strong>Street</strong><input id="emissivity-street" value="0.940;0.955;0.950" spellcheck="false"><span class="file-picker"><input id="street-spectrum-file" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Street spectrum file"><label class="file-trigger" for="street-spectrum-file" title="Select street spectrum file">...</label><span id="street-spectrum-file-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></span></div>
+            <div class="spectrum-row spectrum-head"><span>Property</span><span>One value per band (;)</span><span>Table file</span></div>
+            <div class="spectrum-row"><strong>Wavelength µm</strong><input id="wavelengths" value="0.67;0.86;10.5" spellcheck="false" aria-label="Wavelength bands"><span class="file-picker"><input id="band-table-file" class="file-input-hidden" type="file" accept=".txt,.csv" aria-label="Band table file"><label class="file-trigger" for="band-table-file" title="Load a 7-row band table">...</label><span id="band-table-file-status" class="file-status no-file" role="status" aria-label="No file selected">•</span></span></div>
+            <div class="spectrum-row"><strong>Leaf ρ</strong><input id="leaf-reflectance" value="0.05;0.45;0.015" spellcheck="false" aria-label="Leaf reflectance"><span></span></div>
+            <div class="spectrum-row"><strong>Leaf τ</strong><input id="leaf-transmittance" value="0.03;0.40;0.0" spellcheck="false" aria-label="Leaf transmittance"><span></span></div>
+            <div class="spectrum-row"><strong>Soil ρ</strong><input id="soil-reflectance" value="0.12;0.25;0.045" spellcheck="false" aria-label="Soil reflectance"><span></span></div>
+            <div class="spectrum-row"><strong>Street ρ</strong><input id="street-reflectance" value="0.12;0.18;0.045" spellcheck="false" aria-label="Street reflectance"><span></span></div>
+            <div class="spectrum-row"><strong>Wall ρ</strong><input id="wall-reflectance" value="0.20;0.25;0.07" spellcheck="false" aria-label="Wall reflectance"><span></span></div>
+            <div class="spectrum-row"><strong>Roof ρ</strong><input id="roof-reflectance" value="0.15;0.20;0.05" spellcheck="false" aria-label="Roof reflectance"><span></span></div>
+            <p id="thermal-emissivity-readout" class="field-note spectrum-derived"></p>
           </div>
         </details>
 
@@ -183,14 +185,14 @@
         <section class="results-panel panel">
           <div class="panel-toolbar results-toolbar">
             <div><span class="section-kicker">MODEL OUTPUT</span><h2>Directional results</h2></div>
-            <div class="result-tools"><div class="result-view-controls"><label class="check-label"><input id="show-polar" type="checkbox" checked><span>Polar</span></label><label class="check-label"><input id="show-parallel" type="checkbox" checked><span>Parallel</span></label><label class="check-label"><input id="show-perpendicular" type="checkbox" checked><span>Vertical</span></label><label>Quantity<select id="quantity"><option value="brightness_temperature_C">Temperature (°C)</option><option value="brightness_temperature_K">Temperature (K)</option><option value="radiance">Radiance</option></select></label></div><label>Scenario<select id="scenario-select"><option value="1">S01</option></select></label><label>Band<select id="band-select"><option>10.5 µm</option></select></label></div>
+            <div class="result-tools"><div class="result-view-controls"><label class="check-label"><input id="show-polar" type="checkbox" checked><span>Polar</span></label><label class="check-label"><input id="show-parallel" type="checkbox" checked><span>Parallel</span></label><label class="check-label"><input id="show-perpendicular" type="checkbox" checked><span>Vertical</span></label></div><label>Scene<select id="scene-select"><option>default</option></select></label><label>Band<select id="band-select"><option>10.5 µm</option></select></label></div>
           </div>
           <div id="empty-state" class="empty-state"><div class="empty-icon">&#9670;</div><h3>Run a simulation to inspect the directional field</h3><p>Choose a geometry mode and thermal band, then run the current input through TiRT.</p></div>
           <div id="results-content" class="results-content is-hidden">
             <div class="metric-strip">
               <div class="metric"><span>Mean temperature</span><strong id="mean-bt">--</strong><small>selected band</small></div>
               <div class="metric"><span>Directional span</span><strong id="range-bt">--</strong><small>max - min</small></div>
-              <div class="metric"><span>Radiance</span><strong id="mean-radiance">--</strong><small>W m⁻² sr⁻¹ µm⁻¹</small></div>
+              <div class="metric"><span>Band</span><strong id="metric-band">--</strong><small id="metric-band-kind">selected band</small></div>
               <div class="metric"><span>Observations</span><strong id="observation-count">--</strong><small>selected band</small></div>
             </div>
             <div id="chart-grid" class="chart-grid">
@@ -202,10 +204,10 @@
         </section>
       </section>
     </main>
-    <footer class="app-footer">出品: TIRTLab　邮箱: <a href="mailto:bianzj@aircas.ac.cn">bianzj@aircas.ac.cn</a></footer>
+    <footer class="app-footer">Produced by TIRTLab · Email: <a href="mailto:bianzj@aircas.ac.cn">bianzj@aircas.ac.cn</a></footer>
   </div>
   <div id="toast" class="toast" role="status"></div>
-  <script type="module" src="language.js?v=1"></script>
-  <script type="module" src="app.js?v=stream-tirt-light-3"></script>
+  <script type="module" src="language.js?v=2"></script>
+  <script type="module" src="app.js?v=stream-tirt-light-6"></script>
 </body>
 </html>

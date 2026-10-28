@@ -6,20 +6,22 @@ from pathlib import Path
 
 import numpy as np
 
+from base import canopy_closure
 from base.crown import Crown
 from base.hom import Hom
 from base.inputio import (
-    interpolate,
+    BAND_PROPERTIES,
+    is_input_snapshot,
     numbers,
+    read_band_table,
     read_geometry,
     read_input,
-    read_spectrum,
-    read_wavelengths,
     repeat_to,
     resolve_path,
     value,
     write_input_snapshot,
 )
+from base.optical import InvisibleDirection
 from base.physicsF import inv_planck, planck, slope1
 from base.row import Row
 from base.soilopt import hapke_directional_emissivity
@@ -36,7 +38,7 @@ OUTPUT_FIELDS = (
     "index", "scenario_id", "scenario_label", "surface_model", "vegetation_model", "model", "wavelength_um",
     "vza", "vaa", "sza", "saa", "raa", "emissivity_leaf", "emissivity_soil",
     "emissivity_roof", "emissivity_wall", "emissivity_street",
-    "radiance", "brightness_temperature_K", "brightness_temperature_C",
+    "radiance", "brightness_temperature_K", "brightness_temperature_C", "reflectance_brf",
 )
 
 SCENARIO_PARAMETERS = (
@@ -58,13 +60,17 @@ SCENARIO_PARAMETERS = (
 
 
 def _float(config, *keys, default=0.0):
-    return float(value(config, *keys, default=default))
+    raw = value(config, *keys, default=default)
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{keys[0]} must be a number, got {raw!r}") from exc
 
 
 def _temperature(config, name, default_c):
     kelvin = value(config, f"{name}_k")
     if kelvin not in (None, ""):
-        return float(kelvin)
+        return _float(config, f"{name}_k")
     return _float(config, f"{name}_c", default=default_c) + 273.15
 
 
@@ -81,42 +87,42 @@ def _canonical(config):
     vegetation = str(value(config, "vegetation_model", "vegetation", default="hom")).strip().lower()
     vegetation = {"homogeneous": "hom", "raw": "row", "row_crop": "row", "forest": "crown", "bare_soil": "bare"}.get(vegetation, vegetation)
     if surface not in {"plane", "slope", "terrain", "urban"}:
-        raise ValueError("surface_model 必须是 plane、slope、terrain 或 urban")
+        raise ValueError("surface_model must be plane, slope, terrain or urban")
     if vegetation not in {"bare", "hom", "row", "crown"}:
-        raise ValueError("vegetation_model 必须是 bare、hom、row 或 crown")
+        raise ValueError("vegetation_model must be bare, hom, row or crown")
     return surface, vegetation
 
 
 def _geometry(config, input_path):
     geometries = _geometry_unchecked(config, input_path)
     if not geometries:
-        raise ValueError("至少需要一个有效观测方向")
+        raise ValueError("At least one valid viewing direction is required")
     for geometry in geometries:
         if not np.all(np.isfinite(geometry)):
-            raise ValueError("观测与太阳角度必须为有限数值")
+            raise ValueError("Viewing and solar angles must be finite numbers")
         vza, vaa, sza, saa = geometry
         if not (0.0 <= vza <= 90.0 and 0.0 <= sza <= 90.0):
-            raise ValueError("vza 和 sza 必须位于 0 到 90 度之间")
+            raise ValueError("vza and sza must be between 0 and 90 degrees")
         if not (0.0 <= vaa <= 360.0 and 0.0 <= saa <= 360.0):
-            raise ValueError("vaa 和 saa 必须位于 0 到 360 度之间")
+            raise ValueError("vaa and saa must be between 0 and 360 degrees")
     return geometries
 
 
 def _geometry_unchecked(config, input_path):
-    sza_values = numbers(value(config, "sza", "solar_zenith"), (30.0,))
-    saa_values = numbers(value(config, "saa", "solar_azimuth"), (0.0,))
+    sza_values = numbers(value(config, "sza", "solar_zenith"), (30.0,), key="sza")
+    saa_values = numbers(value(config, "saa", "solar_azimuth"), (0.0,), key="saa")
     sza_default, saa_default = sza_values[0], saa_values[0]
     raw_mode = value(config, "geometry_mode", "observation_mode", "direction_mode")
     if raw_mode not in (None, ""):
         try:
             parsed_mode = float(raw_mode)
             if not np.isfinite(parsed_mode) or not parsed_mode.is_integer():
-                raise ValueError("geometry_mode 必须为整数")
+                raise ValueError("geometry_mode must be an integer")
             mode = int(parsed_mode)
         except ValueError as exc:
-            raise ValueError("geometry_mode 必须是 0、1、2 或 3") from exc
+            raise ValueError("geometry_mode must be 0, 1, 2 or 3") from exc
         if mode not in {0, 1, 2, 3}:
-            raise ValueError("geometry_mode 必须是 0、1、2 或 3")
+            raise ValueError("geometry_mode must be 0, 1, 2 or 3")
     else:
         source = str(value(config, "geometry_source", "direction_source", default="direct")).strip().lower()
         mode = 2 if source in {"file", "txt", "read"} else 0
@@ -136,18 +142,18 @@ def _geometry_unchecked(config, input_path):
             "both": (0.0, 90.0, 180.0, 270.0),
         }.get(plane)
         if relative_azimuths is None:
-            raise ValueError("geometry_view 必须是 parallel、perpendicular 或 both")
+            raise ValueError("geometry_view must be parallel, perpendicular or both")
         raw_vza = value(config, "principal_vza", "principal_plane_vza")
         if raw_vza not in (None, ""):
-            principal_vza = numbers(raw_vza)
+            principal_vza = numbers(raw_vza, key="principal_vza")
         else:
             step = _float(config, "principal_vza_step", default=10.0)
             maximum = _float(config, "principal_vza_max", default=75.0)
             if not np.isfinite(step) or not np.isfinite(maximum) or step <= 0.0 or not 0.0 <= maximum <= 90.0:
-                raise ValueError("principal_vza_step 必须大于 0，principal_vza_max 必须在 0 到 90 度之间")
+                raise ValueError("principal_vza_step must be greater than 0 and principal_vza_max must be between 0 and 90 degrees")
             principal_vza = _stepped_angles(maximum, step)
         if not principal_vza or any(angle < 0.0 or angle > 90.0 for angle in principal_vza):
-            raise ValueError("principal_vza 必须位于 0 到 90 度之间")
+            raise ValueError("principal_vza must be between 0 and 90 degrees")
         return [
             (view_zenith, (solar_azimuth + relative_azimuth) % 360.0, solar_zenith, solar_azimuth)
             for solar_zenith in sza_values
@@ -160,7 +166,7 @@ def _geometry_unchecked(config, input_path):
         raw_step = _float(config, "principal_vza_step", default=10.0)
         maximum = _float(config, "principal_vza_max", default=75.0)
         if not np.isfinite(raw_step) or not np.isfinite(maximum) or raw_step <= 0.0 or not 0.0 <= maximum <= 90.0:
-            raise ValueError("principal_vza_step 必须大于 0，principal_vza_max 必须在 0 到 90 度之间")
+            raise ValueError("principal_vza_step must be greater than 0 and principal_vza_max must be between 0 and 90 degrees")
         principal_vza = _stepped_angles(maximum, raw_step)
         include_principal = str(value(config, "include_principal", default="1")).strip().lower() not in {"0", "false", "no", "off"}
         include_hemisphere = str(value(config, "include_hemisphere", default="0")).strip().lower() not in {"0", "false", "no", "off"}
@@ -186,10 +192,10 @@ def _geometry_unchecked(config, input_path):
                 vza, vaa, sza, saa = read_geometry(path, sza_default, saa_default)
                 additional.extend(zip(vza, vaa, sza, saa))
         if source in {"direct", "manual", "angles"}:
-            vza = numbers(value(config, "observation_vza", "additional_vza"))
-            vaa = numbers(value(config, "observation_vaa", "additional_vaa"))
+            vza = numbers(value(config, "observation_vza", "additional_vza"), key="observation_vza")
+            vaa = numbers(value(config, "observation_vaa", "additional_vaa"), key="observation_vaa")
             if len(vza) != len(vaa):
-                raise ValueError("手动观测角度必须一一对应：observation_vza 和 observation_vaa 数量不同")
+                raise ValueError("Manual viewing angles must be paired: observation_vza and observation_vaa have different lengths")
             additional.extend((view_zenith, view_azimuth, sza_default, saa_default)
                               for view_zenith, view_azimuth in zip(vza, vaa))
         combined = []
@@ -201,11 +207,11 @@ def _geometry_unchecked(config, input_path):
                 combined.append(item)
         return combined
 
-    vza = numbers(value(config, "vza", "observation_vza"), (0.0, 30.0, 60.0))
-    vaa = numbers(value(config, "vaa", "observation_vaa"), (0.0, 90.0, 180.0))
+    vza = numbers(value(config, "vza", "observation_vza"), (0.0, 30.0, 60.0), key="vza")
+    vaa = numbers(value(config, "vaa", "observation_vaa"), (0.0, 90.0, 180.0), key="vaa")
     pair_mode = str(value(config, "geometry_pair_mode", default="cross")).strip().lower()
     if pair_mode not in {"cross", "zip", "pair", "paired"}:
-        raise ValueError("geometry_pair_mode 必须为 cross 或 zip")
+        raise ValueError("geometry_pair_mode must be cross or zip")
     if pair_mode in {"zip", "pair", "paired"}:
         size = max(len(vza), len(vaa), len(sza_values), len(saa_values))
         return list(zip(
@@ -217,92 +223,54 @@ def _geometry_unchecked(config, input_path):
             for solar_zenith in sza_values for solar_azimuth in saa_values]
 
 
-def _wavelengths(config, input_path):
-    source = str(value(config, "spectral_source", "wavelength_source", default="direct")).strip().lower()
+def _required_properties(surface, vegetation):
+    required = set() if vegetation == "bare" else {"leaf_reflectance", "leaf_transmittance"}
+    required |= {"street_reflectance", "wall_reflectance", "roof_reflectance"} if surface == "urban" else {"soil_reflectance"}
+    return required
+
+
+def _band_table(config, input_path):
+    """Wavelengths and per-band optical properties shared by the shortwave and thermal solvers."""
+    source = str(value(config, "spectral_source", default="direct")).strip().lower()
     if source in {"file", "txt", "read"}:
-        path = resolve_path(input_path, value(config, "spectrals_file", "wavelengths_file", default="wavelengths.txt"))
-        return np.asarray(read_wavelengths(path), dtype=float)
-    raw = value(config, "wavelengths", "observation_wavelengths", "wavelength", default=10.5)
-    result = np.asarray(numbers(raw), dtype=float)
-    if result.size == 0 or np.any(result <= 0.0):
-        raise ValueError("wavelengths 必须包含正数波长")
-    return result
+        path = resolve_path(input_path, value(config, "spectrals_file", default="data/spectrals/optical_properties.txt"))
+        rows = read_band_table(path, 1 + len(BAND_PROPERTIES))
+    else:
+        required = _required_properties(config["surface_model"], config["vegetation_model"])
+        rows = [numbers(value(config, "wavelengths"), key="wavelengths")]
+        for key in BAND_PROPERTIES:
+            raw = value(config, key)
+            if raw in (None, "") and key in required:
+                raise ValueError(f"{key} is required: one value per wavelength")
+            # Rows unused by this scene may be omitted; they never enter the result.
+            rows.append(numbers(raw, key=key) if raw not in (None, "") else (0.0,) * len(rows[0]))
+    wavelengths = np.asarray(rows[0], dtype=float)
+    if wavelengths.size == 0 or np.any(wavelengths <= 0.0):
+        raise ValueError("wavelengths must contain positive values")
+    if np.any(wavelengths < 0.4):
+        raise ValueError("Shortwave bands must be at least 0.4 um")
+    table = {"wavelengths": wavelengths}
+    for key, values in zip(BAND_PROPERTIES, rows[1:]):
+        values = np.asarray(values, dtype=float)
+        if values.size != wavelengths.size:
+            raise ValueError(f"{key} must have one value per wavelength: {values.size} != {wavelengths.size}")
+        if np.any(values < 0.0) or np.any(values > 1.0):
+            raise ValueError(f"{key} must be between 0 and 1")
+        table[key] = values
+    if np.any(table["leaf_reflectance"] + table["leaf_transmittance"] > 1.0 + 1.0e-12):
+        raise ValueError("leaf_reflectance + leaf_transmittance must not exceed 1")
+    return table
 
 
-def _typical_band_values(config, keys, wavelengths, defaults, label):
-    raw = value(config, *keys)
-    if raw in (None, ""):
-        return np.interp(wavelengths, np.asarray([8.0, 10.5, 12.0]), np.asarray(defaults, dtype=float))
-    result = np.asarray(numbers(raw), dtype=float)
-    if result.size != len(wavelengths):
-        raise ValueError(f"{label} 的数目必须与 wavelengths 的数目一致: {result.size} != {len(wavelengths)}")
-    return result
-
-
-def _spectra(config, input_path, wavelengths):
-    size = len(wavelengths)
-    file_mode = {"file", "txt", "read"}
-    leaf_from_file = str(value(config, "vegetation_spectrum_source", default="direct")).strip().lower() in file_mode
-    soil_from_file = str(value(config, "soil_spectrum_source", default="direct")).strip().lower() in file_mode
-    terrain_from_file = str(value(config, "terrain_spectrum_source", default="direct")).strip().lower() in file_mode
-    urban_from_file = str(value(config, "urban_spectrum_source", default="direct")).strip().lower() in file_mode
-    roof_from_file = str(value(config, "roof_spectrum_source", default="direct")).strip().lower() in file_mode
-    wall_from_file = str(value(config, "wall_spectrum_source", default="direct")).strip().lower() in file_mode
-    street_from_file = str(value(config, "street_spectrum_source", default="direct")).strip().lower() in file_mode
-    leaf_default = (0.975, 0.985, 0.980)
-    soil_default = (0.920, 0.955, 0.965)
-    terrain_default = (0.920, 0.950, 0.960)
-    roof_default = (0.920, 0.950, 0.940)
-    wall_default = (0.900, 0.930, 0.920)
-    street_default = (0.940, 0.955, 0.950)
-    leaf_e = np.interp(wavelengths, [8.0, 10.5, 12.0], leaf_default) if leaf_from_file else _typical_band_values(config, ("emissivity_leaf", "leaf_emissivity"), wavelengths, leaf_default, "emissivity_leaf")
-    soil_e = np.interp(wavelengths, [8.0, 10.5, 12.0], soil_default) if soil_from_file else _typical_band_values(config, ("emissivity_soil", "soil_emissivity"), wavelengths, soil_default, "emissivity_soil")
-    terrain_e = np.interp(wavelengths, [8.0, 10.5, 12.0], terrain_default) if terrain_from_file else _typical_band_values(config, ("emissivity_terrain", "terrain_emissivity"), wavelengths, terrain_default, "emissivity_terrain")
-    roof_e = np.interp(wavelengths, [8.0, 10.5, 12.0], roof_default) if urban_from_file or roof_from_file else _typical_band_values(config, ("emissivity_roof", "urban_emissivity_roof"), wavelengths, roof_default, "emissivity_roof")
-    wall_e = np.interp(wavelengths, [8.0, 10.5, 12.0], wall_default) if urban_from_file or wall_from_file else _typical_band_values(config, ("emissivity_wall", "urban_emissivity_wall"), wavelengths, wall_default, "emissivity_wall")
-    street_e = np.interp(wavelengths, [8.0, 10.5, 12.0], street_default) if urban_from_file or street_from_file else _typical_band_values(config, ("emissivity_street", "urban_emissivity_street"), wavelengths, street_default, "emissivity_street")
-
-    if leaf_from_file:
-        table = read_spectrum(resolve_path(input_path, value(config, "vegetation_spectrum_file")))
-        leaf_e = interpolate(table, wavelengths, 1)
-
-    if soil_from_file:
-        table = read_spectrum(resolve_path(input_path, value(config, "soil_spectrum_file")))
-        soil_e = interpolate(table, wavelengths, 1)
-
-    if terrain_from_file:
-        table = read_spectrum(resolve_path(input_path, value(config, "terrain_spectrum_file")))
-        terrain_e = interpolate(table, wavelengths, 1)
-
-    if urban_from_file:
-        table = read_spectrum(resolve_path(input_path, value(config, "urban_spectrum_file")))
-        if table.shape[1] >= 7:
-            roof_e, wall_e, street_e = (interpolate(table, wavelengths, col) for col in (4, 5, 6))
-        elif table.shape[1] >= 4:
-            roof_e, wall_e, street_e = (interpolate(table, wavelengths, col) for col in (1, 2, 3))
-        else:
-            raise ValueError("urban_spectrum_file 至少需要 wavelength roof wall street 四列")
-
-    for component, enabled, key in (
-        ("roof", roof_from_file, "roof_spectrum_file"),
-        ("wall", wall_from_file, "wall_spectrum_file"),
-        ("street", street_from_file, "street_spectrum_file"),
-    ):
-        if enabled:
-            table = read_spectrum(resolve_path(input_path, value(config, key)))
-            values = interpolate(table, wavelengths, 1)
-            if component == "roof": roof_e = values
-            elif component == "wall": wall_e = values
-            else: street_e = values
-
-    result = {
-        "leaf_e": np.asarray(leaf_e), "soil_e": np.asarray(soil_e), "terrain_e": np.asarray(terrain_e),
-        "roof_e": np.asarray(roof_e), "wall_e": np.asarray(wall_e), "street_e": np.asarray(street_e),
+def _spectra(table):
+    """Kirchhoff emissivities: leaf 1 - rho - tau, opaque surfaces 1 - rho; terrain facets share the soil material."""
+    soil_e = 1.0 - table["soil_reflectance"]
+    return {
+        "leaf_e": np.maximum(1.0 - table["leaf_reflectance"] - table["leaf_transmittance"], 0.0),
+        "soil_e": soil_e, "terrain_e": soil_e,
+        "roof_e": 1.0 - table["roof_reflectance"], "wall_e": 1.0 - table["wall_reflectance"],
+        "street_e": 1.0 - table["street_reflectance"],
     }
-    for component, emissivities in result.items():
-        if not np.all(np.isfinite(emissivities)) or np.any(emissivities < 0.0) or np.any(emissivities > 1.0):
-            raise ValueError(f"{component} 的发射率必须为 0 到 1 之间的有限值")
-    return result
 
 
 def _vegetation_temperatures(config):
@@ -317,14 +285,13 @@ def _soil_emissivity(config, view_zenith, base_emissivity):
     enabled = str(value(config, "hapke_enable", "soil_hapke_enable", default="0")).strip().lower()
     if enabled in {"0", "false", "no", "off"}:
         return float(base_emissivity)
-    reflectance = _float(config, "soil_reflectance", "soil_albedo", default=1.0 - float(base_emissivity))
     K = _float(config, "hapke_k", "soil_hapke_k", "hapke_K", default=1.0)
-    result = hapke_directional_emissivity(min(abs(float(view_zenith)), 89.999), K, 1.0 - reflectance)
+    result = hapke_directional_emissivity(min(abs(float(view_zenith)), 89.999), K, float(base_emissivity))
     return float(np.asarray(result).reshape(-1)[0])
 
 
 def _shape_values(config, key, default):
-    return numbers(value(config, key), (default,))
+    return numbers(value(config, key), (default,), key=key)
 
 
 def _terrain_shapes(config):
@@ -335,7 +302,7 @@ def _terrain_shapes(config):
     shapes = np.column_stack([repeat_to(heights, size, "terrain_height"), repeat_to(radii, size, "terrain_radius"), repeat_to(densities, size, "terrain_density")])
     occupied = float(np.sum(shapes[:, 2] * np.pi * shapes[:, 1] ** 2))
     if occupied >= 1.0:
-        raise ValueError("terrain_density * pi * terrain_radius^2 的总占据率必须小于 1")
+        raise ValueError("Total coverage terrain_density * pi * terrain_radius^2 must be less than 1")
     return shapes
 
 
@@ -353,10 +320,10 @@ def _urban_shapes(config):
         azimuths, (azimuths + 90.0) % 360.0,
     ])
     if np.any(shapes[:, :4] < 0.0):
-        raise ValueError("building_length、building_width、building_height 和 building_density 不能为负")
+        raise ValueError("building_length, building_width, building_height and building_density must not be negative")
     footprint = float(np.sum(shapes[:, 0] * shapes[:, 1] * shapes[:, 3]))
     if footprint >= 1.0:
-        raise ValueError(f"建筑占地比例 building_density * building_length * building_width 之和必须小于 1，当前为 {footprint:.4g}")
+        raise ValueError(f"Building footprint fraction (sum of building_density * building_length * building_width) must be less than 1; got {footprint:.4g}")
     return shapes
 
 
@@ -419,6 +386,19 @@ def _forest_options(config):
     return mode, inner, outer, transport
 
 
+def _canopy_structure(config, vegetation):
+    """(kind, shape, row azimuth, crown base) for canopy_closure."""
+    if vegetation == "row":
+        shape = (_float(config, "row_width", default=0.5), _float(config, "row_blank", default=0.5),
+                 _float(config, "row_height", default=1.0))
+        return "row", shape, _float(config, "row_azimuth", default=0.0), None
+    if vegetation == "crown":
+        rad_a, rad_b = _crown_semiaxes(config)
+        return "crown", (_float(config, "crown_density", default=0.02), rad_b, rad_a), 0.0, \
+            _float(config, "crown_height", default=3.0)
+    return "hom", None, 0.0, None
+
+
 def _vegetation_result(config, vegetation, wavelength, geometry, spectra):
     vza, vaa, sza, saa = geometry
     # The analytical crown and hotspot equations are singular exactly at the
@@ -435,6 +415,14 @@ def _vegetation_result(config, vegetation, wavelength, geometry, spectra):
     hspot = _float(config, "hspot", "vegetation_hspot", default=0.15)
     if lai == 0.0 or (vegetation == "crown" and _float(config, "crown_density", default=0.02) == 0.0):
         return _vegetation_result(config, "bare", wavelength, geometry, spectra)
+    level = canopy_closure.closure(config)
+    if level != "legacy" and not (vegetation == "row" and _row_closure(config)):
+        kind, shape, row_azimuth, base = _canopy_structure(config, vegetation)
+        weights = canopy_closure.thermal_weights(
+            kind, lai, hspot, shape, spectra["leaf_e"], spectra["soil_e"], model_vza, vaa, model_sza, saa,
+            row_azimuth, base, _soil_emissivity(config, model_vza, spectra["soil_e"]), level)
+        radiance = float(np.sum(weights * planck(wavelength, np.asarray([soil_sun, soil_shade, leaf_sun, leaf_shade]))))
+        return _checked_radiance(radiance, wavelength, f"plane+{vegetation}", geometry)
     if vegetation == "hom":
         model = Hom()
         model.set_structure(lai, hspot)
@@ -442,6 +430,7 @@ def _vegetation_result(config, vegetation, wavelength, geometry, spectra):
     elif vegetation == "row":
         model = Row()
         model.set_geometry(str(value(config, "thermal_row_geometry", default="parametric")).strip().lower())
+        model.set_closure(_row_closure(config))
         model.set_structure(lai, hspot, _float(config, "row_width", default=0.5), _float(config, "row_blank", default=0.5), _float(config, "row_height", default=1.0))
         model.set_angle(np.asarray([model_vza]), np.asarray([model_sza]), np.asarray([vaa]), np.asarray([saa]), np.asarray([_float(config, "row_azimuth", default=0.0)]))
     else:
@@ -480,7 +469,8 @@ def _slope_local_geometry(config, geometry):
 
 
 def _slope_result(config, vegetation, wavelength, geometry, spectra):
-    if vegetation == "crown" and _forest_options(config)[0] != "legacy":
+    standard = vegetation != "bare" and canopy_closure.closure(config) != "legacy"
+    if standard or (vegetation == "crown" and _forest_options(config)[0] != "legacy"):
         from base.solar import slope_direction
         slope = _float(config, "slope_angle", "terrain_slope", default=0.0)
         aspect = _float(config, "slope_aspect", "terrain_aspect", default=0.0)
@@ -490,6 +480,9 @@ def _slope_result(config, vegetation, wavelength, geometry, spectra):
         if not lit:
             local_config["soil_sunlit_k"] = _temperature(config, "soil_shaded", 30.0)
             local_config["leaf_sunlit_k"] = _temperature(config, "leaf_shaded", 30.0)
+        if vegetation == "row":
+            local_config["row_azimuth"] = slope_direction(90.0, _float(config, "row_azimuth", default=0.0),
+                                                          slope, aspect)[1]
         return _vegetation_result(local_config, vegetation, wavelength,
                                   (local_view, local_vaa, local_sun, local_saa), spectra)
     if vegetation == "bare":
@@ -542,10 +535,26 @@ def _slope_backface(config, geometry):
     return corrected_vza > 89.0 + 1.0e-9
 
 
+def _row_closure(config):
+    """Unified plane-row closure for thermal and shortwave bands, or None for the standard model."""
+    raw = value(config, "row_closure")
+    closure = None if raw in (None, "") else str(raw).strip().lower()
+    if closure not in (None, "legacy", "conditioned", "reference"):
+        raise ValueError("row_closure must be empty, legacy, conditioned or reference")
+    return closure
+
+
+def _check_row_closure(config, surface, vegetation):
+    closure = _row_closure(config)
+    if vegetation == "row" and surface != "plane" and closure is not None:
+        raise ValueError(f"row_closure={closure} currently supports plane rows only.")
+
+
 def _surface_result(config, surface, vegetation, wavelength, geometry, spectra):
     if (vegetation == "crown" and surface == "urban" and
             _forest_options(config)[0] not in ("legacy", "clumping_dual", "parametric")):
         raise ValueError("Urban thermal crown geometry supports legacy, clumping_dual or parametric.")
+    _check_row_closure(config, surface, vegetation)
     vza, vaa, sza, saa = geometry
     if surface == "plane":
         return _vegetation_result(config, vegetation, wavelength, geometry, spectra)
@@ -564,6 +573,10 @@ def _surface_result(config, surface, vegetation, wavelength, geometry, spectra):
             model = Terrain()
         else:
             model = TerrainForest()
+            if canopy_closure.closure(config) != "legacy":
+                if vegetation == "crown" and _forest_options(config)[3] == "reciprocal_exchange":
+                    raise ValueError("forest_transport=reciprocal_exchange requires canopy_closure=legacy.")
+                canopy_closure.install(model, canopy_closure.closure(config))
             if vegetation == "crown":
                 mode, inner, outer, transport = _forest_options(config)
                 if transport == "reciprocal_exchange" and outer is None:
@@ -633,10 +646,21 @@ def _surface_result(config, surface, vegetation, wavelength, geometry, spectra):
         if vegetation == "crown":
             model.set_hotspot_geometry(*_forest_options(config)[:3])
             model.crown_base = _float(config, "crown_height", default=3.0)
+        if canopy_closure.closure(config) != "legacy":
+            canopy_closure.install(model, canopy_closure.closure(config))
         model.set_spectral_input(spectra["street_e"], spectra["wall_e"], spectra["roof_e"], spectra["leaf_e"])
         component_temperatures = (wall_sun, wall_shade, street_sun, street_shade, roof_sun, roof_shade, leaf_sun, leaf_shade)
-    emissivity = _checked_components(
-        model.calculate_effective_component_emissivity(2), f"urban+{vegetation}", geometry, wavelength)
+    # The standard and upgrade closures share the street + four-wall radiosity of the optical urban model.
+    default_transport = "legacy" if canopy_closure.closure(config) == "legacy" else "radiosity"
+    transport = str(value(config, "urban_transport", default=default_transport) or default_transport).strip().lower()
+    if transport == "radiosity":
+        from base.urban_radiosity import effective_component_emissivity
+        weights = effective_component_emissivity(model)
+    elif transport == "legacy":
+        weights = model.calculate_effective_component_emissivity(2)
+    else:
+        raise ValueError("urban_transport must be legacy or radiosity")
+    emissivity = _checked_components(weights, f"urban+{vegetation}", geometry, wavelength)
     radiance = float(np.sum(emissivity * planck(wavelength, np.asarray(component_temperatures[:len(emissivity)]))))
     return _checked_radiance(radiance, wavelength, f"urban+{vegetation}", geometry)
 
@@ -648,7 +672,7 @@ def _scenario_configs(config):
         raw = value(config, *aliases)
         if raw in (None, ""):
             continue
-        values = tuple(float(item) for item in numbers(raw))
+        values = numbers(raw, key=key)
         if not values:
             continue
         entries.append((key, aliases, label, values))
@@ -686,9 +710,9 @@ def _sky_temperature(config):
     celsius = value(config, "sky_temperature_c")
     if kelvin in (None, "") and celsius in (None, ""):
         return None
-    result = float(kelvin) if kelvin not in (None, "") else float(celsius) + 273.15
+    result = _float(config, "sky_temperature_k") if kelvin not in (None, "") else _float(config, "sky_temperature_c") + 273.15
     if not np.isfinite(result) or result <= 0.0:
-        raise ValueError("sky_temperature 必须为正的有限温度")
+        raise ValueError("sky_temperature must be a positive finite temperature")
     return result
 
 
@@ -701,7 +725,93 @@ def _with_sky_reflection(config, surface, vegetation, wavelength, geometry, spec
     return _checked_radiance(total, wavelength, f"{surface}+{vegetation}", geometry)
 
 
-def _simulate_rows(config, input_path, surface, vegetation, wavelengths, spectra, scenario_id, scenario_label):
+def _optical_band(config, surface, vegetation, wavelength, geometry, band):
+    """Shortwave BRF from the explicit VNIR interface, using this band's optical properties."""
+    from base.optical import reflectance
+
+    settings = dict(config)
+    diffuse_fraction = _float(config, "shortwave_diffuse_fraction", default=0.2)
+    if diffuse_fraction < 0.0:
+        diffuse_fraction = 0.2
+    if not np.isfinite(diffuse_fraction) or not 0.0 <= diffuse_fraction <= 1.0:
+        raise ValueError("shortwave_diffuse_fraction must be between 0 and 1 for the directional optical model")
+    for key in ("lai", "hspot", "surface_type", "distribution", "row_width", "row_blank",
+                "row_height", "row_azimuth", "crown_rad_a", "crown_rad_b", "crown_height",
+                "crown_density", "stand_density", "height", "width", "slope_angle",
+                "slope_aspect", "terrain_type"):
+        if settings.get(key) not in (None, ""):
+            settings[key] = _float(settings, key)
+    if settings.get("shortwave_sunlit_surface") not in (None, ""):
+        settings["shortwave_sunlit_surface"] = str(settings["shortwave_sunlit_surface"]).lower() not in ("0", "false", "no")
+    settings.setdefault("surface_type", 0.0)
+    if surface == "terrain" and settings.get("terrain_type") in (None, ""):
+        settings["terrain_type"] = 2.0
+    settings.setdefault("distribution", 2.0 if vegetation in ("row", "raw") else 0.0)
+    settings.setdefault("stand_density", float(settings.get("crown_density", 0.02) or 0.02))
+    settings.setdefault("height", 2.0 * float(settings.get("crown_rad_b", 3.0) or 3.0))
+    settings.setdefault("width", 2.0 * float(settings.get("crown_rad_a", 3.0) or 3.0))
+    if canopy_closure.closure(config) != "legacy" and vegetation in ("crown", "forest"):
+        # Same crown as the thermal path: semiaxes crown_rad_b / crown_rad_a, density and base height.
+        rad_a, rad_b = _crown_semiaxes(config)
+        settings.update(height=rad_b, width=rad_a, stand_density=_float(config, "crown_density", default=0.02),
+                        crown_bottom=_float(config, "crown_height", default=3.0))
+    if vegetation == "bare":
+        settings["lai"] = 0.0
+    else:
+        settings["lai"] = _float(config, "lai", "vegetation_lai", default=1.5)
+    if surface == "urban":
+        shapes = _urban_shapes(config)
+        if len(shapes) > 1:
+            raise ValueError("The shortwave urban model supports a single building class; give one value per building_* parameter")
+        settings.update(zip(("urban_building_length", "urban_building_width", "urban_building_height",
+                             "urban_density", "urban_building_azimuth"), map(float, shapes[0, :5])))
+    settings.update(
+        surface_model=surface,
+        vegetation_model=vegetation,
+        wavelengths=[float(wavelength) * 1000.0],
+        leaf_reflectance=band["leaf_reflectance"],
+        leaf_transmittance=band["leaf_transmittance"],
+        soil_reflectance=band["soil_reflectance"],
+        leaf_reflectance_spectrum=[band["leaf_reflectance"]],
+        leaf_transmittance_spectrum=[band["leaf_transmittance"]],
+        soil_reflectance_spectrum=[band["soil_reflectance"]],
+        urban_reflectance_roof_spectrum=[band["roof_reflectance"]],
+        urban_reflectance_wall_spectrum=[band["wall_reflectance"]],
+        urban_reflectance_street_spectrum=[band["street_reflectance"]],
+        shortwave_diffuse_fraction=diffuse_fraction,
+        hapke_enable=0,
+    )
+    if surface == "terrain" and vegetation in ("crown", "forest"):
+        method = str(value(config, "optical_terrain_method",
+                           default="reciprocal_exchange")).strip().lower()
+        if method not in ("reciprocal_exchange", "facet_exchange",
+                          "finite_crown_ports", "effective_slab"):
+            raise ValueError("Unknown optical_terrain_method: " + method)
+        settings["optical_terrain_method"] = method
+        settings["forest_transport"] = (
+            "reciprocal_exchange" if method == "reciprocal_exchange" else "legacy")
+        if method in ("reciprocal_exchange", "finite_crown_ports"):
+            settings.setdefault("optical_crown_geometry", "clumping_dual")
+        if method == "reciprocal_exchange":
+            settings.setdefault("optical_terrain_source_depth", "effective_forest")
+            settings.setdefault("optical_hotspot_outer", 1.0)
+            settings.setdefault("crown_bottom",
+                                float(settings.get("crown_height", 3.0) or 3.0))
+    vza, vaa, sza, saa = geometry
+    if surface == "terrain" and vegetation not in ("crown", "forest"):
+        # The public VNIR wrapper restricts compound terrain to forests, but the
+        # underlying directional model supports the other covers through the
+        # compound-terrain component fractions.
+        from base.radiation import directional_reflectance
+        return float(directional_reflectance(
+            settings, sza, saa, vza, vaa, band["leaf_reflectance"], band["leaf_transmittance"],
+            band["soil_reflectance"], use_hapke=False, diffuse_fraction=diffuse_fraction))
+    # Single slopes (every cover) use base.optical: local-plane BRF re-referred to horizontal irradiance.
+    return float(reflectance(settings, float(wavelength) * 1000.0, vza, vaa, sza, saa))
+
+
+def _simulate_rows(config, input_path, surface, vegetation, table, spectra, scenario_id, scenario_label):
+    _check_row_closure(config, surface, vegetation)
     geometries = _geometry(config, input_path)
     rows = []
     index = 0
@@ -709,14 +819,24 @@ def _simulate_rows(config, input_path, surface, vegetation, wavelengths, spectra
         vza, vaa, sza, saa = geometry
         raa = abs(vaa - saa) % 360.0
         raa = min(raa, 360.0 - raa)
-        for band_index, wavelength in enumerate(wavelengths):
+        for band_index, wavelength in enumerate(table["wavelengths"]):
             band_spectra = {key: values[band_index] for key, values in spectra.items()}
+            band = {key: float(table[key][band_index]) for key in BAND_PROPERTIES}
+            radiance, brightness_temperature = float("nan"), float("nan")
+            reflectance_brf = float("nan")
             try:
-                radiance, brightness_temperature = _surface_result(config, surface, vegetation, float(wavelength), geometry, band_spectra)
-                sky_temperature = _sky_temperature(config)
-                if sky_temperature is not None and np.isfinite(radiance):
-                    radiance, brightness_temperature = _with_sky_reflection(
-                        config, surface, vegetation, float(wavelength), geometry, band_spectra, radiance, sky_temperature)
+                if float(wavelength) < 2.5:
+                    try:
+                        reflectance_brf = _optical_band(config, surface, vegetation, float(wavelength), geometry, band)
+                    except InvisibleDirection:
+                        # Directions outside the optical adapter's validity domain stay missing.
+                        reflectance_brf = float("nan")
+                else:
+                    radiance, brightness_temperature = _surface_result(config, surface, vegetation, float(wavelength), geometry, band_spectra)
+                    sky_temperature = _sky_temperature(config)
+                    if sky_temperature is not None and np.isfinite(radiance):
+                        radiance, brightness_temperature = _with_sky_reflection(
+                            config, surface, vegetation, float(wavelength), geometry, band_spectra, radiance, sky_temperature)
             except FloatingPointError as exc:
                 raise FloatingPointError(
                     f"{surface}+{vegetation}, wavelength={wavelength}, geometry={geometry}: {exc}") from exc
@@ -725,9 +845,10 @@ def _simulate_rows(config, input_path, surface, vegetation, wavelengths, spectra
                 "surface_model": surface, "vegetation_model": vegetation,
                 "model": f"{surface}+{vegetation}", "wavelength_um": float(wavelength),
                 "vza": float(vza), "vaa": float(vaa), "sza": float(sza), "saa": float(saa), "raa": float(raa),
-                "emissivity_leaf": float(spectra["leaf_e"][band_index]), "emissivity_soil": float(spectra["soil_e"][band_index]),
-                "emissivity_roof": float(spectra["roof_e"][band_index]), "emissivity_wall": float(spectra["wall_e"][band_index]), "emissivity_street": float(spectra["street_e"][band_index]),
+                "emissivity_leaf": round(float(spectra["leaf_e"][band_index]), 12), "emissivity_soil": round(float(spectra["soil_e"][band_index]), 12),
+                "emissivity_roof": round(float(spectra["roof_e"][band_index]), 12), "emissivity_wall": round(float(spectra["wall_e"][band_index]), 12), "emissivity_street": round(float(spectra["street_e"][band_index]), 12),
                 "radiance": radiance, "brightness_temperature_K": brightness_temperature, "brightness_temperature_C": brightness_temperature - 273.15,
+                "reflectance_brf": reflectance_brf,
             })
             index += 1
     return rows
@@ -743,8 +864,8 @@ def run(input_path=DEFAULT_INPUT, output_path=None, model=None, report=None, **o
         if vegetation not in {"bare", "hom", "row", "crown"}:
             raise ValueError("model must be bare, hom, row, or crown")
     config["surface_model"], config["vegetation_model"] = surface, vegetation
-    wavelengths = _wavelengths(config, input_path)
-    spectra = _spectra(config, input_path, wavelengths)
+    table = _band_table(config, input_path)
+    spectra = _spectra(table)
     if output_path is None:
         case_name = str(value(config, "case_name", default=f"{surface}_{vegetation}"))
         result_dir = value(config, "result_dir")
@@ -757,26 +878,26 @@ def run(input_path=DEFAULT_INPUT, output_path=None, model=None, report=None, **o
         output_path = input_path.parent / output_path
     output_path.parent.mkdir(parents=True, exist_ok=True)
     snapshot = output_path.parent / "input.csv"
-    if snapshot.resolve() == input_path:
+    if snapshot.resolve() == input_path or (snapshot.is_file() and not is_input_snapshot(snapshot)):
         snapshot = output_path.parent / "input_used.csv"
 
     rows = []
     for scenario_id, scenario_label, scenario_config in _scenario_configs(config):
         rows.extend(_simulate_rows(
-            scenario_config, input_path, surface, vegetation, wavelengths, spectra,
+            scenario_config, input_path, surface, vegetation, table, spectra,
             scenario_id, scenario_label,
         ))
     # Do not expose invalid radiometric records to the GUI or plot readers.
     requested = len(rows)
     rows = [
         row for row in rows
-        if np.isfinite(float(row["radiance"])) and np.isfinite(float(row["brightness_temperature_K"]))
+        if np.isfinite(float(row["brightness_temperature_K"])) or np.isfinite(float(row["reflectance_brf"]))
     ]
     if not rows:
-        raise ValueError("未找到可见的观测方向；请检查坡面朝向和观测角度")
+        raise ValueError("No visible viewing directions; check the slope orientation and viewing angles")
     if len(rows) < requested:
         warnings.warn(
-            f"{requested - len(rows)} 条观测记录位于坡面背面（相对坡面法线的观测天顶角大于 89°），已从输出中省略",
+            f"{requested - len(rows)} observation records have no valid values (slope backface or optical direction not visible) and were omitted from the output",
             BackfaceOmittedWarning)
     if report is not None:
         report["omitted_backface"] = requested - len(rows)

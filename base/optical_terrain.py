@@ -36,19 +36,32 @@ def exchange_geometry(shapes):
     return matrix
 
 
-def forest_albedo(settings, solar, rho, tau, soil_rho):
+def _albedo_options(settings):
     shape = tuple(float(settings[key]) for key in ('lai', 'stand_density', 'height', 'width', 'hspot'))
-    if shape[0] <= 1e-8 or shape[1] == 0:
-        return float(soil_rho)
     mode = settings.get('optical_crown_geometry', 'volume')
     source = settings.get('optical_crown_source', 'sunlit_volume' if mode == 'volume' else 'diffusion_profile')
     scales = None
     if mode == 'clumping_dual':
         scales = (float(settings.get('optical_hotspot_inner', shape[-1])),
                   float(settings.get('optical_hotspot_outer', shape[3]/shape[2])))
+    quadrature = int(settings.get('optical_crown_quadrature', 12))
+    return shape, mode, source, scales, quadrature
+
+
+@lru_cache(maxsize=16384)
+def _cached_albedo(shape, mode, source, scales, quadrature, solar, rho, tau, soil_rho):
+    if shape[0] <= 1e-8 or shape[1] == 0:
+        return float(soil_rho)
     _, budget = transport(shape, float(solar), float(rho), float(tau), float(soil_rho),
-                          int(settings.get('optical_crown_quadrature', 12)), mode, source, scales)
+                          quadrature, mode, source, scales)
     return budget['reflected']
+
+
+def forest_albedo(settings, solar, rho, tau, soil_rho):
+    # The same facet albedos are reused by every view direction; caching them
+    # avoids repeating the crown transport inside the terrain azimuth loop.
+    return _cached_albedo(*_albedo_options(settings), float(solar),
+                          float(rho), float(tau), float(soil_rho))
 
 
 def diffuse_albedo(settings, rho, tau, soil_rho):

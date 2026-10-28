@@ -11,22 +11,40 @@ import numpy as np
 
 
 def parameters(settings):
+    from . import canopy_closure
     kind = str(settings.get('vegetation_model', 'hom')).lower()
-    kind = {'homogeneous': 'hom', 'raw': 'row'}.get(kind, kind)
+    kind = {'homogeneous': 'hom', 'raw': 'row', 'forest': 'crown'}.get(kind, kind)
+    closure = canopy_closure.closure(settings)
+    crown = None
+    if kind == 'crown':
+        _, _, _, shape, _, base = canopy_closure.structure(settings)
+        crown = (*shape, base)
     return (kind, float(settings.get('lai', 0)), float(settings.get('hspot', .1)),
             float(settings.get('row_width', .5)), float(settings.get('row_blank', .5)),
             float(settings.get('row_height', 1.)), float(settings.get('row_azimuth', 0)),
-            str(settings.get('optical_row_method', 'conditioned_corridor')))
+            str(settings.get('optical_row_method', 'conditioned_corridor')), closure, crown)
+
+
+def _standard_shape(p):
+    kind, crown = p[0], p[9]
+    if kind == 'crown':
+        return crown[:3], crown[3]
+    return (p[3], p[4], p[5]) if kind == 'row' else None, None
 
 
 @lru_cache(maxsize=4096)
 def response(p, solar, solar_azimuth, view, view_azimuth, rho, tau, soil, diffuse):
+    kind, lai, hotspot, width, gap, height, bearing, method, closure, _ = p
+    if closure != 'legacy':
+        from . import canopy_closure
+        shape, base = _standard_shape(p)
+        return canopy_closure.reflectance(kind, lai, hotspot, shape, rho, tau, soil, view, view_azimuth,
+                                          solar, solar_azimuth, bearing, base, diffuse, True, level=closure)
     from .radiation import directional_reflectance
-    kind, lai, hotspot, width, gap, height, bearing, method = p
     local = dict(surface_model='plane', vegetation_model=kind, surface_type=0,
                  distribution=2 if kind == 'row' else 1, lai=lai, hspot=hotspot,
                  row_width=width, row_blank=gap, row_height=height,
-                 row_azimuth=bearing, optical_row_method=method)
+                 row_azimuth=bearing, optical_row_method=method, canopy_closure=closure)
     return directional_reflectance(local, solar, solar_azimuth, view, view_azimuth,
                                    rho, tau, soil, diffuse_fraction=diffuse,
                                    sunlit=True, use_hapke=False)
@@ -34,6 +52,12 @@ def response(p, solar, solar_azimuth, view, view_azimuth, rho, tau, soil, diffus
 
 @lru_cache(maxsize=1024)
 def albedo(p, solar, solar_azimuth, rho, tau, soil, diffuse):
+    if p[8] != 'legacy':
+        from . import canopy_closure
+        shape, _ = _standard_shape(p)
+        if diffuse:
+            return canopy_closure.sky_albedo(p[0], p[1], shape, rho, tau, soil, p[6])
+        return canopy_closure.beam_albedo(p[0], p[1], shape, rho, tau, soil, solar, solar_azimuth, p[6])
     # Angular quadrature of the analytical canopy response, without a spatial
     # crown grid. Cache it across view directions and time-series iterations.
     from .optical_crown import quadrature
@@ -51,11 +75,13 @@ def reflectance(settings, view, view_azimuth, solar, solar_azimuth,
     length, width, height, density, bearing = shape
     footprint = length*width*density
     ground = 1-footprint
-    cover = float(settings.get('urban_vegetation_fraction', 0.))
+    # The vegetation model itself describes the whole street surface: homogeneous,
+    # row and crown gaps are already part of its directional response.
+    cover = 1.0
     diffuse = float(settings.get('shortwave_diffuse_fraction', 0.))
     sunlit = bool(settings.get('shortwave_sunlit_surface', True))
-    if not 0 <= cover <= 1 or not 0 <= diffuse <= 1:
-        raise ValueError('Urban vegetation and diffuse fractions must be in [0, 1].')
+    if not 0 <= diffuse <= 1:
+        raise ValueError('Urban diffuse fraction must be in [0, 1].')
     if not 0 <= solar < 90 or not 0 <= view < 90:
         raise ValueError('Urban optical transport requires above-horizon directions.')
     p = parameters(settings)

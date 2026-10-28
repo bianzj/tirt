@@ -1,9 +1,9 @@
 import math
 
-from .eb import saturation_vapor_pressure
+from .eb import air_density, saturation_vapor_pressure
+from .soilopt import volumetric_water
 
 
-RHOA = 1.2047
 MAIR = 28.96
 RSS = 50.0
 
@@ -16,9 +16,38 @@ def _root(a, b, c, smaller=True):
     return min(roots) if smaller else max(roots)
 
 
+def soil_surface_resistance(settings):
+    """Sellers (1992) surface resistance [s/m], with prescribed volumetric water."""
+    method = str(settings.get("soil_rss_method", "constant" if "soil_rss" in settings else "sellers")).lower()
+    if method == "constant":
+        return max(float(settings.get("soil_rss", RSS)), 0.0)
+    if method != "sellers":
+        raise ValueError("soil_rss_method must be sellers or constant")
+    saturation = volumetric_water(settings.get("satwater", 0.45))
+    if not math.isfinite(saturation) or saturation <= 0.0:
+        raise ValueError("satwater must be positive and finite")
+    wetness = min(max(volumetric_water(settings.get("soil_moisture", 0.25)) / saturation, 0.0), 1.0)
+    return math.exp(8.206 - 4.255 * wetness)
+
+
+def _leaf_par(netrad, sunlit):
+    """Absorbed PAR [umol photons/m2 leaf/s]; shade receives no direct beam."""
+    suffix = "sunlit" if sunlit else "shaded"
+    diffuse = float(netrad.get(f"diffusePrad_leaf_{suffix}", netrad.get("diffusePrad_leaf", 0.0)))
+    return max(diffuse + (float(netrad.get("directPrad_leaf", 0.0)) if sunlit else 0.0), 0.0)
+
+
+def _set_leaf_resistance(settings, state, sunlit, leaf_resistance):
+    key = "rssunlit" if sunlit else "rsshaded"
+    # Fluxes use LAI*absorbed PAR/radiation and 2*LAI emission. Convert the
+    # leaf-area resistance to their ground-area big-leaf convention exactly once.
+    state[key + "_leaf"] = leaf_resistance
+    state[key] = leaf_resistance / float(settings["lai"])
+
+
 def farquhar_resistance(settings, meteo, state, netrad):
     """Biochemical::suresist -> biochemical_Farquhar, in C++ order and units."""
-    state["rss"] = max(float(settings.get("soil_rss", RSS)), 0.0)
+    state["rss"] = soil_surface_resistance(settings)
     if settings["surface_type"] == 16 or settings["lai"] <= 0.0:
         return state
 
@@ -36,12 +65,12 @@ def farquhar_resistance(settings, meteo, state, netrad):
     cs0 = float(state.get("cs", settings.get("ca", 380.0)))
     eb = float(state.get("es", settings.get("ea", meteo["vapor_pressure"])))
     oxygen = float(settings.get("oa", 209.0))
-    q = float(netrad.get("directPrad_leaf", 0.0) + netrad.get("diffusePrad_leaf", 0.0))
     effcon = 1.0 / 6.0 if leaf_type >= 3.5 else 1.0 / 5.0
+    g0 = max(float(settings.get("stomatal_g0", 0.01)), 1.0e-5)
 
-    # The source has this historical assignment for both components.
     for issunlit in (0, 1):
-        tc = state["Tlh"]
+        tc = float(state["Tls" if issunlit else "Tlh"])
+        q = _leaf_par(netrad, bool(issunlit))
         cs = cs0 * (1.0e-6 * (p * 1.0e-3))
         o = (oxygen * 1.0e-3) * (p * 1.0e-3)
         if leaf_type > 3.5:
@@ -90,13 +119,10 @@ def farquhar_resistance(settings, meteo, state, netrad):
         ag = _root(0.98, -(v + vs), v * vs, True)
         assimilation = ag - rd
         gs = 1.6 * assimilation * (1.0e-6 * (p * 1.0e-3)) / (cs - ci)
-        rcw = (RHOA / (MAIR * 1.0e-3)) / gs if gs else float("nan")
-        if assimilation < 0.0 or not math.isfinite(rcw):
-            rcw = 0.625 * 1.0e6
-        if issunlit == 0:
-            state["rsshaded"] = rcw
-        else:
-            state["rssunlit"] = rcw
+        # As in SCOPE 2: a conductance floor g0 replaces full closure (rcw = 625000) when A <= 0.
+        gs = max(gs if math.isfinite(gs) else 0.0, g0)
+        rcw = (air_density(meteo) / (MAIR * 1.0e-3)) / gs
+        _set_leaf_resistance(settings, state, bool(issunlit), rcw)
         if math.isfinite(ci):
             state["ci"] = ci / (1.0e-6 * (p * 1.0e-3))
     return state
@@ -113,28 +139,26 @@ def suresist(settings, meteo, state, netrad):
 
 def ballberry_resistance(settings, meteo, state, netrad):
     """Empirical Ball-Berry/light-response stomatal resistance in s m-1."""
-    state["rss"] = max(float(settings.get("soil_rss", RSS)), 0.0)
+    state["rss"] = soil_surface_resistance(settings)
     if settings["lai"] <= 0.0:
         state["rssunlit"] = state["rsshaded"] = 625000.0
         return state
     pressure = max(float(meteo["pressure"]), 1.0e-6)
-    air_temp = float(meteo["air_temperature_c"]) + 273.15
-    ambient_es = saturation_vapor_pressure(air_temp - 273.15)
-    rh = min(max(float(meteo["vapor_pressure"]) / max(ambient_es, 1.0e-6), 0.05), 1.2)
     ca = max(float(state.get("cs", settings.get("ca", 380.0))), 1.0)
-    par = max(float(netrad.get("directPrad_leaf", 0.0)) + float(netrad.get("diffusePrad_leaf", 0.0)), 0.0)
-    light = par / (par + 100.0)
-    temperature = math.exp(-((float(state["Tlh"]) - 298.15) / 18.0) ** 2)
     vcmax = max(float(settings.get("vcmax", 80.0)), 0.0)
     stress = min(max(float(settings.get("stressfactor", 1.0)), 0.0), 1.0)
-    assimilation = vcmax * light * temperature * stress
     slope = max(float(settings.get("ballberry_m", 9.0)), 0.0)
     g0 = max(float(settings.get("stomatal_g0", 0.01)), 1.0e-5)
-    gs = g0 + (1.0 + slope * rh) * assimilation / ca
-    gs = min(max(gs, 1.0e-5), 2.0)
-    resistance = (RHOA / (MAIR * 1.0e-3)) / gs
-    state["rsshaded"] = resistance
-    state["rssunlit"] = resistance
+    for sunlit in (False, True):
+        tc = float(state["Tls" if sunlit else "Tlh"])
+        ambient_es = saturation_vapor_pressure(tc - 273.15)
+        rh = min(max(float(state.get("es", meteo["vapor_pressure"])) / max(ambient_es, 1.0e-6), 0.05), 1.2)
+        par = _leaf_par(netrad, sunlit)
+        light = par / (par + 100.0)
+        temperature = math.exp(-((tc - 298.15) / 18.0) ** 2)
+        assimilation = vcmax * light * temperature * stress
+        gs = min(max(g0 + (1.0 + slope * rh) * assimilation / ca, 1.0e-5), 2.0)
+        _set_leaf_resistance(settings, state, sunlit, (air_density(meteo) / (MAIR * 1.0e-3)) / gs)
     state["ci"] = ca
     return state
 

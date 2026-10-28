@@ -1,4 +1,4 @@
-/* Shared STREAM/TIRT brand; model names belong to titles and navigation. */
+/* Shared RTLab/TIRT brand; model names belong to titles and navigation. */
 :root { --static-color: #0f72c7; --dynamic-color: #d53b36; }
 .brand-logo.model-static, .brand-logo.model-dynamic {
   display: inline-grid; grid-template-columns: auto 10px auto auto;

@@ -1,5 +1,3 @@
-import math
-
 import numpy as np
 
 from .urban import Urban
@@ -53,21 +51,10 @@ def urban_component_fractions(settings, vza, vaa, sza, saa):
 
 
 def urban_canopy_fraction(settings, vza=0.0, vaa=0.0):
-    """Fraction of the visible street covered by the selected canopy."""
-    lai = max(float(settings.get("lai", 0.0)), 0.0)
-    footprint = min(max(float(settings.get("urban_vegetation_fraction", 0.30)), 0.0), 1.0)
-    if lai <= 0.0 or footprint <= 0.0:
-        return 0.0
-    if str(settings.get('vegetation_model', '')).lower() in ('row', 'raw'):
-        from .vegetation import vegetation_proportions
-        fractions = vegetation_proportions('row', lai, float(settings.get('hspot', .1)),
-            vza, vaa, 0., 0., row_width=float(settings.get('row_width', .5)),
-            row_blank=float(settings.get('row_blank', .5)),
-            row_height=float(settings.get('row_height', 1.)),
-            row_azimuth=float(settings.get('row_azimuth', 0.)))
-        return float(footprint*(fractions[2, 0]+fractions[3, 0]))
-    mu = max(math.cos(math.radians(min(max(float(vza), 0.0), 89.0))), 0.1)
-    return float(np.clip(footprint * (1.0 - math.exp(-0.5 * lai / mu)), 0.0, 0.95))
+    """Visible leaf fraction of the street canopy along a view: 1 - view gap of the standard closure."""
+    from .tirteb_radiation import view_fractions
+    parts = view_fractions(dict(settings, surface_model="plane"), vza, vaa, vza, vaa)
+    return float(np.clip(parts[2] + parts[3], 0.0, 1.0))
 
 
 def urban_directional_reflectance(settings, wavelength, vza, vaa, sza, saa):

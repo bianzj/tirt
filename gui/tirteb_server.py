@@ -38,6 +38,18 @@ def _json_safe(value):
     return value
 
 
+def _check_paths(overrides: dict, work_dir: Path) -> None:
+    """Client-supplied paths may only name bundled data or this request's uploads."""
+    roots = ((PROJECT_ROOT / "data").resolve(), Path(work_dir).resolve())
+    for key, value in overrides.items():
+        name = str(key).lower()
+        if value in (None, "") or not (name == "meteo" or name.endswith(("_file", "_dir", "_path"))):
+            continue
+        path = Path(str(value))
+        path = (path if path.is_absolute() else PROJECT_ROOT / path).resolve()
+        if not any(path.is_relative_to(root) for root in roots):
+            raise ValueError(f"{key} must be a file inside the project data folder: {value}")
+
 
 def _write_run_input(source: Path, target: Path, overrides: dict[str, object]) -> None:
     with source.open(newline="", encoding="utf-8-sig") as file:
@@ -92,28 +104,12 @@ def _time_overrides(payload: dict) -> dict:
     overrides = {str(key): value for key, value in raw.items()}
     for gui_key, solver_key in {
         "canopy_height": "height", "slope_angle": "terrain_slope",
-        "slope_aspect": "terrain_aspect", "crown_rad_a": "crown_width",
-        "emissivity_roof": "urban_emissivity_roof", "emissivity_wall": "urban_emissivity_wall",
-        "emissivity_street": "urban_emissivity_street",
+        "slope_aspect": "terrain_aspect",
     }.items():
         if gui_key in overrides:
-            overrides[solver_key] = overrides[gui_key]
+            overrides[solver_key] = overrides.pop(gui_key)
     if overrides.get("vegetation_model") == "row" and "row_height" in overrides:
         overrides["height"] = overrides["row_height"]
-    # Crown height in TIRTEB is the ellipsoid vertical semi-axis, not trunk height.
-    if "crown_rad_b" in overrides:
-        overrides["crown_height"] = overrides["crown_rad_b"]
-    if "crown_rad_a" in overrides:
-        overrides["crown_radius"] = overrides["crown_rad_a"]
-    for component in ("leaf", "soil"):
-        key = f"emissivity_{component}"
-        if key in overrides:
-            values = [float(item) for item in str(overrides[key]).replace(",", ";").split(";")]
-            if not values or any(not math.isfinite(e) or not 0 <= e <= 1 for e in values):
-                raise ValueError(f"{key} must be between 0 and 1")
-            overrides[f"{component}_reflectance"] = ";".join(str(1 - e) for e in values)
-            if component == "leaf":
-                overrides["leaf_transmittance"] = "0"
     if any(key in overrides for key in ("vza", "vaa", "geometry_mode")):
         overrides["direction_source"] = "direct"
     return overrides
@@ -146,7 +142,6 @@ def _time_request(payload: dict, work_dir: Path) -> dict:
         uploaded_files["directions"] = "\n".join(f"{z} {a}" for z, a in zip(zenith, azimuth))
     file_overrides = {
         "directions": ("observation_direction_mode", "file", "directions_file", "observation_directions.txt"),
-        "wavelengths": ("observation_spectral_mode", "file", "spectrals_file", "observation_spectrals.txt"),
         "vegetation_spectrum": ("vegetation_spectrum_source", "measured", "vegetation_spectrum_file", "leaf_spectrum.txt"),
         "soil_spectrum": ("soil_spectrum_source", "measured", "soil_spectrum_file", "soil_spectrum.txt"),
         "urban_spectrum": ("urban_spectrum_source", "measured", "urban_spectrum_file", "urban_spectrum.txt"),
@@ -161,10 +156,12 @@ def _time_request(payload: dict, work_dir: Path) -> dict:
         overrides[path_key] = str(file_path)
         if key == "directions":
             overrides["direction_source"] = "file"
-        if key == "wavelengths":
-            overrides["spectral_source"] = "file"
-            overrides["observation_spectral_mode"] = "file"
 
+    # TiRT-only geometry keys are rejected by the temporal runner.
+    for key in [key for key in overrides if key.lower() in {"geometry_mode", "geometry_pair_mode", "geometry_file"}
+                or key.lower().startswith(("principal_vza", "additional_geometry_"))]:
+        del overrides[key]
+    _check_paths(overrides, work_dir)
     input_path = work_dir / "input.csv"
     _write_run_input(TIRTEB_INPUT, input_path, overrides)
     output_path = work_dir / "output.csv"

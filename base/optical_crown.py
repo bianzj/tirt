@@ -1,4 +1,4 @@
-"""Optical-only four-component synthesis for statistical ellipsoidal forests.
+﻿"""Optical-only four-component synthesis for statistical ellipsoidal forests.
 
 First scattering defaults to crown-volume joint sun/view geometry. The
 optical_crown_geometry='clumping' option reuses the thermal model's clumping
@@ -250,6 +250,9 @@ def crown_reflectance(settings, sza, vza, raa, rho, tau, rs,
         raise ValueError('Crown transport requires sun and view above the horizon.')
     if not 0 <= f <= 1 or min(rho,tau,rs) < 0 or rho+tau > 1+1e-12 or rs > 1:
         raise ValueError('Invalid optical illumination or material coefficients.')
+    from . import canopy_closure
+    if canopy_closure.closure(settings) != 'legacy':
+        return canopy_closure.crown_reflectance(settings, sza, vza, raa, rho, tau, rs, f, sunlit)
     geometry_mode = str(settings.get('optical_crown_geometry', 'volume')).strip().lower()
     source_mode = str(settings.get('optical_crown_source',
                       'sunlit_volume' if geometry_mode == 'volume' else 'diffusion_profile')).strip().lower()

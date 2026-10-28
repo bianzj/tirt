@@ -36,7 +36,7 @@ def multiple_scattering_analytical(lai,vza,refl_soil,refl_leaf):
     return multiple_scattering_emissivity
 
 
-def multiple_scattering_analytical_sunlit(lai,vza,sza,refl_soil,refl_leaf,bv=None,M=None):
+def multiple_scattering_analytical_sunlit(lai,vza,sza,refl_soil,refl_leaf,bv=None,M=None,Vsunlit=None):
     '''
 	参数化的方案计算多次散射,区分光照和阴影
     :param lai: 叶面积指数
@@ -46,6 +46,7 @@ def multiple_scattering_analytical_sunlit(lai,vza,sza,refl_soil,refl_leaf,bv=Non
     :param refl_leaf: 叶片反射率
     :param bv: 视向间隙率，缺省为均质冠层
     :param M: 半球间隙率，缺省为均质冠层拟合值
+    :param Vsunlit: 光照叶片体积比例，缺省为均质冠层
     :return:
     '''
     if bv is None:
@@ -55,7 +56,8 @@ def multiple_scattering_analytical_sunlit(lai,vza,sza,refl_soil,refl_leaf,bv=Non
     alpha_table = np.asarray([0.2885375, 0.2885375, 0.2964427, 0.3003953, 0.3083004, 0.3201581, 0.3399209, 0.3715415, 0.4189723])
     # Tabulated every 10 degrees up to 80; interpolate for continuity and hold the last value beyond.
     alpha = np.interp(np.asarray(vza, dtype=float), np.arange(0.0, 90.0, 10.0), alpha_table)
-    Vsunlit = hotspot_vegetation_volume(lai, sza)
+    if Vsunlit is None:
+        Vsunlit = hotspot_vegetation_volume(lai, sza)
     Vshaded = 1 - Vsunlit
     multiple_scattering_emissivity_sunlit = bv * (1-M)* refl_soil*Vsunlit + (1-alpha)*(1-bv*M) *(1-bv)*refl_leaf*Vsunlit
     multiple_scattering_emissivity_sunlit = multiple_scattering_emissivity_sunlit *(1-refl_leaf)

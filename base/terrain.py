@@ -145,7 +145,8 @@ class Terrain:
                 height_temp = dheight * (kh + 0.5)
                 dh = shapes[:, 0] - height_temp
                 alpha2 = np.arctan(shapes[:,1] / shapes[:,0])
-                r1 = height_temp / height1 * radius1
+                # Radius of the cone cross-section at this height above the base.
+                r1 = (1.0 - height_temp / height1) * radius1
                 w = (r1*np.pi*dheight+r1*2+dheight)
 
 
@@ -186,20 +187,17 @@ class Terrain:
             gapvs_mount = np.exp(-projvs)
 
             slope = alpha1 * 180 / np.pi
+            # Sunlit share of the visible cone surface is the joint visibility of the view and
+            # sun rays, exp(-(projs - projv)); the same rule applies at every solar elevation.
+            joint = np.exp(-(projvs - projv)) if projv > 0.0 else 1.0
             if L1_v <= radius1:
-                pMountV = pMountV + density1 * gapv_mount * (( np.pi) * radius1 * radius1)
-                if sza > slope:
-                    cosphi = uv * ui + sv * si * up
-                    pMountV_sunlit = pMountV_sunlit + density1 *(( np.pi) * radius1 * radius1) * (1 + cosphi) * 0.5
-                else:
-                    pMountV_sunlit = pMountV_sunlit + density1 * gapvs_mount * ((np.pi) * radius1 * radius1)
+                visible = density1 * gapv_mount * ((np.pi) * radius1 * radius1)
+                pMountV = pMountV + visible
+                pMountV_sunlit = pMountV_sunlit + visible * joint
             else:
-                pMountV = pMountV + density1 * gapv_mount * ((1.0/np.tan(gamma1_v) + gamma1_v + np.pi / 2.0) * radius1*radius1)
-                if sza > slope:
-                    cosphi = uv * ui + sv * si * up
-                    pMountV_sunlit = pMountV_sunlit + density1 * gapv_mount * ((1.0/np.tan(gamma1_v) + gamma1_v + np.pi / 2.0) * radius1*radius1) * (1 + cosphi) * 0.5
-                else:
-                    pMountV_sunlit = pMountV_sunlit + density1 * gapv_mount * ((1.0/np.tan(gamma1_v) + gamma1_v + np.pi / 2.0) * radius1*radius1)
+                visible = density1 * gapv_mount * ((1.0/np.tan(gamma1_v) + gamma1_v + np.pi / 2.0) * radius1*radius1)
+                pMountV = pMountV + visible
+                pMountV_sunlit = pMountV_sunlit + visible * joint
 
 
 
