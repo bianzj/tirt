@@ -42,6 +42,7 @@ TIRTEB 与 TiRT 尽量使用同名参数；TIRTEB 的字段由 `base/io.py` 读�
 | 波段参数表 | `wavelengths`、`leaf_reflectance`、`leaf_transmittance`、`soil_reflectance`、`street_reflectance`、`wall_reflectance`、`roof_reflectance`（与 TiRT 同一格式；TIRTEB 允许 `-` 表示取模型/实测值） |
 | Hapke 土壤 | `hapke_enable`、`hapke_K` |
 | 观测方向与波段 | `vza`、`vaa`、`spectral_source`、`spectrals_file` |
+| 天空下行 | `sky_temperature_k`：`auto`（默认，由逐步下行长波算 `(L↓/σ)^0.25`）、数字（K）、`none`/`black`/`0`（黑天空） |
 
 树冠为 Poisson 分布的椭球体，冠层开放度 `exp(−crown_density·π·crown_rad_a²)`，允许树冠相互重叠，因此 `crown_density·π·crown_rad_a²` 可以大于 1。旧的 `crown_radius`、`crown_width` 已停用，出现时报错（旧版 `crown_height` 表示垂直半轴，与现在的冠底高度含义不同，静默兼容会算错）。
 
@@ -64,7 +65,7 @@ TIRTEB 还包含气象与时间、`leaf_width`、空气动力学、生理和热�
 
 土壤短波反射率由 BSM 计算；土壤含水量统一用体积分数 m³ m⁻³（读入后限制在 0.05–0.55），BSM 的容量参数也取 0.25，并直接在该尺度上计算 `μ = (θ − 0.05)/0.25`，不再换算成百分数。为兼容旧输入，`soil_moisture`、`satwater` 和 TIR 干/湿参考含水量中大于 1 的值按百分数除以 100，模型内部只保留 m³ m⁻³；`bsm_latitude`、`bsm_longitude` 是 BSM 的谱形角度参数（度），与土壤含水量无关。水膜反射率取 `1 − tav(40°, nw)`（`calctav` 返回的是透过率），土壤水膜下界反射率按 SCOPE 的 `rbac` 公式计算。
 
-短波默认按直射 0.8、漫射 0.2 划分（`shortwave_diffuse_fraction=0.2`）；填 `-1` 时按 Erbs 从总辐射和太阳高度角反算，填 0–1 时使用给定值。能量平衡的短波吸收按 50 nm 分组（约 41 组）计算，观测光谱仍保留 1 nm 分辨率。TiRT 方向模型的短波反射率使用同一默认值。
+短波默认按直射 0.8、漫射 0.2 划分（`shortwave_diffuse_fraction=0.2`）；填 `-1` 时按 Erbs 从总辐射和太阳高度角反算，填 0–1 时使用给定值。能量平衡的短波吸收按 10 nm 分组（201 组）计算，观测光谱仍保留 1 nm 分辨率。TiRT 方向模型的短波反射率使用同一默认值。
 
 能量平衡默认还启用 `shortwave_enforce_solar_limit=1`：直射法向辐照度不得超过晴空直射辐照度。晴空 DNI 采用 Meinel 模型 `DNI_clear = 1367·E0·0.7^(AM^0.678)`（Meinel & Meinel, 1976），E0 = `1+0.033·cos(2π·DOY/365)`，相对大气质量 AM 采用 Kasten & Young (1989) 公式 `AM = 1/[cos(sza) + 0.50572·(96.07995−sza)^−1.6364]`（sza 为度）。若给定比例下的直射超过这一上限，保留原气象总短波，将超出的直射功率转为漫射；地平线以下的正短波全部作为漫射。日地距离修正采用 [FAO 的年内近似](https://www.fao.org/4/x0490e/x0490e07.htm)。该处理是物理可行性约束，不是实际直散射观测反演；Meinel 值是典型晴空值，高海拔极洁净大气下真实 DNI 可能略高于此上限。中间文件保留请求比例、实际比例、`shortwave_partition_limited`、直射法向功率和上限（`solar_direct_normal_limit_W_m2`）；控制试验可显式设为 0 关闭限制。单纯给定几何的静态 BRF 没有绝对入射功率，不进行这一约束。小于 20 W m⁻² 的正入射也继续参与预算，不再直接丢弃。
 
@@ -74,7 +75,7 @@ TIRTEB 的方向观测采用 TiRT 标准实现。平面冠层的吸收预算使�
 
 方向观测：平面和单坡的短波 BRF/HDRF 直接调用标准版四组分 + 节点辐射度（单坡在坡面局地坐标下计算，垄向同样换算到局地坐标，再以水平面总入射为分母：局地直射反射率乘 `(1−f)·cos i/cos sza`、天空反射率乘 `f·(1+cos β)/2`，权重取自能量平衡的同一坡面投影，与 TiRT 一致；`hapke_enable=1` 时一次项土壤取 Hapke 方向反射）；复合地形调用 TiRT 标准版复合地形光学；城市调用 TiRT 城市光学（街道冠层同为标准版）。`transmittance` 为标准版视场叶片比例 × 叶片透过率。
 
-热红外方向辐亮度和亮温直接调用 TiRT 标准版的辐射传输（`run._surface_result`，经 `base/tirteb_tirt.py` 映射），输入为能量平衡求得的组分温度。参数映射：`terrain_type=1` → TiRT 单坡（`terrain_slope/aspect` → `slope_angle/aspect`），`terrain_type=2` → TiRT 复合地形（锥体占据率 `density·π·radius²` 必须小于 1）；树冠 `crown_rad_b` → TiRT `crown_rad_b`（内部 `height`），`crown_rad_a` → `crown_rad_a`（内部 `width`），`crown_density` → `crown_density`（内部 `stand_density`），`crown_height` → `crown_height`（内部 `crown_base_height`，冠底离地高度）；叶片发射率 1−ρ−τ、土壤 1−ρ_s，城市组分 1−ρ，均取自该热红外波段的波段参数表；地形锥体按土壤温度处理；街道取能量平衡求得的街道温度。太阳在地平线以下或位于坡面背面时，所有组分按阴影温度计算。同一场景、相同组分温度下 TIRTEB 与 `run.py` 的辐亮度一致（plane/slope 的全部植被组合、terrain 的非裸地组合、urban 的全部植被组合；terrain 裸地的锥体在 TIRTEB 中取土壤温度）。observations.csv 对小于 2.5 µm 的波段保存反射率，对热红外波段默认保存亮温 K；`observation_quantity=reflectance` 时热红外保存 1 − 方向发射率（同一 TiRT 模型在等温黑天空下的辐亮度 / B(T)，含全部散射阶）。坡面背面不可见的方向记为空值。方向观测与 TiRT 的一致性可用 `validation/compare_tirt_tirteb.py --full` 复算（相同场景、组分温度和波段光学下逐方向比较，默认容差 `1e-9`；场景用 `input_tirteb.csv` 的参数名经 `read_input/read_defined` 读入，TiRT 参考的几何直接取自这些参数，因此也能检出参数映射错误；算例中太阳均在地平线以上）。
+热红外方向辐亮度和亮温直接调用 TiRT 标准版的辐射传输（`run._surface_result`，经 `base/tirteb_tirt.py` 映射），输入为能量平衡求得的组分温度。参数映射：`surface_model=slope`（或旧别名 `terrain_type=1`）→ TiRT 单坡（`terrain_slope/aspect` → `slope_angle/aspect`），`surface_model=terrain`（`terrain_type=2`）→ TiRT 复合地形（锥体占据率 `density·π·radius²` 必须小于 1）；树冠 `crown_rad_b` → TiRT `crown_rad_b`（内部 `height`），`crown_rad_a` → `crown_rad_a`（内部 `width`），`crown_density` → `crown_density`（内部 `stand_density`），`crown_height` → `crown_height`（内部 `crown_base_height`，冠底离地高度）；叶片发射率 1−ρ−τ、土壤 1−ρ_s，城市组分 1−ρ，均取自该热红外波段的波段参数表；地形锥体按土壤温度处理；街道取能量平衡求得的街道温度。太阳在地平线以下或位于坡面背面时，所有组分按阴影温度计算。同一场景、相同组分温度下 TIRTEB 与 `run.py` 的辐亮度一致（plane/slope 的全部植被组合、terrain 的非裸地组合、urban 的全部植被组合；terrain 裸地的锥体在 TIRTEB 中取土壤温度）。observations.csv 对小于 2.5 µm 的波段保存反射率，对热红外波段默认保存亮温 K；`observation_quantity=reflectance` 时热红外保存 1 − 方向发射率（同一 TiRT 模型在等温黑天空下的辐亮度 / B(T)，含全部散射阶）。坡面背面不可见的方向记为空值。方向观测与 TiRT 的一致性可用 `validation/compare_tirt_tirteb.py --full` 复算（相同场景、组分温度和波段光学下逐方向比较，默认容差 `1e-9`；场景用 `input_tirteb.csv` 的参数名经 `read_input/read_defined` 读入，TiRT 参考的几何直接取自这些参数，因此也能检出参数映射错误；算例中太阳均在地平线以上）。
 
 观测方向由 `direction_source` 选择：`direct` 为 `vza` 与 `vaa` 两个列表的笛卡尔积，`file` 为 `directions_file` 中逐行给出的 `vza vaa`；方向在整个时间序列中固定，不随太阳方位生成主平面。观测时间由 `observation_time_mode` 选择：`all` 为全部时间；`time` 为 `observation_times` 中精确的 DOY 时刻；`hour` 为 `observation_hours` 中的当地钟点（0–24 小时，可带小数，例如 `12;13.5`），每天相同钟点都输出，非法值报错。
 
@@ -97,7 +98,7 @@ LAIshade = LAI − LAIsun
 
 叶面积划分的太阳天顶角计算上限为 85°。夜间直接照明面积为零；面积为零的组分不贡献场景总量。上述叶片权重与大叶方程的 LAI 因子配合，等价于按真实叶面积积分。`soil_sunlit_fraction / soil_shaded_fraction / lai_sunlit / lai_shaded` 保存能量面积权重；复合地形的土壤权重和为真实表面积比，可以大于 1。
 
-平面短波在 2001 个 1 nm 波段上求解。一次直射只给光照组分；直射的后续散射和天空漫射用节点辐射度算子求全部阶，并按节点中光照/阴影面积分配吸收。总叶片吸收、土壤吸收和逃逸反射应与入射相平衡。长波也在同一互易节点几何上求全部阶，节点发射由光照/阴影温度的四次方按面积混合；等温节点处于同温黑体辐射环境时净长波为零。
+方向观测保留 2001 个 1 nm 波段；能量平衡短波按 10 nm 分组求解（每组总入射与平均光学参数），以降低计算量。一次直射只给光照组分；直射的后续散射和天空漫射用节点辐射度算子求全部阶，并按节点中光照/阴影面积分配吸收。总叶片吸收、土壤吸收和逃逸反射应与入射相平衡。长波也在同一互易节点几何上求全部阶，节点发射由光照/阴影温度的四次方按面积混合；等温节点处于同温黑体辐射环境时净长波为零。
 
 ### 城市
 

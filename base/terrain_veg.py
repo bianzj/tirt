@@ -15,6 +15,11 @@ class Terrain_Veg(CanopyGeometry):
 
     Material emissivities multiply the four visible components. This is not a
     full multiple-scattering terrain/canopy radiative-transfer solution.
+
+    Legacy note: the direct-emission branch below still uses the cone half-angle
+    ``atan(r/h)`` as the facet zenith (see ``slope = alpha1*180/pi``); it is kept
+    for backwards compatibility. ``TerrainForest`` overrides that branch and uses
+    the side-slope zenith ``pi/2 - alpha1`` for current terrain+vegetation work.
     """
 
     ### h, r, density

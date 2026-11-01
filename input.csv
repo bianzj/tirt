@@ -4,10 +4,10 @@
 [case],,,
 case,case_name,hom_plane,case name
 case,cases_dir,cases,result root directory
-case,result_dir,cases/hom_plane,result directory
+case,result_dir,,result directory; leave empty to write to cases/<case_name> (a value here overrides case_name)
 ,,,
 [surface],,,
-surface,surface_model,plane,plane=flat ground; slope=single slope; terrain=compound terrain; urban=buildings and streets
+surface,surface_model,plane,plane=flat ground; slope=single slope; terrain=compound terrain (cones of terrain_radius/height/density); dem=DEM facet ensemble (multi-ridge terrain; requires dem_file); urban=buildings and streets
 surface,vegetation_model,hom,bare=bare surface; hom=homogeneous; row=ridge; crown=forest
 ,,,
 [slope],,,
@@ -19,6 +19,12 @@ terrain,terrain_radius,10,equivalent terrain radius m; semicolon-separated for m
 terrain,terrain_height,20,equivalent terrain height m; semicolon-separated for multiple layers
 terrain,terrain_density,0.001,terrain spatial density; semicolon-separated for multiple layers
 ,,,
+[dem],,,
+dem,dem_file,,ESRI ASCII grid (.asc) for surface_model=dem or ridge; path relative to input.csv
+dem,dem_slope_bin,2,slope class width degrees for the facet ensemble
+dem,dem_aspect_bin,10,aspect class width degrees for the facet ensemble
+dem,dem_shadow,1,1=cast shadows by horizon ray march; 0=no cast shadow
+,,,
 [urban],,,
 urban,building_density,0.0015,building plan density; semicolon-separated for multiple shapes
 urban,building_length,10,building length m
@@ -29,7 +35,7 @@ urban,urban_transport,,thermal multiple scattering: empty=radiosity with canopy_
 ,,,
 [vegetation_structure],,,
 vegetation_structure,lai,1.5,leaf area index
-vegetation_structure,height,3,vegetation height m (TIRTEB only; not used by run.py)
+vegetation_structure,height,3,vegetation height m (TIRTEB aerodynamics); run.py uses it only with canopy_closure=legacy as the optical crown vertical semiaxis (standard/upgrade use crown_rad_b)
 vegetation_structure,hspot,0.15,hotspot parameter = leaf size / canopy height; for crowns use leaf size / crown height
 vegetation_structure,canopy_closure,standard,standard=CI transmittance + dual-scale hotspot (two-layer + compensation) + node radiosity; upgrade=exact geometric optics (K-integral hom / row cross-section / FRT-type crowns) + the same node radiosity; both apply to hom/row/crown on plane/slope/terrain/urban in thermal and optical bands; legacy=earlier closures (thermal_*_geometry and optical methods below apply only with legacy)
 vegetation_structure,leaf_width,0.2,leaf width m (TIRTEB only; not used by run.py)
@@ -82,7 +88,7 @@ thermal,wall_sunlit_c,45,sunlit wall temperature C
 thermal,wall_shaded_c,30,shaded wall temperature C
 thermal,street_sunlit_c,45,sunlit street temperature C
 thermal,street_shaded_c,30,shaded street temperature C
-thermal,sky_temperature_k,,optional equivalent sky brightness temperature K; empty = black sky (emission only); set to add (1-emissivity) x B(T_sky)
+thermal,sky_temperature_k,250,equivalent 8-14 um sky brightness temperature K (default 250 = typical clear sky); adds (1-emissivity) x B(T_sky); none = black sky (emission only; HiSTREAM validation setting)
 ,,,
 [geometry],,,
 geometry,geometry_mode,0,0=given vza/vaa lists; 1=solar principal and perpendicular planes; 2=read geometry_file TXT; 3=both principal planes from principal_vza_step/principal_vza_max plus optional hemisphere/file/manual directions

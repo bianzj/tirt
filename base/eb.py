@@ -45,6 +45,40 @@ def _temperature_method(value):
     raise ValueError("temperature_method must be direct or robust")
 
 
+def heat_derivative(settings, state, method_key, default_method, urban=False, envelope=False):
+    """Upper estimate of dG/dT [W m-2 K-1] for the configured ground/envelope heat method.
+
+    Used only in relaxation denominators; overestimating it damps but never
+    destabilises the update. The direct method (G = fraction*N) contributes a
+    small negative slope and is taken as 0.
+    """
+    from .evapo import _method
+    from .heat_conduction import column_layers, thermal_properties, time_step
+
+    method = _method(settings.get(method_key, default_method))
+    if method == "direct":
+        return 0.0
+    conductivity, capacity = thermal_properties(settings, urban=urban)
+    dt = time_step(settings, state)
+    if method == "surface":
+        return 2.0 * math.sqrt(conductivity * capacity) / math.sqrt(math.pi * dt)
+    if envelope:
+        layers = max(int(settings.get("urban_wall_layers", 3)), 1)
+        dz = max(float(settings.get("urban_wall_thickness", 0.5)), 1.0e-3) / layers
+        return conductivity / dz
+    dz = column_layers()[0]
+    return conductivity / dz + capacity * 0.5 * dz / dt
+
+
+def _jacobian(rho, ra, rs, pressure, temp, emissivity, faces, gterm, latent=True):
+    """d(N - LE - H - G)/dT magnitude for one component (per unit ground area)."""
+    value = rho * CP / ra + 4.0 * faces * emissivity * SIGMASB * temp ** 3 + max(float(gterm), 0.0)
+    if latent:
+        value += (rho * latent_heat(temp) * (MH20 / MAIR / pressure)
+                  * saturation_slope(temp - 273.15) / (ra + rs))
+    return value
+
+
 def _update_temperature(state, key, ra, rs, gterm, emissivity, pressure, closed, name=None, gkey=None, method="direct", lai=0.0, soil=False, faces=1.0, rho=None):
     name = name or {"Tls": "leafsunlit", "Tlh": "leafshaded", "Tss": "soilsunlit", "Tsh": "soilshaded"}[key]
     old = float(state[key])
@@ -56,24 +90,13 @@ def _update_temperature(state, key, ra, rs, gterm, emissivity, pressure, closed,
     residual = float(state.get("N_" + name, 0.0)) - float(state.get("LE_" + name, 0.0)) - float(state.get("H_" + name, 0.0))
     if gkey:
         residual -= float(state.get(gkey, 0.0))
-    if method == "robust":
-        # ebal.m: T = T + Wc*EBres / (heat-conduction + 4*sigma*T^3).
-        # The MATLAB soil expression contains two air heat-conduction terms.
-        effective_resistance = max(ra + rs, 1.0)
-        conduction = rho * CP / effective_resistance
-        if soil:
-            conduction *= 2.0
-        else:
-            conduction /= max(float(lai) + 1.0, 1.0)
-        denominator = conduction + 4.0 * SIGMASB * old_for_derivative ** 3
-    else:
-        denominator = (
-            rho * CP / ra
-            + rho * latent_heat(old_for_derivative) * (MH20 / MAIR / pressure)
-            * saturation_slope(old_for_derivative - 273.15) / (ra + rs)
-            + 4.0 * faces * emissivity * SIGMASB * old_for_derivative ** 3
-            + max(float(gterm), 0.0)
-        )
+    # Relaxed Newton step on the complete per-ground-area Jacobian for both
+    # methods. The former "robust" ebal.m-style denominator (rho*cp/(ra+rs)
+    # without the 2*LAI emission, dLE/dT and dG/dT terms) under-estimated the
+    # slope several fold, so Wc*J/denominator exceeded 2 and the update
+    # oscillated. Both methods keep the 5 K step limit and temperature bounds.
+    denominator = _jacobian(rho, ra, rs, pressure, old_for_derivative, emissivity,
+                            faces, gterm, latent=True)
     if not math.isfinite(residual) or not math.isfinite(denominator) or denominator <= 0.0:
         return False
     raw_delta = WC * residual / denominator
@@ -97,11 +120,13 @@ def rebalance(settings, meteo, state):
     soil_method = _temperature_method(settings.get("soil_temperature_method", leaf_method))
     rho = air_density(meteo)
     closed = True
+    # dG/dT of the configured soil heat method (surface memory, column or direct).
+    soil_gterm = heat_derivative(settings, state, "soil_heat_method", "direct")
     if settings["lai"] > 0.0:
         closed = _update_temperature(state, "Tls", state["raa_leaf"], state["rssunlit"], 0.0, settings["leaf_emissivity"], meteo["pressure"], closed, method=leaf_method, lai=settings["lai"], faces=2.0 * settings["lai"], rho=rho)
         closed = _update_temperature(state, "Tlh", state["raa_leaf"], state["rsshaded"], 0.0, settings["leaf_emissivity"], meteo["pressure"], closed, method=leaf_method, lai=settings["lai"], faces=2.0 * settings["lai"], rho=rho)
-    closed = _update_temperature(state, "Tss", state["raa_soil"], state["rss"], state["dG_term"], settings["soil_emissivity"], meteo["pressure"], closed, gkey="G_sunlit", method=soil_method, lai=settings["lai"], soil=True, rho=rho)
-    closed = _update_temperature(state, "Tsh", state["raa_soil"], state["rss"], state["dG_term"], settings["soil_emissivity"], meteo["pressure"], closed, gkey="G_shaded", method=soil_method, lai=settings["lai"], soil=True, rho=rho)
+    closed = _update_temperature(state, "Tss", state["raa_soil"], state["rss"], soil_gterm, settings["soil_emissivity"], meteo["pressure"], closed, gkey="G_sunlit", method=soil_method, lai=settings["lai"], soil=True, rho=rho)
+    closed = _update_temperature(state, "Tsh", state["raa_soil"], state["rss"], soil_gterm, settings["soil_emissivity"], meteo["pressure"], closed, gkey="G_shaded", method=soil_method, lai=settings["lai"], soil=True, rho=rho)
     if soil_method == "robust":
         for key in ("Tss", "Tsh"):
             if abs(state[key] - 273.15) > 100.0:
@@ -130,10 +155,14 @@ def _urban_temperature(state, temp_key, components, resistances, emissivity, set
         rs = max(float(rs), 0.0)
         residual += float(state.get("N_" + name, 0.0)) - float(state.get("LE_" + name, 0.0)) - float(state.get("H_" + name, 0.0)) - float(state.get("G_" + name, 0.0))
         old = min(max(float(state[temp_key]), 180.0), 380.0)
-        if method == "robust":
-            denominator += rho * CP / (ra + rs) + 4.0 * emissivity[component] * SIGMASB * old ** 3
+        # H uses ra alone (evapo._component_flux); urban LE is forced to 0, so it has
+        # no slope; G is the roof/wall envelope or the street (soil-material) flux.
+        if component in {"roof", "wall"}:
+            gterm = heat_derivative(settings, state, "urban_heat_method", "depth", urban=True, envelope=True)
         else:
-            denominator += rho * CP / ra + rho * latent_heat(old) * (MH20 / MAIR / max(float(pressure), 1.0e-6)) * saturation_slope(old - 273.15) / (ra + rs) + 4.0 * emissivity[component] * SIGMASB * old ** 3
+            gterm = heat_derivative(settings, state, "soil_heat_method", "surface")
+        denominator += _jacobian(rho, ra, rs, max(float(pressure), 1.0e-6), old,
+                                 emissivity[component], 1.0, gterm, latent=False)
     if not math.isfinite(residual) or not math.isfinite(denominator) or denominator <= 0.0:
         return False
     raw_delta = WC * residual / denominator
@@ -148,7 +177,9 @@ def _urban_temperature(state, temp_key, components, resistances, emissivity, set
 
 
 def rebalance_urban(settings, meteo, state):
-    urban_method = _temperature_method(settings.get("temperature_method", "direct"))
+    # urban_temperature_method is parsed by read_defined (falls back to temperature_method).
+    urban_method = _temperature_method(
+        settings.get("urban_temperature_method") or settings.get("temperature_method", "direct"))
     rho = air_density(meteo)
     resistance = {
         "roof": (state.get("raa_roof", 1.0), state.get("rssroof", 3662.8562)),

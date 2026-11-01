@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-SURFACES = ("plane", "slope", "terrain", "urban")
+SURFACES = ("plane", "slope", "terrain", "dem", "urban")
 VEGETATION = ("bare", "hom", "row", "crown")
 
 
@@ -90,12 +90,16 @@ def thermal_forward(case, lai, requests, directory):
     from run import run, BackfaceOmittedWarning, _slope_backface, OUTPUT_FIELDS
     waves = sorted({row["wavelength"] for row in requests})
     views = list(dict.fromkeys((row["vza"], row["vaa"]) for row in requests))
-    config = dict(case["structure"], **case["temperatures"], lai=lai,
+    structure = dict(case["structure"])
+    dem_file = structure.get("dem_file")
+    if dem_file and case.get("_base_dir") and not Path(str(dem_file)).is_absolute():
+        structure["dem_file"] = str(Path(case["_base_dir"]) / str(dem_file))
+    config = dict(structure, **case["temperatures"], lai=lai,
                   surface_model=case["surface_model"], vegetation_model=case["vegetation_model"],
                   wavelengths=waves, sza=case["sza"], saa=case["saa"],
                   vza=[v[0] for v in views], vaa=[v[1] for v in views],
                   geometry_mode=0, geometry_pair_mode="zip", spectral_source="direct",
-                  hapke_enable=0, sky_temperature_k="")
+                  hapke_enable=0, sky_temperature_k="none")
     indices = [case["wavelengths"].index(wave) for wave in waves]
     for key, values in case["materials"].items():
         values = [values[i] for i in indices]
@@ -151,6 +155,9 @@ def simulate_case(case, output_dir):
         settings = dict(case["structure"], **case["materials"], lai=lai,
                         surface_model=case["surface_model"], vegetation_model=case["vegetation_model"],
                         wavelengths=case["wavelengths"])
+        dem_file = settings.get("dem_file")
+        if dem_file and case.get("_base_dir") and not Path(str(dem_file)).is_absolute():
+            settings["dem_file"] = str(Path(case["_base_dir"]) / str(dem_file))
         for sweep_index, sweep in enumerate(requests):
             if case["domain"] == "thermal":
                 lookup = thermal_forward(case, lai, sweep, output_dir / "thermal_inputs" /
@@ -162,8 +169,20 @@ def simulate_case(case, output_dir):
                 if case["domain"] == "optical":
                     hidden = case["surface_model"] == "slope" and not slope_direction(
                         obs["vza"], obs["vaa"], settings["slope_angle"], settings["slope_aspect"])[2]
-                    row["reflectance_brf"] = None if hidden else float(reflectance(
-                        settings, obs["wavelength"], obs["vza"], obs["vaa"], case["sza"], case["saa"]))
+                    if case["surface_model"] == "dem":
+                        from run import _optical_band
+                        index = case["wavelengths"].index(obs["wavelength"])
+                        material = case["materials"]
+                        band = {name: float(material[f"{name}_spectrum"][index]) for name in
+                                ("leaf_reflectance", "leaf_transmittance", "soil_reflectance",
+                                 "street_reflectance", "wall_reflectance", "roof_reflectance")}
+                        value = _optical_band(settings, "dem", case["vegetation_model"],
+                                              obs["wavelength"] / 1000.0,
+                                              (obs["vza"], obs["vaa"], case["sza"], case["saa"]), band)
+                    else:
+                        value = float(reflectance(
+                            settings, obs["wavelength"], obs["vza"], obs["vaa"], case["sza"], case["saa"]))
+                    row["reflectance_brf"] = None if hidden else value
                     if hidden:
                         row["status"] = "slope_backface"
                 else:
@@ -249,6 +268,8 @@ def run_case(case, output_dir=None, show=False, *, plots=True, input_path=None):
     output.mkdir(parents=True, exist_ok=True)
     # A failed rerun must not retain a success receipt from an earlier run.
     (output / "verification.json").unlink(missing_ok=True)
+    if input_path is not None:
+        case = dict(case, _base_dir=str(Path(input_path).resolve().parent))
     start = time.perf_counter()
     spectrum, angles = simulate_case(case, output)
     write_csv(output / "spectrum.csv", spectrum)

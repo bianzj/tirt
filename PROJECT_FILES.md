@@ -52,7 +52,7 @@
 ## 验证
 
 项目不再附带 `examples/` 场景示例；模型复算与精度检查统一使用 `validation/`。
-与 HiSTREAM 的对比见[测试文档](docs/TiRT_validation.md)，复算命令：
+与 HiSTREAM 的对比见[测试文档](docs/TiRT_validation.md)；多山脊 DEM 的对照见 [validation/ridge_20261029](validation/ridge_20261029/README.md)。复算命令：
 
 ```bat
 cd /d C:\work\tirt

@@ -69,9 +69,13 @@ async function startBackend() {
   ], {
     cwd: app.isPackaged ? app.getPath('userData') : sourceRoot,
     windowsHide: true,
-    stdio: ['ignore', 'ignore', 'pipe'],
+    // stdin is a pipe that is never written: when this process ends for any reason
+    // (quit, crash, kill) the OS closes it and the backend stops on EOF, so it
+    // cannot be left running as an orphan (gui/launcher.py _watch_parent).
+    stdio: ['pipe', 'ignore', 'pipe'],
     env: { ...process.env, MPLBACKEND: 'Agg' },
   })
+  backendProcess.stdin?.on('error', () => {})
   backendProcess.stderr?.on('data', (data) => { backendError = (backendError + String(data)).slice(-8000) })
   backendProcess.once('error', (error) => {
     backendError += `\n${error.message}`
@@ -81,6 +85,8 @@ async function startBackend() {
     backendProcess = null
     if (!isQuitting) {
       // Exit code 0 is the in-app Exit button (/api/shutdown), not a failure.
+      // gui/launcher.py exits with 1 on start-up or runtime errors and writes the
+      // reason to stderr (no MessageBox with --server-only), which is shown here.
       if (code !== 0 && !smokeTest) {
         const detail = backendError.trim() || `服务已退出（code=${code}, signal=${signal || 'none'}）`
         dialog.showErrorBox('TiRT 服务已停止', detail)
@@ -118,6 +124,8 @@ function stopBackend() {
   backendProcess = null
   if (readyFile) rm(readyFile, { force: true }).catch(() => {})
   if (!child || child.killed) return
+  // Closing stdin asks the backend to stop on its own; the kill below is the fallback.
+  try { child.stdin?.end() } catch { /* already closed */ }
   if (process.platform === 'win32') {
     spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
       windowsHide: true,
@@ -125,6 +133,9 @@ function stopBackend() {
     })
   } else {
     child.kill('SIGTERM')
+    const timer = setTimeout(() => { try { child.kill('SIGKILL') } catch { /* gone */ } }, 3000)
+    timer.unref?.()
+    child.once('exit', () => clearTimeout(timer))
   }
 }
 

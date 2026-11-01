@@ -73,7 +73,7 @@
           <div class="subsection-title">PROSPECT</div>
           <div class="field-grid"><label>Cab<input id="cab" type="number" step="0.1" value="58"></label><label>Cw<input id="cw" type="number" step="0.001" value="0.013"></label></div>
           <div class="field-grid"><label>Cdm<input id="cdm" type="number" step="0.0001" value="0.0036"></label><label>Cs<input id="cs" type="number" step="0.01" value="0"></label></div>
-          <label>Leaf structure N<input id="leaf-n" type="number" step="0.01" value="1.86"></label>
+          <div class="field-grid"><label>Leaf structure N<input id="leaf-n" type="number" step="0.01" value="1.86"></label><label>Cca<input id="cca" type="number" step="0.1" value="10" title="Carotenoids ug cm-2 (SCOPE default 10)"></label></div>
           <div class="subsection-title">BSM</div>
           <div class="field-grid"><label>BSM brightness<input id="soil-brightness" type="number" step="0.01" value="0.25"></label><label>BSM latitude<input id="soil-latitude" type="number" step="1" value="25"></label></div>
           <label>BSM longitude<input id="soil-longitude" type="number" step="1" value="45"></label>
@@ -99,7 +99,7 @@
 
         <details class="form-section accordion">
           <summary class="section-title"><span class="section-number">06</span><span>Physical properties</span><span class="accordion-mark">⌄</span></summary>
-          <label>SW diffuse fraction<input id="shortwave-diffuse-fraction" type="number" min="-1" max="1" step="0.01" value="-1" title="-1: automatic Erbs partition; 0-1: measured diffuse fraction"></label><div class="field-grid"><label>Soil moisture (m³ m⁻³)<input id="soil-moisture" type="number" step="0.01" value="0.25" title="Volumetric water content; values above 1 are read as percent"></label><label>Soil surface resistance (s m⁻¹)<input id="soil-rss" type="number" min="0" step="1" value="200"></label></div>
+          <label>SW diffuse fraction<input id="shortwave-diffuse-fraction" type="number" min="-1" max="1" step="0.01" value="0.2" title="0.2 = 80% direct + 20% diffuse (default); -1: automatic Erbs partition; 0-1: measured diffuse fraction"></label><div class="field-grid"><label>Soil moisture (m³ m⁻³)<input id="soil-moisture" type="number" step="0.01" value="0.25" title="Volumetric water content; values above 1 are read as percent"></label><label>Soil surface resistance (s m⁻¹)<input id="soil-rss" type="number" min="0" step="1" value="200"></label></div>
           <div class="field-grid"><label>Soil heat capacity<input id="soil-cs" type="number" step="1" value="1180"></label><label>Soil density<input id="soil-rhos" type="number" step="1" value="1100"></label></div>
           <div class="field-grid"><label>Soil conductivity<input id="soil-lambda" type="number" step="0.01" value="1.55"></label><label>Soil boundary resistance<input id="soil-rbs" type="number" min="0" step="1" value="10"></label></div>
           <div class="field-grid"><label>Urban surface resistance<input id="urban-rss" type="number" min="0" step="1" value="3662.8562"></label><label>Urban heat capacity<input id="urban-cs" type="number" step="1" value="1000000"></label></div>

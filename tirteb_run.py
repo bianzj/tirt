@@ -106,7 +106,7 @@ def _band_observation(settings, meteo, state, name, wavelength, vza, vaa, tir_re
             "radiance": float("nan"),
             "brightness_temperature_K": float("nan"),
         })
-    if settings.get("surface_model") == "terrain" and int(settings.get("terrain_type", 1)) == 1:
+    if settings.get("surface_model") == "terrain" and int(settings.get("terrain_type", 2)) == 1:
         local_vza, local_vaa, visible = slope_direction(
             vza,
             vaa,
@@ -155,7 +155,7 @@ def _band_observation(settings, meteo, state, name, wavelength, vza, vaa, tir_re
                 urban_settings.pop(key, None)
             reflectance = urban_directional_reflectance(
                 urban_settings, wavelength, local_vza, local_vaa, state["sza"], state["saa"])
-        elif settings.get("surface_model") == "terrain" and int(settings.get("terrain_type", 1)) == 2:
+        elif settings.get("surface_model") == "terrain" and int(settings.get("terrain_type", 2)) == 2:
             reflectance = directional_reflectance(
                 settings, state["sza"], state["saa"], local_vza, local_vaa, leaf_rho, leaf_tau, soil_rho,
                 sunlit=sunlit, use_hapke=False, diffuse_fraction=diffuse)
@@ -276,6 +276,10 @@ def _observation_columns(wavelength, values, quantity):
     return {prefix: values.get("reflectance", float("nan"))}
 
 
+# Half a minute in days: meteorological DOY values carry only ~4 decimals (about 9 s).
+OBSERVATION_TIME_TOLERANCE_DAYS = 0.5 / 1440.0
+
+
 def _observation_hour_fractions(config):
     """Parse observation_hours as local clock hours 0-24 (decimals allowed) and return day fractions."""
     raw = config.get("observation_hours", "")
@@ -294,10 +298,16 @@ def _observation_hour_fractions(config):
     return tuple(fractions)
 
 
-def _matches_observation_hour(time_value, fractions, tolerance=0.5 / 1440.0):
+def _matches_observation_hour(time_value, fractions, tolerance=OBSERVATION_TIME_TOLERANCE_DAYS):
     # Meteorological DOY values carry only ~4 decimals (about 9 s), so match to the half minute.
     fraction = float(time_value) % 1.0
     return any(min(abs(fraction - target), 1.0 - abs(fraction - target)) <= tolerance for target in fractions)
+
+
+def _matches_observation_time(time_value, times, tolerance=OBSERVATION_TIME_TOLERANCE_DAYS):
+    """Absolute DOY times match within the same half-minute tolerance as observation_hours."""
+    value = float(time_value)
+    return any(abs(value - float(target)) <= tolerance for target in times)
 
 
 def _csv_value(value):
@@ -430,7 +440,7 @@ def _run_csv(input_path=DEFAULT_INPUT, output_path=None, **overrides):
         selected_times = None
         selected_fractions = None
     elif observation_time_mode in {"time", "selected", "specific", "some", "exact"}:
-        selected_times = {round(value, 8) for value in observation_times}
+        selected_times = tuple(observation_times)
         if not selected_times:
             raise ValueError("observation_time_mode=time requires observation_times")
         selected_fractions = None
@@ -453,7 +463,7 @@ def _run_csv(input_path=DEFAULT_INPUT, output_path=None, **overrides):
         )
     observation_selected = [
         (selected_times is None and selected_fractions is None)
-        or (selected_times is not None and round(float(record["time"]), 8) in selected_times)
+        or (selected_times is not None and _matches_observation_time(record["time"], selected_times))
         or (selected_fractions is not None and _matches_observation_hour(record["time"], selected_fractions))
         for record in records
     ]
@@ -484,9 +494,11 @@ def _run_csv(input_path=DEFAULT_INPUT, output_path=None, **overrides):
     if model_name(settings) == "urban":
         scene_height = max(
             float(settings.get("urban_building_height", 0.0)),
-            float(settings.get("height", 0.0)),
+            float(settings.get("aerodynamic_height", settings.get("height", 0.0))),
         )
-        settings["z"] = max(15.0, scene_height)
+        # Keep the user's reference height; only lift it above the roughness elements
+        # (aerodynamic_resistance applies the same lower bound).
+        settings["z"] = max(float(settings.get("z", 15.0)), scene_height + 0.1)
     # Initialize soil and urban surfaces from the full-day air-temperature
     # mean of the first simulated day. Legacy input temperatures remain
     # readable for compatibility but are not used for initialization.
@@ -510,7 +522,7 @@ def _run_csv(input_path=DEFAULT_INPUT, output_path=None, **overrides):
 
     for node, meteo in enumerate(records):
         if settings.get("surface_model") == "terrain":
-            if int(settings.get("terrain_type", 1)) == 1:
+            if int(settings.get("terrain_type", 2)) == 1:
                 terrain_slope = float(settings.get("terrain_slope", 0.0))
                 terrain_aspect = float(settings.get("terrain_aspect", 0.0))
             else:
@@ -671,6 +683,7 @@ def run(input_path=DEFAULT_INPUT, output_path=None, *, output_dir=None,
 SOIL_METHODS = ("direct", "surface", "depth")
 STOMATAL_METHODS = ("farquhar", "ballberry")
 SOIL_TEMPERATURE_METHODS = ("direct", "robust")
+COMPARISON_FIELDS = ("soil_heat_method", "stomatal_method", "soil_temperature_method")
 
 
 def run_comparison(input_path=DEFAULT_INPUT, output_root=None, start_time=None, end_time=None, max_iter=None):
@@ -700,12 +713,14 @@ def run_comparison(input_path=DEFAULT_INPUT, output_root=None, start_time=None, 
                 if max_iter is not None:
                     overrides["max_iter"] = max_iter
                 result = run(input_path, **overrides)
+                methods = {"soil_heat_method": soil_heat_method, "stomatal_method": stomatal_method,
+                           "soil_temperature_method": soil_temperature_method}
                 with Path(result).open(newline="", encoding="utf-8") as file:
-                    summary.extend(csv.DictReader(file))
+                    summary.extend(dict(methods, **row) for row in csv.DictReader(file))
     output_root.mkdir(parents=True, exist_ok=True)
     summary_path = output_root / "summary.csv"
     with summary_path.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=OUTPUT_FIELDS)
+        writer = csv.DictWriter(file, fieldnames=COMPARISON_FIELDS + tuple(OUTPUT_FIELDS))
         writer.writeheader()
         writer.writerows(summary)
     return summary_path

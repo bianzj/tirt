@@ -1016,8 +1016,9 @@ class Urban_Veg(CanopyGeometry):
 
 
     def set_strcutural_input(self,shapes):
-        self.shapes = shapes
-        self.n_shape, self.n_dim = np.shape(shapes)
+        from .urban import validate_urban_shapes
+        self.shapes = validate_urban_shapes(shapes)
+        self.n_shape, self.n_dim = np.shape(self.shapes)
 
     def set_structural_input(self, shapes):
         return self.set_strcutural_input(shapes)

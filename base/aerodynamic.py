@@ -71,10 +71,19 @@ def _bulk_resistance(reference_height, roughness_length, wind_speed, length, psi
     return max(momentum_log * heat_log / (KAPPA * KAPPA * wind_speed), 1.0e-3)
 
 
+def _canopy_top(settings, default=None):
+    """Aerodynamic canopy-top height [m]: read_defined's aerodynamic_height, else height."""
+    value = settings.get("aerodynamic_height")
+    if value in (None, ""):
+        value = settings.get("height", default) if default is not None else settings["height"]
+    return float(value)
+
+
 def aerodynamic_resistance(settings, meteo, state, urban=False):
     """Complete equivalent of old/aerodynamic.cpp::aeresist and aeresist_urban."""
     lai = max(float(settings["lai"]), 0.0)
-    hc = max(float(settings["height"]), 0.1)
+    # Canopy top: crown base + 2 x vertical semiaxis for crowns, ridge height for rows.
+    hc = max(_canopy_top(settings), 0.1)
     wind = max(float(meteo["wind_speed"]), float(settings.get("min_wind_speed", 0.05)), 0.01)
     # Convective gustiness keeps free-convective daytime exchange finite.
     buoyancy = max(float(state.get("scene_sensible_heat_W_m2", 0.0)), 0.0)
@@ -92,7 +101,7 @@ def aerodynamic_resistance(settings, meteo, state, urban=False):
         width = max(float(settings.get("urban_building_width", 10.0)), 0.1)
         building_length = max(float(settings.get("urban_building_length", 10.0)), 0.1)
         density = max(float(settings.get("urban_density", 0.0015)), 0.0)
-        scene_height = max(hc, float(settings.get("height", 0.0)))
+        scene_height = max(hc, _canopy_top(settings, 0.0))
         z = max(float(settings.get("z", 15.0)), scene_height + 0.1)
         profile_reference = z
         _set_stability_reference(state, length, profile_reference)
@@ -244,7 +253,7 @@ def _canopy(settings, lai, hc, z, wind, length, profile_reference, psim, psih, p
     displacement = hc * (1.0 - (1.0 - math.exp(-sq)) / sq)
     # Grass represented without an explicit height falls back to the fixed
     # bare-surface roughness; vegetation with a height keeps Raupach z0.
-    raw_height = float(settings.get("height", 0.0))
+    raw_height = _canopy_top(settings, 0.0)
     roughness = (BARE_SOIL_ROUGHNESS if raw_height <= 0.0 else
                  max((hc - displacement) * math.exp(-KAPPA * g1 + float(settings["aero_psicor"])), 1e-4))
     if hc > z:

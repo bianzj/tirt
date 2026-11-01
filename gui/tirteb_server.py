@@ -14,7 +14,7 @@ GUI_ROOT = _BUNDLE_ROOT / "gui" if (_BUNDLE_ROOT / "gui").exists() else Path(__f
 PROJECT_ROOT = GUI_ROOT.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from tirteb_run import run  # noqa: E402
+from tirteb_run import INPUT_FILE_KEYS, run  # noqa: E402
 
 TIRTEB_INPUT = PROJECT_ROOT / "input_tirteb.csv"
 
@@ -26,7 +26,21 @@ _PATH_KEYS = {
     "urban_wall_spectrum_file", "urban_street_spectrum_file", "geometry_file",
     "terrain_spectrum_file", "roof_spectrum_file", "wall_spectrum_file",
     "street_spectrum_file", "additional_geometry_file", "observation_geometry_file",
-}
+} | set(INPUT_FILE_KEYS)
+
+
+def _normal_key(key) -> str:
+    """Canonical parameter name, identical to what base.inputio.read_input sees."""
+    return str(key).strip().lower()
+
+
+def _is_path_key(name: str) -> bool:
+    return name in _PATH_KEYS or name.endswith(("_file", "_dir", "_path"))
+
+
+def _absolute(value) -> str:
+    path = Path(str(value))
+    return str((path if path.is_absolute() else PROJECT_ROOT / path).resolve())
 
 def _json_safe(value):
     if isinstance(value, float) and not math.isfinite(value):
@@ -41,12 +55,19 @@ def _json_safe(value):
 def _check_paths(overrides: dict, work_dir: Path) -> None:
     """Client-supplied paths may only name bundled data or this request's uploads."""
     roots = ((PROJECT_ROOT / "data").resolve(), Path(work_dir).resolve())
+    seen = set()
     for key, value in overrides.items():
-        name = str(key).lower()
-        if value in (None, "") or not (name == "meteo" or name.endswith(("_file", "_dir", "_path"))):
+        name = _normal_key(key)
+        if not name or name.startswith("_"):
             continue
-        path = Path(str(value))
-        path = (path if path.is_absolute() else PROJECT_ROOT / path).resolve()
+        if name in seen:
+            raise ValueError(f"Duplicate parameter after normalisation: {key!r}")
+        seen.add(name)
+        if any(ch in name for ch in ",\r\n\"") or any(ch in str(value) for ch in "\r\n"):
+            raise ValueError(f"Invalid characters in parameter {key!r}")
+        if value in (None, "") or not _is_path_key(name):
+            continue
+        path = Path(_absolute(value))
         if not any(path.is_relative_to(root) for root in roots):
             raise ValueError(f"{key} must be a file inside the project data folder: {value}")
 
@@ -54,25 +75,23 @@ def _check_paths(overrides: dict, work_dir: Path) -> None:
 def _write_run_input(source: Path, target: Path, overrides: dict[str, object]) -> None:
     with source.open(newline="", encoding="utf-8-sig") as file:
         rows = list(csv.reader(file))
-    values = {str(key).lower(): value for key, value in overrides.items() if not str(key).startswith("_")}
+    # Normalise exactly like read_input (strip + lower) so the checked key is the used key.
+    values = {_normal_key(key): value for key, value in overrides.items()
+              if _normal_key(key) and not _normal_key(key).startswith("_")}
     for row in rows:
         if len(row) < 3:
             continue
-        key = row[1].strip().lower()
+        key = _normal_key(row[1])
         changed = key in values
         value = values.pop(key) if changed else row[2]
-        if key in _PATH_KEYS and value not in (None, ""):
-            file_path = Path(str(value))
-            if not file_path.is_absolute():
-                value = str((PROJECT_ROOT / file_path).resolve())
-        if changed or key in _PATH_KEYS:
+        if _is_path_key(key) and str(value).strip() not in ("",):
+            value = _absolute(str(value).strip())
+        if changed or _is_path_key(key):
             row[2] = str(value)
     for key, value in values.items():
         if value not in (None, ""):
-            if key in _PATH_KEYS:
-                path = Path(str(value))
-                if not path.is_absolute():
-                    value = str((PROJECT_ROOT / path).resolve())
+            if _is_path_key(key):
+                value = _absolute(value)
             rows.append(["gui", key, str(value), "GUI run value"])
     with target.open("w", newline="", encoding="utf-8") as file:
         csv.writer(file, lineterminator="\n").writerows(rows)
@@ -101,7 +120,12 @@ def _time_overrides(payload: dict) -> dict:
     raw, files = payload.get("overrides", {}), payload.get("files") or {}
     if not isinstance(raw, dict) or not isinstance(files, dict):
         raise ValueError("overrides and files must be objects")
-    overrides = {str(key): value for key, value in raw.items()}
+    overrides = {}
+    for key, value in raw.items():
+        name = _normal_key(key)
+        if name in overrides:
+            raise ValueError(f"Duplicate parameter after normalisation: {key!r}")
+        overrides[name] = value
     for gui_key, solver_key in {
         "canopy_height": "height", "slope_angle": "terrain_slope",
         "slope_aspect": "terrain_aspect",
@@ -158,8 +182,8 @@ def _time_request(payload: dict, work_dir: Path) -> dict:
             overrides["direction_source"] = "file"
 
     # TiRT-only geometry keys are rejected by the temporal runner.
-    for key in [key for key in overrides if key.lower() in {"geometry_mode", "geometry_pair_mode", "geometry_file"}
-                or key.lower().startswith(("principal_vza", "additional_geometry_"))]:
+    for key in [key for key in overrides if _normal_key(key) in {"geometry_mode", "geometry_pair_mode", "geometry_file"}
+                or _normal_key(key).startswith(("principal_vza", "additional_geometry_"))]:
         del overrides[key]
     _check_paths(overrides, work_dir)
     input_path = work_dir / "input.csv"

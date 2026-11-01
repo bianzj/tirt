@@ -89,9 +89,10 @@ case_name cases_dir case_result_dir surface_model surface_option vegetation_mode
 terrain_type terrain_slope terrain_aspect slope_angle slope_aspect terrain_radius terrain_height terrain_density
 building_density building_length building_width building_height building_azimuth
 urban_roughness_length urban_canyon_roughness_ratio urban_canyon_min_ratio urban_leaf_wind_decay urban_leaf_boundary_factor
-aero_cd aero_cd1 aero_psicor aero_cssoil aero_rbs max_aerodynamic_resistance
+aero_cd aero_cd1 aero_cr aero_psicor aero_cssoil aero_rbs max_aerodynamic_resistance
+sky_temperature_k sky_temperature_c urban_temperature_method
 z ea ca oa shortwave_diffuse_fraction shortwave_enforce_solar_limit min_wind_speed
-lai height hspot leaf_width
+lai height hspot leaf_width aerodynamic_height
 row_width row_blank row_height row_azimuth ridge_width ridge_blank ridge_height ridge_azimuth
 crown_rad_a crown_rad_b crown_height crown_density
 vegetation_spectrum_source vegetation_spectral_source vegetation_spectrum_file vegetation_spectral_file leaf_spectrum_file
@@ -102,7 +103,7 @@ urban_roof_spectrum_file roof_spectrum_file urban_wall_spectrum_file wall_spectr
 urban_street_spectrum_file street_spectrum_file
 urban_reflectance_roof urban_reflectance_wall urban_reflectance_street
 urban_absorption_roof urban_absorption_wall urban_absorption_street
-cab cw cdm cs n bsm_brightness bsm_latitude bsm_longitude soil_brightness soil_latitude soil_longitude
+cab cca cant cw cdm cs n bsm_brightness bsm_latitude bsm_longitude soil_brightness soil_latitude soil_longitude
 vcmax ballberry_m m leaf_type tparam1 tparam2 tparam3 tparam4 tparam5 rdparam tyear beta knpqs qls kv stressfactor
 stomatal_method stomatal_g0
 soil_rss rss soil_rss_method soil_cs cs_soil soil_rhos rhos soil_lambda soil_lambdas soil_rbs rbs
@@ -124,6 +125,24 @@ RENAMED_KEYS = {
     "crown_radius": "crown_rad_a (horizontal crown radius, m)",
     "crown_width": "crown_rad_a (horizontal crown radius, m) and crown_rad_b (vertical semiaxis, m)",
 }
+# Parsed by read_defined/InputStructure for compatibility, but no solver consumes them
+# (checked by grep). They keep a warning so users know a change has no effect.
+_NO_CONSUMER = "no TIRTEB solver uses it"
+INEFFECTIVE_KEYS = {
+    "aero_zo": "roughness is computed from the canopy", "aero_d": "displacement is computed from the canopy",
+    "aero_rbc": _NO_CONSUMER, "aero_rwc": _NO_CONSUMER,
+    "gleaf": _NO_CONSUMER, "g": _NO_CONSUMER, "lidfa": _NO_CONSUMER, "lidfb": _NO_CONSUMER, "lidb": _NO_CONSUMER,
+    "doy": "the day of year comes from the meteorological time column",
+    "soil_temperature_c": "initial temperatures are the first-day mean air temperature",
+    "soil_temperature": "initial temperatures are the first-day mean air temperature",
+    "urban_temperature_c": "initial temperatures are the first-day mean air temperature",
+    "urban_street_radiation_factor": _NO_CONSUMER, "terrain_base_model": _NO_CONSUMER,
+    "urban_emissivity_roof": "use broadband_urban_emissivity_roof",
+    "urban_emissivity_wall": "use broadband_urban_emissivity_wall",
+    "urban_emissivity_street": "use broadband_urban_emissivity_street",
+    "width": "crowns use crown_rad_a, rows use row_width", "canopy_width": "crowns use crown_rad_a, rows use row_width",
+    "stand_density": "crowns use crown_density", "density": "crowns use crown_density",
+}
 UNSUPPORTED_KEYS = ("geometry_mode", "geometry_file", "geometry_pair_mode", "principal_vza")
 SLOPE_ALIASES = {"slope_angle": "terrain_slope", "slope_aspect": "terrain_aspect"}
 
@@ -134,23 +153,33 @@ def _unsupported(key):
 
 def read_input(path):
     """Read grouped input.csv and return a flat key/value configuration."""
+    from .inputio import warn_split_value
+
     values = {}
     sections = {}
     with Path(path).open(newline="", encoding="utf-8-sig") as file:
-        for row in csv.reader(file):
+        reader = csv.reader(file)
+        for row in reader:
             fields = [item.strip() for item in row]
             if not fields or not fields[0] or fields[0].startswith("#"):
                 continue
             if fields[0].startswith("[") and fields[0].endswith("]"):
                 continue
+            if fields[0].lower() == "section" and len(fields) >= 3 and fields[1].lower() in {"parameter", "key"}:
+                # Column header (energy_runner writes section,parameter,value), not a parameter.
+                continue
             if len(fields) >= 3:
+                warn_split_value(path, reader.line_num, fields)
                 section, key, value = fields[0].lower(), fields[1].lower(), fields[2]
                 sections.setdefault(section, {})[key] = value
                 values[key] = value
             elif len(fields) >= 2 and fields[1]:
                 values[fields[0].lower()] = fields[1]
     for key in values:
-        if key not in INPUT_KEYS and key not in RENAMED_KEYS and not _unsupported(key):
+        if key in INEFFECTIVE_KEYS:
+            warnings.warn(f"{path}: TIRTEB parameter '{key}' is read but has no effect "
+                          f"({INEFFECTIVE_KEYS[key]}); it is ignored", stacklevel=2)
+        elif key not in INPUT_KEYS and key not in RENAMED_KEYS and not _unsupported(key):
             warnings.warn(f"{path}: unknown or unused TIRTEB parameter '{key}' is ignored", stacklevel=2)
     values["_sections"] = sections
     return values
@@ -179,6 +208,31 @@ def _check_input_keys(overrides):
 def _input_number(overrides, key, default):
     value = overrides.get(key, default)
     return float(value) if value not in (None, "") else default
+
+
+SKY_BLACK = {"none", "black", "black_sky", "off", "0"}
+
+
+def _sky_temperature_k(overrides):
+    """Equivalent sky brightness temperature for the observation sky reflection.
+
+    Default (empty) and ``auto``: derived at every time step from the measured
+    downwelling longwave, T_sky = (L_down / sigma)^(1/4). ``none``/``black``/0:
+    black sky (emission only). A number gives kelvin (sky_temperature_c: Celsius).
+    """
+    kelvin = _input_value(overrides, "sky_temperature_k")
+    celsius = _input_value(overrides, "sky_temperature_c")
+    if celsius is not None and kelvin is not None and str(kelvin).strip().lower() in {"auto", "meteo", "longwave"}:
+        kelvin = None  # an explicit Celsius value overrides the template's "auto"
+    text = str(kelvin if kelvin is not None else celsius if celsius is not None else "auto").strip().lower()
+    if text in {"", "auto", "meteo", "longwave"}:
+        return "auto"
+    if text in SKY_BLACK:
+        return None
+    result = float(kelvin) if kelvin is not None else float(celsius) + 273.15
+    if not np.isfinite(result) or result <= 0.0:
+        raise ValueError("sky_temperature_k/sky_temperature_c must give a positive finite temperature")
+    return result
 
 
 def _surface_model(value):
@@ -257,7 +311,7 @@ def _apply_input_overrides(canopy, leaf, leafbio, soil_optical, soil_thermal, ae
         canopy[0] = 0.0
 
     leaf_keys = {
-        0: ("cab",), 1: ("cw",), 2: ("cdm",), 3: ("cs",), 4: ("n",),
+        0: ("cab",), 1: ("cw",), 2: ("cdm",), 3: ("cs",), 4: ("n",), 5: ("cca",), 6: ("cant",),
     }
     for index, keys in leaf_keys.items():
         value = _input_value(overrides, *keys)
@@ -418,7 +472,8 @@ def read_defined(path=None, overrides=None):
 
     canopy = [
         _input_number(overrides, "lai", 2.0),
-        _input_number(overrides, "stand_density", 1.0),
+        # Crowns per m2; same default as TiRT (run.py crown_density=0.02).
+        _input_number(overrides, "stand_density", 0.02),
         _input_number(overrides, "height", 3.0),
         _input_number(overrides, "width", 3.0),
         _input_number(overrides, "gleaf", 0.5),
@@ -433,6 +488,9 @@ def read_defined(path=None, overrides=None):
         _input_number(overrides, "cdm", 0.0036),
         _input_number(overrides, "cs", 0.0),
         _input_number(overrides, "n", 1.86),
+        # Carotenoids and anthocyanins [ug cm-2]; SCOPE 2 / PROSPECT-D defaults.
+        _input_number(overrides, "cca", 10.0),
+        _input_number(overrides, "cant", 0.0),
     ]
     leafbio = [
         _input_number(overrides, "vcmax", 80.0), _input_number(overrides, "ballberry_m", 9.0),
@@ -488,6 +546,17 @@ def read_defined(path=None, overrides=None):
     crown_base_height = _input_number(overrides, "crown_height", canopy[2])
     if surface_model == "urban" and vegetation_model == "bare":
         canopy[0] = 0.0
+    # Canopy-top height for roughness/displacement. For crowns "height" is the
+    # vertical semiaxis (radiative geometry), so the top is base + 2 * semiaxis;
+    # rows use the ridge height; homogeneous canopies use "height".
+    row_height_value = _input_number(overrides, "row_height", _input_number(overrides, "ridge_height", canopy[2]))
+    if vegetation_model == "crown":
+        aerodynamic_height = crown_base_height + 2.0 * canopy[2]
+    elif vegetation_model == "row":
+        aerodynamic_height = row_height_value
+    else:
+        aerodynamic_height = canopy[2]
+    aerodynamic_height = _input_number(overrides, "aerodynamic_height", aerodynamic_height)
 
     def input_path(*keys, default):
         value = _input_value(overrides, *keys) or default
@@ -610,7 +679,12 @@ def read_defined(path=None, overrides=None):
         urban_eps_street = urban_columns[6]
 
     raw_surface = str(_input_value(overrides or {}, "surface_model", "surface_option") or "plane").strip().lower().replace("-", "_")
-    terrain_type = 1 if raw_surface == "slope" else int(round(_input_number(overrides or {}, "terrain_type", 1.0)))
+    # One meaning in TiRT and TIRTEB: surface_model=slope is a single slope,
+    # surface_model=terrain is the compound (multi-cone) terrain. terrain_type is
+    # only a legacy alias (1 = single slope); its default is the compound terrain.
+    terrain_type = 1 if raw_surface == "slope" else int(round(_input_number(overrides or {}, "terrain_type", 2.0)))
+    if terrain_type not in (1, 2):
+        raise ValueError("terrain_type must be 1 (single slope, = surface_model=slope) or 2 (compound terrain)")
     terrain_slope = _input_number(overrides or {}, "terrain_slope", 0.0)
     terrain_aspect = _input_number(overrides or {}, "terrain_aspect", 0.0)
     terrain_radius = _input_number(overrides or {}, "terrain_radius", 10.0)
@@ -696,8 +770,17 @@ def read_defined(path=None, overrides=None):
         _input_number(overrides or {}, "hapke_optical_enable", 0.0),
         _input_number(overrides or {}, "hapke_thermal_enable", 0.0),
     )
+    sky_temperature = _sky_temperature_k(overrides or {})
+    # BSM's water-film model uses 0.05-0.55, but the physical upper bound is the
+    # soil saturation (satwater). Keep the smaller of the two so a user cannot
+    # force water above saturation through the BSM capacity.
+    soil_water_max = max(min(BSM_WATER_MAX, float(soil_thermal[7])), BSM_WATER_RESIDUAL)
+    soil_moisture = min(max(float(soil_thermal[5]), BSM_WATER_RESIDUAL), soil_water_max)
 
     return DefinedStructure.from_mapping({
+        # Equivalent sky brightness temperature for the (1 - emissivity) * B(T_sky)
+        # reflection in TIRTEB observations; None keeps the black-sky observation.
+        "sky_temperature_k": sky_temperature,
         "surface_type": int(round(canopy[9])),
         "distribution": int(round(canopy[10])),
         "surface_model": surface_model or "plane",
@@ -706,6 +789,7 @@ def read_defined(path=None, overrides=None):
         "canopy_closure": "standard",
         "lai": canopy[0], "stand_density": canopy[1],
         "height": canopy[2], "width": canopy[3],
+        "aerodynamic_height": aerodynamic_height,
         "gleaf": canopy[4], "lidfa": canopy[5],
         "lidfb": canopy[6], "hspot": canopy[7],
         "leaf_width": canopy[8],
@@ -765,7 +849,7 @@ def read_defined(path=None, overrides=None):
         "urban_heat_fraction": _input_number(overrides or {}, "urban_heat_fraction", 0.4),
         "soil_temperature_method": str(_input_value(overrides or {}, "soil_temperature_method", "temperature_method") or "robust").strip().lower(),
         "urban_temperature_method": str(_input_value(overrides or {}, "urban_temperature_method", "temperature_method") or "robust").strip().lower(),
-        "soil_moisture": min(max(float(soil_thermal[5]), BSM_WATER_RESIDUAL), BSM_WATER_MAX), "soil_temperature_c": meta[5],
+        "soil_moisture": soil_moisture, "soil_temperature_c": meta[5],
         "satwater": soil_thermal[7], "dtime": meta[7],
         "z": meta[0], "ea": meta[2], "ca": meta[3], "oa": meta[4],
         "shortwave_diffuse_fraction": min(max(_input_number(overrides or {}, "shortwave_diffuse_fraction", 0.2), -1.0), 1.0),

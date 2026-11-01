@@ -105,6 +105,8 @@ function currentOverrides() {
     include_hemisphere: $("include-hemisphere").checked ? "1" : "0",
     sza: value("sza"),
     saa: value("saa"),
+    shortwave_diffuse_fraction: value("shortwave-diffuse-fraction"),
+    sky_temperature_k: value("sky-temperature-k"),
     spectral_source: "direct",
     wavelengths: value("wavelengths"),
     leaf_reflectance: value("leaf-reflectance"),
@@ -125,6 +127,10 @@ function currentOverrides() {
     terrain_height: value("terrain-height"),
     terrain_radius: value("terrain-radius"),
     terrain_density: value("terrain-density"),
+    dem_file: value("dem-file"),
+    dem_slope_bin: value("dem-slope-bin"),
+    dem_aspect_bin: value("dem-aspect-bin"),
+    dem_shadow: value("dem-shadow"),
     row_width: value("row-width"),
     row_blank: value("row-blank"),
     row_height: value("row-height"),
@@ -183,6 +189,7 @@ function updateConditionalFields() {
   const vegetation = value("vegetation-model");
   $("slope-structure-fields").classList.toggle("is-hidden", surface !== "slope");
   $("terrain-structure-fields").classList.toggle("is-hidden", surface !== "terrain");
+  $("dem-structure-fields").classList.toggle("is-hidden", surface !== "dem");
   $("urban-structure-fields").classList.toggle("is-hidden", surface !== "urban");
   $("vegetation-common-fields").classList.toggle("is-hidden", vegetation === "bare");
   $("row-structure-fields").classList.toggle("is-hidden", vegetation !== "row");

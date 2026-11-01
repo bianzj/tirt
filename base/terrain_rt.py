@@ -12,6 +12,17 @@ def _shade(values):
     return np.asarray([0.0, values[0] + values[1], 0.0, values[2] + values[3]])
 
 
+def _vegetation_call(function, arguments, row_azimuth):
+    """Call a proportions callback, passing a facet-local row azimuth when supported."""
+    if row_azimuth is None:
+        return function(*arguments)
+    try:
+        return function(*arguments, row_azimuth=row_azimuth)
+    except TypeError:
+        # Legacy callbacks have no row_azimuth keyword; keep their global behaviour.
+        return function(*arguments)
+
+
 def _shape_values(settings):
     """Cone classes as (height, radius, density), accepting the thermal multi-value syntax.
 
@@ -190,10 +201,16 @@ def compound_terrain_proportions(settings, sza, saa, vza, vaa, vegetation_propor
         for weight, laa in zip(weights, azimuths[visible]):
             facet_view_z, facet_view_a, _ = slope_direction(vza, vaa, math.degrees(alpha), laa)
             facet_sun_z, facet_sun_a, facet_sunlit = slope_direction(sza, saa, math.degrees(alpha), laa)
+            # A row direction fixed in the global frame has a different azimuth in
+            # each facet's local frame; rotate it before evaluating the row canopy.
+            row_azimuth = settings.get("row_azimuth")
+            local_row = ((slope_direction(90.0, float(row_azimuth), math.degrees(alpha), laa)[1] % 360.0)
+                         if row_azimuth not in (None, "") else None)
             facet = np.asarray(
-                vegetation_proportions(
-                    facet_sun_z, facet_sun_a, facet_view_z, facet_view_a,
-                    facet_sunlit and sunlit,
+                _vegetation_call(
+                    vegetation_proportions,
+                    (facet_sun_z, facet_sun_a, facet_view_z, facet_view_a, facet_sunlit and sunlit),
+                    local_row,
                 ),
                 dtype=float,
             ).reshape(4)
@@ -205,7 +222,13 @@ def compound_terrain_proportions(settings, sza, saa, vza, vaa, vegetation_propor
             mountain_sun += sun_area * facet_sun_total
     mountain *= scale
     mountain_sun = np.minimum(np.maximum(mountain_sun * scale, 0.0), mountain)
-    mountain_shade = mountain - mountain_sun
+    # The remainder is either self-shaded or shadowed by other cones: like
+    # plane_shade, its sunlit soil/vegetation is moved to the shaded slots so the
+    # mutual-shadow term actually changes the sunlit/shaded split.
+    remainder = mountain - mountain_sun
+    mountain_shade = np.asarray([
+        0.0, remainder[0] + remainder[1], 0.0, remainder[2] + remainder[3],
+    ])
 
     result = plane_sun + plane_shade + mountain_sun + mountain_shade
     result = np.maximum(result, 0.0)

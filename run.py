@@ -83,11 +83,23 @@ def _stepped_angles(maximum, step):
 
 def _canonical(config):
     surface = str(value(config, "surface_model", "surface", default="plane")).strip().lower()
-    surface = {"flat": "plane", "bare": "plane", "single_slope": "slope", "sloped": "slope", "building": "urban", "city": "urban"}.get(surface, surface)
+    surface = {"flat": "plane", "bare": "plane", "single_slope": "slope", "sloped": "slope", "building": "urban", "city": "urban",
+               "ridge": "dem", "terrain_dem": "dem"}.get(surface, surface)
     vegetation = str(value(config, "vegetation_model", "vegetation", default="hom")).strip().lower()
     vegetation = {"homogeneous": "hom", "raw": "row", "row_crop": "row", "forest": "crown", "bare_soil": "bare"}.get(vegetation, vegetation)
-    if surface not in {"plane", "slope", "terrain", "urban"}:
-        raise ValueError("surface_model must be plane, slope, terrain or urban")
+    if surface not in {"plane", "slope", "terrain", "dem", "urban"}:
+        raise ValueError("surface_model must be plane, slope, terrain, dem (ridge) or urban")
+    # terrain = compound terrain in both TiRT and TIRTEB; the legacy alias
+    # terrain_type=1 selects the single slope for every band (it used to be
+    # honoured by the optical path only).
+    if surface == "terrain":
+        raw_type = value(config, "terrain_type")
+        if raw_type not in (None, ""):
+            terrain_type = int(round(float(raw_type)))
+            if terrain_type not in (1, 2):
+                raise ValueError("terrain_type must be 1 (single slope) or 2 (compound terrain)")
+            if terrain_type == 1:
+                surface = "slope"
     if vegetation not in {"bare", "hom", "row", "crown"}:
         raise ValueError("vegetation_model must be bare, hom, row or crown")
     return surface, vegetation
@@ -562,6 +574,9 @@ def _surface_result(config, surface, vegetation, wavelength, geometry, spectra):
         if _slope_backface(config, geometry):
             return float("nan"), float("nan")
         return _slope_result(config, vegetation, wavelength, geometry, spectra)
+    if surface == "dem":
+        from base.dem import radiance as dem_radiance
+        return dem_radiance(config, vegetation, wavelength, geometry, spectra)
     if surface == "terrain":
         from base.terrain import Terrain
         from base.terrain_forest import TerrainForest
@@ -665,10 +680,33 @@ def _surface_result(config, surface, vegetation, wavelength, geometry, spectra):
     return _checked_radiance(radiance, wavelength, f"urban+{vegetation}", geometry)
 
 
+def _zip_pairs_solar_angles(config):
+    """True when direct geometry pairs sza/saa element-wise with vza/vaa (geometry_pair_mode=zip)."""
+    pair_mode = str(value(config, "geometry_pair_mode", default="cross")).strip().lower()
+    if pair_mode not in {"zip", "pair", "paired"}:
+        return False
+    raw_mode = value(config, "geometry_mode", "observation_mode", "direction_mode")
+    if raw_mode not in (None, ""):
+        try:
+            return float(raw_mode) == 0.0
+        except ValueError:
+            return False  # _geometry reports the invalid mode
+    source = str(value(config, "geometry_source", "direction_source", default="direct")).strip().lower()
+    return source not in {"file", "txt", "read"}
+
+
 def _scenario_configs(config):
-    """Expand semicolon-separated scenario parameters into a Cartesian batch."""
+    """Expand semicolon-separated scenario parameters into a Cartesian batch.
+
+    With geometry_pair_mode=zip the solar angles belong to the paired view list,
+    so they are not expanded into separate scenarios (that would turn the zip into
+    a Cartesian product).
+    """
+    paired_solar = _zip_pairs_solar_angles(config)
     entries = []
     for key, aliases, label in SCENARIO_PARAMETERS:
+        if paired_solar and key in {"sza", "saa"}:
+            continue
         raw = value(config, *aliases)
         if raw in (None, ""):
             continue
@@ -699,6 +737,10 @@ def _scenario_configs(config):
 
 
 SKY_REFERENCE_TEMPERATURE = 300.0
+#: Default equivalent sky brightness temperature [K] for directional TiRT runs:
+#: a typical clear-sky 8-14 um window value. ``none``/``black``/0 gives the black
+#: sky used by the HiSTREAM validation (emission only).
+DEFAULT_SKY_TEMPERATURE_K = 250.0
 COMPONENT_TEMPERATURE_KEYS = tuple(f"{material}_{lighting}_k"
                                    for material in ("soil", "leaf", "terrain", "roof", "wall", "street")
                                    for lighting in ("sunlit", "shaded"))
@@ -709,7 +751,12 @@ def _sky_temperature(config):
     kelvin = value(config, "sky_temperature_k")
     celsius = value(config, "sky_temperature_c")
     if kelvin in (None, "") and celsius in (None, ""):
+        return DEFAULT_SKY_TEMPERATURE_K
+    text = str(kelvin if kelvin not in (None, "") else celsius).strip().lower()
+    if text in {"none", "black", "black_sky", "off", "0"}:
         return None
+    if text in {"auto", "meteo", "longwave"}:
+        raise ValueError("sky_temperature_k=auto needs measured longwave; use it in TIRTEB or give a temperature")
     result = _float(config, "sky_temperature_k") if kelvin not in (None, "") else _float(config, "sky_temperature_c") + 273.15
     if not np.isfinite(result) or result <= 0.0:
         raise ValueError("sky_temperature must be a positive finite temperature")
@@ -798,6 +845,9 @@ def _optical_band(config, surface, vegetation, wavelength, geometry, band):
             settings.setdefault("crown_bottom",
                                 float(settings.get("crown_height", 3.0) or 3.0))
     vza, vaa, sza, saa = geometry
+    if surface == "dem":
+        from base.dem import reflectance as dem_reflectance
+        return dem_reflectance(settings, float(wavelength), geometry, band)
     if surface == "terrain" and vegetation not in ("crown", "forest"):
         # The public VNIR wrapper restricts compound terrain to forests, but the
         # underlying directional model supports the other covers through the

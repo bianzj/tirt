@@ -39,19 +39,31 @@ def calctav(alpha, nr):
 
 
 def _leaf_values(leafbio):
+    """Cab, Cw, Cdm, Cs, N, Cca, Cant. Cca/Cant are optional (default 0, legacy LeafOpt)."""
     if isinstance(leafbio, dict):
-        return leafbio["Cab"], leafbio["Cw"], leafbio["Cdm"], leafbio["Cs"], leafbio["N"]
-    return leafbio[0], leafbio[1], leafbio[2], leafbio[3], leafbio[4]
+        return (leafbio["Cab"], leafbio["Cw"], leafbio["Cdm"], leafbio["Cs"], leafbio["N"],
+                leafbio.get("Cca", 0.0), leafbio.get("Cant", 0.0))
+    values = list(leafbio) + [0.0, 0.0]
+    return tuple(values[:7])
 
 
 def fluspect(coeff, leafbio):
-    """Calculate leaf reflectance and transmittance as LeafOpt::fluspect."""
-    cab, cw, cdm, cs, n = _leaf_values(leafbio)
+    """Calculate leaf reflectance and transmittance as LeafOpt::fluspect.
+
+    Carotenoid (optipar column 3) and anthocyanin (column 11) absorption are
+    included when Cca/Cant are supplied, as in PROSPECT-D/SCOPE.
+    """
+    cab, cw, cdm, cs, n, cca, cant = _leaf_values(leafbio)
     reflectance, transmittance = [], []
     for row in coeff[:2001]:
         nr = row[1]
         kab, ks, kw, kdm = row[2], row[4], row[5], row[6]
-        kall = (cab * kab + cdm * kdm + cw * kw + cs * ks) / n
+        kall = cab * kab + cdm * kdm + cw * kw + cs * ks
+        if cca:
+            kall += cca * row[3]
+        if cant and len(row) > 11:
+            kall += cant * row[11]
+        kall /= n
         tau = 1.0
         if kall > 0.0:
             tau = (1.0 - kall) * math.exp(-kall) + kall * kall * _expint(kall)
@@ -74,11 +86,14 @@ def fluspect(coeff, leafbio):
         b_nm1 = b ** (n - 1.0)
         b_n2_g = b_nm1 * b_nm1
         denom = a * a * b_n2_g - 1.0
-        rsub = a * (b_n2_g - 1.0) / denom
-        tsub = b_nm1 * (a * a - 1.0) / denom
-        if r + tt >= 1.0:
+        # Non-absorbing limit (r + t -> 1): Stokes' closed form for N layers. Checked
+        # before the general expression, whose denominator vanishes there.
+        if r + tt >= 1.0 - 1.0e-12 or abs(denom) < 1.0e-12:
             tsub = tt / (tt + (1.0 - tt) * (n - 1.0))
             rsub = 1.0 - tsub
+        else:
+            rsub = a * (b_n2_g - 1.0) / denom
+            tsub = b_nm1 * (a * a - 1.0) / denom
         denom = 1.0 - rsub * r
         transmittance.append(ta * tsub / denom)
         reflectance.append(ra + ta * rsub * tt / denom)

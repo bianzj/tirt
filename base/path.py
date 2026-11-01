@@ -261,7 +261,9 @@ def oblique_ellipsoid(zk,rk, za, hc, hcr, rcr):
 		z0 = np.zeros(number)
 		ind = (tv > eps) * ind0
 		if np.sum(ind):
-			z0[ind] = hcr / np.sqrt(rcr / np.power(hcr * tv[ind], 2) + 1.0)
+			# Silhouette tangent height of x^2/a^2 + z^2/b^2 = 1 (a=rcr, b=hcr):
+			# z0 = b / sqrt(a^2 / (b tan(theta))^2 + 1); a^2 keeps the ratio dimensionless.
+			z0[ind] = hcr / np.sqrt(rcr * rcr / np.power(hcr * tv[ind], 2) + 1.0)
 		### crown radii at height zx
 		rz = np.sqrt(hcr * hcr - zx * zx) * rcr / hcr
 		### top of crown above the intersection point
@@ -322,7 +324,8 @@ def crosscutting_ellipsoid(zk, xza, hc, hcr, rcr):
 		z0 = np.zeros(number)
 		ind = (tgthx > eps) * ind0
 		if np.sum(ind):
-			z0[ind] = hcr / np.sqrt(rcr / np.power(hcr * tgthx[ind], 2) + 1.0)
+			# Silhouette tangent height; see oblique_ellipsoid (a^2 = rcr*rcr).
+			z0[ind] = hcr / np.sqrt(rcr * rcr / np.power(hcr * tgthx[ind], 2) + 1.0)
 		### crown radii at height zx
 		rz = np.zeros(number)
 		rz[ind0] = np.sqrt(hcr * hcr - zx[ind0] * zx[ind0]) * rcr / hcr

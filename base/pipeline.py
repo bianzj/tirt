@@ -27,10 +27,13 @@ def run_node(settings, meteo, node, year, doy, latitude, longitude, dem=0.0, slo
     global_vza, global_vaa = float(vza), float(vaa)
     sunlit_surface = True
     if settings.get("surface_model") == "terrain":
-        if int(settings.get("terrain_type", 1)) == 1:
+        if int(settings.get("terrain_type", 2)) == 1:
             slope = float(settings.get("terrain_slope", settings.get("slope", slope)))
             aspect = float(settings.get("terrain_aspect", settings.get("aspect", aspect)))
-            sza, saa, sunlit_surface = slope_direction(global_sza, global_saa, slope, aspect)
+            sza, saa, facing_sun = slope_direction(global_sza, global_saa, slope, aspect)
+            # slope1 folds zenith > 90 back into the local hemisphere: a slope facing a
+            # sun below the horizon is not lit.
+            sunlit_surface = facing_sun and global_sza < 90.0
             vza, vaa, _ = slope_direction(global_vza, global_vaa, slope, aspect)
         else:
             slope = 0.0
@@ -67,7 +70,9 @@ def run_node(settings, meteo, node, year, doy, latitude, longitude, dem=0.0, slo
         "depth_profile_wall_sunlit": wall_profile[:], "depth_profile_wall_shaded": wall_profile[:],
         "depth_profile_street_sunlit": [soil_initial], "depth_profile_street_shaded": [soil_initial],
         "cs": settings.get("ca", 380.0), "ci": settings.get("ca", 380.0),
-        "es": settings.get("ea", meteo["vapor_pressure"]),
+        # Stomatal humidity follows the hourly meteorology, like evapotranspiration;
+        # the static ``ea`` setting is only a fallback for records without vapour pressure.
+        "es": _ambient_vapour_pressure(settings, meteo),
     }
     if initial_state:
         for key in ("Tss", "Tsh", "Tls", "Tlh", "Troof_sunlit", "Troof_shaded", "Twall_sunlit", "Twall_shaded", "L", "dt_seconds", "thermal_history_dt_seconds", "scene_sensible_heat_W_m2",
@@ -273,6 +278,16 @@ def run_node(settings, meteo, node, year, doy, latitude, longitude, dem=0.0, slo
                 state[f"LW_input_{component}_{suffix}"] = longwave
                 state[f"radiation_input_{component}_{suffix}"] = direct + diffuse + longwave
     return FluxStructure.from_mapping(state)
+
+
+def _ambient_vapour_pressure(settings, meteo):
+    """Air vapour pressure [hPa] for the stomatal model at this time step."""
+    value = meteo.get("vapor_pressure") if hasattr(meteo, "get") else meteo["vapor_pressure"]
+    if value is not None:
+        value = float(value)
+        if math.isfinite(value):
+            return value
+    return float(settings.get("ea", 15.0))
 
 
 def _stability_tolerance(target, buoyancy_scale, ustar):

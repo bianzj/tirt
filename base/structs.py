@@ -18,19 +18,27 @@ def _numbers(values: Mapping[str, Any], key: str) -> tuple[float, ...]:
 
 
 def _time_numbers(values: Mapping[str, Any], key: str) -> tuple[float, ...]:
-    """Read numeric times while allowing wildcard hour syntax such as *.5."""
+    """Read absolute day-of-year times; every item must be a finite number.
+
+    Wildcards such as ``*.5`` are not supported: use observation_time_mode=hour with
+    observation_hours for clock hours repeated every day.
+    """
     value = values.get(key, "")
     if value in (None, ""):
         return ()
     numbers = []
     for item in str(value).replace(";", ",").split(","):
         item = item.strip()
-        if not item or "*" in item:
+        if not item:
             continue
         try:
-            numbers.append(float(item))
+            number = float(item)
         except ValueError:
-            continue
+            number = float("nan")
+        if number != number or number in (float("inf"), float("-inf")):
+            hint = " (wildcards are not supported; use observation_time_mode=hour with observation_hours)" if "*" in item else ""
+            raise ValueError(f"{key} must contain day-of-year times separated by ';'; invalid item {item!r}{hint}")
+        numbers.append(number)
     return tuple(numbers)
 
 
@@ -109,7 +117,7 @@ class InputStructure:
 
     surface_model: str = "plane"
     vegetation_model: str = "hom"
-    terrain_type: int = 1
+    terrain_type: int = 2
     terrain_slope: float = 0.0
     terrain_aspect: float = 0.0
     terrain_radius: float = 10.0
@@ -168,7 +176,7 @@ class InputStructure:
     crown_rad_a: float = 3.0
     crown_rad_b: float = 3.0
     crown_height: float = 3.0
-    crown_density: float = 1.0
+    crown_density: float = 0.02
     building_density: float = 0.0015
     building_length: float = 10.0
     building_width: float = 10.0
@@ -216,7 +224,7 @@ class InputStructure:
         return cls(
             surface_model=model,
             vegetation_model=vegetation,
-            terrain_type=1 if str(config.get("surface_model", "")).strip().lower() == "slope" else int(float(config.get("terrain_type", 1))),
+            terrain_type=1 if str(config.get("surface_model", "")).strip().lower() == "slope" else int(float(config.get("terrain_type", 2))),
             terrain_slope=_number(config, "terrain_slope"),
             terrain_aspect=_number(config, "terrain_aspect"),
             terrain_radius=_number(config, "terrain_radius", 10.0),
@@ -276,7 +284,7 @@ class InputStructure:
             crown_rad_a=_number(config, "crown_rad_a", 3.0),
             crown_rad_b=_number(config, "crown_rad_b", 3.0),
             crown_height=_number(config, "crown_height", 3.0),
-            crown_density=_number(config, "crown_density", 1.0),
+            crown_density=_number(config, "crown_density", 0.02),
             building_density=_number(config, "building_density", 0.0015),
             building_length=_number(config, "building_length", 10.0),
             building_width=_number(config, "building_width", 10.0),
@@ -349,7 +357,7 @@ class DefinedStructure(MappingStruct):
             "urban_spectrum": ("urban_spectrum_source", "urban_spectrum_file", "urban_reflectance_roof_spectrum", "urban_reflectance_wall_spectrum", "urban_reflectance_street_spectrum", "urban_emissivity_roof_spectrum", "urban_emissivity_wall_spectrum", "urban_emissivity_street_spectrum"),
             "run": ("soil_heat_method", "urban_heat_method", "soil_temperature_method", "urban_temperature_method", "soil_heat_fraction", "urban_heat_fraction", "temperature_method"),
             "aerodynamic": ("aero_zo", "aero_d", "aero_rbc", "aero_cr", "aero_cd", "aero_cd1", "aero_psicor", "aero_cssoil", "aero_rwc", "aero_rbs"),
-            "atmosphere": ("z", "ea", "ca", "oa", "shortwave_diffuse_fraction"),
+            "atmosphere": ("z", "ea", "ca", "oa", "shortwave_diffuse_fraction", "sky_temperature_k"),
             "spectra": ("wavelengths", "fesun", "fesky", "leaf_reflectance_spectrum", "leaf_transmittance_spectrum", "soil_reflectance_spectrum"),
         }
         return cls(data, **{name: {key: data[key] for key in keys if key in data} for name, keys in groups.items()})

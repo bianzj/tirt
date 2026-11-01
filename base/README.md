@@ -5,7 +5,7 @@
 ## 模块分层
 
 - `hom.py`、`row.py`、`crown.py`：均质植被、垄行和离散树冠模型。
-- `slope_veg.py`、`terrain*.py`、`urban*.py`：坡面、复杂地形和城市场景（地形植被由 `terrain_forest.py` 计算）。
+- `slope_veg.py`、`terrain*.py`、`dem.py`、`urban*.py`：坡面、复杂地形、DEM 多山脊面元集合和城市场景（地形植被由 `terrain_forest.py` 计算）。
 - `gap.py`、`path.py`、`hotspot.py`、`proportion.py`、`scatter.py`：几何路径、间隙、热点、方向比例和散射计算。
 - `radiance.py`、`radiation.py`、`rt_transfer.py`：辐射、亮温和辐射传输公共逻辑。
 - `aerodynamic.py`、`biochemical.py`、`evapo.py`、`eb.py`：TIRTEB 的阻抗、蒸散和能量平衡。

@@ -17,7 +17,7 @@ def _surface(settings):
     if surface == "urban" or int(settings.get("surface_type", -1)) == 13:
         return "urban"
     if surface in ("terrain", "slope"):
-        return "slope" if int(settings.get("terrain_type", 1)) == 1 or surface == "slope" else "terrain"
+        return "slope" if int(settings.get("terrain_type", 2)) == 1 or surface == "slope" else "terrain"
     return "plane"
 
 
@@ -48,8 +48,15 @@ def tirt_config(settings, state):
         "hapke_enable": settings.get("hapke_enable", 0), "hapke_k": settings.get("hapke_K", 1.0),
         "canopy_closure": "standard",
     }
-    if settings.get("sky_temperature_k") not in (None, ""):
-        config["sky_temperature_k"] = settings["sky_temperature_k"]
+    sky = settings.get("sky_temperature_k")
+    if str(sky).strip().lower() == "auto":
+        # Equivalent sky temperature from the measured broadband downwelling longwave
+        # of this time step. Exact for an overcast (grey) sky; for a clear sky it
+        # overestimates the 8-14 um window sky radiance.
+        down = float(state.get("longwave_down", float("nan")))
+        sky = (down / 5.67e-8) ** 0.25 if np.isfinite(down) and down > 0.0 else None
+    if sky not in (None, ""):
+        config["sky_temperature_k"] = float(sky)
 
     sunlit = bool(state.get("sunlit_surface", True)) and float(state.get("sza_global", state["sza"])) < 90.0
 

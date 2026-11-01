@@ -63,7 +63,7 @@ def farquhar_resistance(settings, meteo, state, netrad):
     tref = 25.0 + 273.15
     p = float(meteo["pressure"])
     cs0 = float(state.get("cs", settings.get("ca", 380.0)))
-    eb = float(state.get("es", settings.get("ea", meteo["vapor_pressure"])))
+    eb = float(state.get("es", meteo["vapor_pressure"]))
     oxygen = float(settings.get("oa", 209.0))
     effcon = 1.0 / 6.0 if leaf_type >= 3.5 else 1.0 / 5.0
     g0 = max(float(settings.get("stomatal_g0", 0.01)), 1.0e-5)
@@ -104,7 +104,9 @@ def farquhar_resistance(settings, meteo, state, netrad):
         je = 0.5 * po0 * q
         gamma = 0.5 * o / specificity
         rh = min(1.0, eb / saturation_vapor_pressure(tc - 273.15))
-        ci = max(min_ci * cs, cs * (1.0 - 1.6 / (ballberry * rh)))
+        # Ball-Berry ci/cs = 1 - 1.6/(m rh) is undefined for rh = 0 or m = 0: closed stomata (ci floor).
+        denominator = ballberry * max(rh, 0.0)
+        ci = max(min_ci * cs, cs * (1.0 - 1.6 / denominator)) if denominator > 1.0e-9 else min_ci * cs
         if leaf_type < 3.5:
             vs = vs_c3
             vc = vcmax * (ci - gamma) / (mm + ci)

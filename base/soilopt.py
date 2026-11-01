@@ -10,6 +10,8 @@ BSM_WATER_CAPACITY = 0.25
 #: BSM residual (dry) and maximum (saturated) soil water, in m3 m-3.
 BSM_WATER_RESIDUAL = 0.05
 BSM_WATER_MAX = 0.55
+#: SCOPE soilwat sums Poisson film counts k = 0..6.
+BSM_FILM_LAYERS = 6
 
 
 def volumetric_water(value):
@@ -54,7 +56,6 @@ def bsm(coeff, soil_optical, soil_moisture):
         gsv1, gsv2, gsv3 = row[14], row[15], row[16]
         kw, nw = row[5], row[17]
         rdry = gsv1 * f1 + gsv2 * f2 + gsv3 * f3
-        tw = math.exp(-kw * film)
         tav90_nw = calctav(90.0, nw)
         # SCOPE: rbac = 1 - (1-rdry) * (rdry * tav(90, 2/nw) / tav(90, 2) + 1-rdry)
         rbac = 1.0 - (1.0 - rdry) * (
@@ -62,11 +63,25 @@ def bsm(coeff, soil_optical, soil_moisture):
         p = 1.0 - tav90_nw / (nw * nw)
         # SCOPE: Rw = 1 - tav(40, nw); calctav returns transmittance, not reflectance.
         rw = 1.0 - calctav(40.0, nw)
-        radd = (1.0 - rw) * (1.0 - p) * rbac / (1.0 - p * rbac)
-        fdry = math.exp(-mu)
-        fmul = (math.exp(tw * mu) - 1.0) * fdry
-        reflectance.append(rdry * fdry + rw * (1.0 - fdry) + radd * fmul)
+        reflectance.append(_soilwat(rdry, rw, p, rbac, kw, film, mu))
     return reflectance
+
+
+def _soilwat(rdry, rw, p, rbac, kw, film, mu):
+    """SCOPE BSM soilwat: Poisson mixture of k = 0..6 water films.
+
+    tw = exp(-2 kw deleff k) carries the two-way path through each film and
+    appears in both numerator and denominator of Rwet_k, as in SCOPE.
+    """
+    if mu <= 0.0:
+        return rdry
+    total = rdry * math.exp(-mu)
+    for k in range(1, BSM_FILM_LAYERS + 1):
+        weight = math.exp(-mu + k * math.log(mu) - math.lgamma(k + 1))
+        tw = math.exp(-2.0 * kw * film * k)
+        wet = rw + (1.0 - rw) * (1.0 - p) * tw * rbac / (1.0 - p * tw * rbac)
+        total += weight * wet
+    return total
 
 
 def soil_emissivity(reflectance):

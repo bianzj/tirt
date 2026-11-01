@@ -57,6 +57,7 @@ LAI 输入支持单个值或分号分隔的列表（如 `1;3;5`）。多 LAI 时
 - 离散树冠
 - 坡面植被
 - 复杂地形
+- DEM 多山脊/沙丘
 - 城市建筑
 - 城市建筑与街道植被耦合场景
 
@@ -111,7 +112,7 @@ CSV 输入返回 `output.csv` 路径，不绘图；`output_dir`、`plots`、`sho
 python thermal_run.py --input input.csv --output cases/row_demo/output.csv --model row
 ```
 
-统一入口支持植被与地表的组合模型：`plane`、`slope`、`terrain`、`urban` 地表可分别组合 `bare`、`hom`、`row`、`crown` 植被。新案例参数放在 JSON；原 `input.csv` 和 CSV 输出接口保持兼容。
+统一入口支持植被与地表的组合模型：`plane`、`slope`、`terrain`、`dem`、`urban` 地表可分别组合 `bare`、`hom`、`row`、`crown` 植被（`dem` 当前只用于方向性 TiRT）。新案例参数放在 JSON；原 `input.csv` 和 CSV 输出接口保持兼容。
 
 能量平衡时间序列：
 
@@ -134,13 +135,14 @@ python tirteb_run.py --input input_tirteb.csv --output cases/my_case/output.csv
 
 输入分组采用 `section,key,value,description` 格式：
 
-- `[surface]`：`surface_model` 选择平面、单一坡、复合地形或城区地表，`vegetation_model` 选择裸地、均质植被、垄行或森林。
+- `[surface]`：`surface_model` 选择平面、单一坡、复合地形、DEM 多山脊或城区地表，`vegetation_model` 选择裸地、均质植被、垄行或森林。
 - `[vegetation_structure]`、`[row_structure]`、`[crown_structure]`：分别配置 LAI、热点、垄行和树冠结构。
 - `[slope]`：配置单一坡的坡度和坡向；`[terrain]` 配置复合地形层，可用分号提供多个高度、半径和密度参数。
+- `[dem]`：`surface_model=dem`（别名 `ridge`）读取 ESRI ASCII 网格，按逐像元坡面/坡向和投影阴影调用单坡模型，再按投影面积合成方向辐亮度和 BRF；`dem_file`、`dem_slope_bin`、`dem_aspect_bin`、`dem_shadow` 控制该面元集合。当前仅用于方向性 TiRT，TIRTEB 仍用 `terrain` 的共享温度。
 - `[optical]`：`optical_terrain_method` 仅在 `canopy_closure=legacy` 时控制复合地形森林的光学算法，默认 `reciprocal_exchange`（项目内的 4 状态互易闭合，不是外部命名模型），可改为 `facet_exchange`（显式面元辐射度，慢速参照）；`standard`/`upgrade` 使用标准复合地形闭合。热红外 `forest_transport=reciprocal_exchange` 同样要求 `canopy_closure=legacy`。
 - `[spectral]`：光学和热红外共用一张波段参数表，按行依次为 `wavelengths`（波段，µm）、`leaf_reflectance`（叶片反射率）、`leaf_transmittance`（叶片透过率）、`soil_reflectance`（土壤反射率）、`street_reflectance`（街道反射率）、`wall_reflectance`（墙壁反射率）、`roof_reflectance`（屋顶反射率），每行用分号给出每个波段一个值。小于 2.5 µm 的波段直接用这些反射率/透过率计算 BRF；大于等于 2.5 µm 的波段按基尔霍夫定律换算发射率：叶片 `ε = 1 − ρ − τ`，土壤（含复合地形山体）、街道、墙壁、屋顶 `ε = 1 − ρ`。输出 CSV 的 `emissivity_*` 列即换算结果，可直接核对。`spectral_source=file` 时从 `spectrals_file`（默认 [optical_properties.txt](data/spectrals/optical_properties.txt)）读取同样 7 行的表，每行前面可以带文字标签。场景用不到的行可以留空（例如非城市场景的街道/墙壁/屋顶）。
 - `[soil_anisotropy]`：选择 `bare` 时，`hapke_enable=1` 启用 Hapke/Thapke 土壤方向性修正（以该波段土壤发射率为半球发射率），`hapke_K` 控制各向异性强度。
-- `[thermal]`：配置土壤、叶片、地形、屋顶、墙壁和街道的日照/阴影温度。`sky_temperature_k` 可选：留空时输出仅含发射（黑天空，与验证一致）；填写天空等效亮温后，按 `(1 − 有效发射率) × B(T_sky)` 加入天空下行辐射的反射。
+- `[thermal]`：配置土壤、叶片、地形、屋顶、墙壁和街道的日照/阴影温度。`sky_temperature_k` 默认 250 K（典型晴空 8–14 µm 等效亮温），按 `(1 − 有效发射率) × B(T_sky)` 加入天空下行辐射的反射；设为 `none`/`black`/`0` 回到仅发射的黑天空（HiSTREAM 验证口径）。
 - `[row_structure]`、`[crown_structure]` 中的 `thermal_row_geometry`、`thermal_crown_geometry`、`forest_transport` 默认即参数化标准（`parametric`、`parametric`、`legacy`），一般无需修改；树冠参数化需要冠底高度 `crown_height`。`crown_rad_a` 为水平半径、`crown_rad_b` 为垂直半轴；树冠的 `hspot` 取叶片大小 / 树冠高度。
 - `[geometry]`：通过 `geometry_mode` 选择观测角度来源：`0` 为 `vza/vaa` 给定角度，`1` 自动生成主平面，`2` 从 TXT 文件读取，`3` 以一个天顶角步长同时生成太阳主平面和垂直太阳主平面，并追加文件或手动的一一对应观测角度。
 
@@ -238,6 +240,7 @@ tirt/
 │   ├── scatter.py          # VNIR/TIR 散射
 │   ├── hom/row/crown*.py  # 均质、垄行、树冠及体素模型
 │   ├── terrain*.py         # 坡面、复合地形及地形植被模型
+│   ├── dem.py              # DEM 多山脊面元集合（surface_model=dem）
 │   ├── urban*.py           # 城市建筑及城市植被模型
 │   ├── inputio.py          # TiRT 与 TIRTEB 共用的参数解析
 │   ├── radiation.py        # 统一辐射准备、合并和诊断

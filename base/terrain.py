@@ -1,5 +1,6 @@
 import numpy as np
 from .physicsF import *
+from .terrain_exchange import _self_lit_fraction, _unit
 
 ###----------------------------------
 ### 这里考虑了山地本身，相互遮挡
@@ -187,9 +188,14 @@ class Terrain:
             gapvs_mount = np.exp(-projvs)
 
             slope = alpha1 * 180 / np.pi
-            # Sunlit share of the visible cone surface is the joint visibility of the view and
-            # sun rays, exp(-(projs - projv)); the same rule applies at every solar elevation.
+            # Sunlit share of the visible cone surface: joint visibility of the view and
+            # sun rays exp(-(projs - projv)) (mutual shadowing by other cones) times the
+            # share of the visible cone side whose facets face the sun (self-shadowing),
+            # as in TerrainForest. Side slope of the cone is pi/2 - alpha1.
             joint = np.exp(-(projvs - projv)) if projv > 0.0 else 1.0
+            joint = joint * _self_lit_fraction(
+                np.pi / 2.0 - alpha1, _unit(np.asarray(vza * rd), np.asarray(vaa * rd)),
+                _unit(np.asarray(sza * rd), np.asarray(saa * rd)))
             if L1_v <= radius1:
                 visible = density1 * gapv_mount * ((np.pi) * radius1 * radius1)
                 pMountV = pMountV + visible
@@ -203,7 +209,7 @@ class Terrain:
 
 
 
-        pMountV_sunlit_fraction = pMountV_sunlit/pMountV
+        pMountV_sunlit_fraction = (pMountV_sunlit / pMountV) if pMountV > 0.0 else 0.0
         pMountV = 1 - pPlaneV
         pMountV_sunlit = pMountV * pMountV_sunlit_fraction
         pMountV_shaded = pMountV - pMountV_sunlit

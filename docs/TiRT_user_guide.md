@@ -50,6 +50,7 @@ GUI 由三部分组成：
 - `Plane`：平面地表。
 - `Slope`：单坡地表。
 - `Terrain`：复合地形。
+- `DEM`：DEM 多山脊面元集合（`surface_model=dem`，需要在输入中给 `dem_file`；当前为方向性入口）。
 - `Urban`：城市建筑与街道。
 
 ### 3.2 Vegetation type

@@ -19,6 +19,7 @@ KNOWN_KEYS = frozenset((
     "surface_model", "surface", "vegetation_model", "vegetation",
     "slope_angle", "terrain_slope", "slope_aspect", "terrain_aspect",
     "terrain_radius", "terrain_height", "terrain_density", "terrain_type", "surface_type", "distribution",
+    "dem_file", "dem_slope_bin", "dem_aspect_bin", "dem_shadow",
     "building_density", "building_length", "building_width", "building_height", "building_azimuth",
     "urban_transport",
     "lai", "vegetation_lai", "hspot", "vegetation_hspot", "canopy_closure",
@@ -49,6 +50,26 @@ KNOWN_KEYS = frozenset((
 ))
 
 
+def _looks_number(text):
+    try:
+        float(str(text).strip())
+        return True
+    except ValueError:
+        return False
+
+
+def warn_split_value(path, line, cells):
+    """Warn when an unquoted ',' list spilled into the description column.
+
+    ``vza,0,30,60`` is read as value 0 with "30" as description; values must use ';'.
+    """
+    if len(cells) >= 4 and _looks_number(cells[2]) and _looks_number(cells[3]):
+        warnings.warn(
+            f"{path}:{line}: parameter '{cells[1]}' value looks split by ','; only "
+            f"'{cells[2]}' is used. Separate list items with ';' (e.g. "
+            f"{';'.join(c for c in cells[2:] if _looks_number(c))})")
+
+
 def read_input(input_path):
     """Read grouped input.csv into flat and scoped keys."""
     config = {"_input_path": str(Path(input_path).resolve())}
@@ -67,6 +88,7 @@ def read_input(input_path):
                     continue
                 if not cells[1]:
                     continue
+                warn_split_value(input_path, reader.line_num, cells)
                 section, key, value = cells[0].lower(), cells[1].lower(), cells[2]
                 if section != "effective" and key not in KNOWN_KEYS:
                     warnings.warn(f"{input_path}:{reader.line_num}: unknown parameter '{cells[1]}' is ignored")

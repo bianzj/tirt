@@ -14,7 +14,7 @@ def relative_azimuth(saa, vaa):
     return np.minimum(difference, 360.0 - difference)
 
 
-def _vegetation_proportions(settings, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
+def _vegetation_proportions(settings, sza, saa, vza=0.0, vaa=0.0, sunlit=True, row_azimuth=None):
     lai = max(float(settings["lai"]), 0.0)
     if lai <= 0.0:
         # Bare ground still has to honour the illumination state: a shaded facet is not sunlit soil.
@@ -38,7 +38,7 @@ def _vegetation_proportions(settings, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
             vaa_,
             sza_,
             saa_,
-            np.asarray([settings["row_azimuth"]]),
+            np.asarray([settings["row_azimuth"] if row_azimuth is None else row_azimuth]),
         )
     else:
         values = proportion_bidirectional_hom_one(lai, settings["hspot"], vza_, sza_, vsa_)
@@ -51,7 +51,7 @@ def _vegetation_proportions(settings, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
 def _component_proportions(settings, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
     if (
         settings.get("surface_model") == "terrain"
-        and int(settings.get("terrain_type", 1)) == 2
+        and int(settings.get("terrain_type", 2)) == 2
     ):
         return compound_terrain_proportions(
             settings,
@@ -59,13 +59,14 @@ def _component_proportions(settings, sza, saa, vza=0.0, vaa=0.0, sunlit=True):
             saa,
             vza,
             vaa,
-            lambda local_sza, local_saa, local_vza, local_vaa, local_sunlit: _vegetation_proportions(
+            lambda local_sza, local_saa, local_vza, local_vaa, local_sunlit, local_row_azimuth=None: _vegetation_proportions(
                 settings,
                 local_sza,
                 local_saa,
                 local_vza,
                 local_vaa,
                 local_sunlit,
+                local_row_azimuth,
             ),
             sunlit,
         )
@@ -99,17 +100,17 @@ def directional_reflectance(
     from . import canopy_closure
     bare_terrain = (canopy_closure.closure(settings) != 'legacy' and not use_hapke
                     and settings.get('surface_model','plane') == 'terrain'
-                    and int(settings.get('terrain_type', 1)) == 2
+                    and int(settings.get('terrain_type', 2)) == 2
                     and not is_crown and float(settings.get('lai',0)) <= 0.0)
     if (canopy_closure.closure(settings) != 'legacy' and settings.get('surface_model','plane') == 'terrain'
-            and int(settings.get('terrain_type', 1)) == 2 and not use_hapke and model in ('hom','row','raw')
+            and int(settings.get('terrain_type', 2)) == 2 and not use_hapke and model in ('hom','row','raw')
             and float(settings.get('lai',0)) > 0):
         from .optical_terrain_standard import reflectance
         return reflectance(dict(settings, vegetation_model='row' if model in ('row','raw') else 'hom'),
                            float(sza),float(saa),float(vza),float(vaa),
                            float(leaf_rho),float(leaf_tau),float(soil_rho),diffuse_fraction,sunlit)
     if (is_crown and settings.get('surface_model','plane') == 'terrain'
-            and int(settings.get('terrain_type', 1)) == 2 and not use_hapke):
+            and int(settings.get('terrain_type', 2)) == 2 and not use_hapke):
         method = settings.get('optical_terrain_method', 'facet_exchange')
         common=settings.get('forest_transport')
         if common not in (None,'legacy','reciprocal_exchange'):
@@ -142,7 +143,7 @@ def directional_reflectance(
                    and settings.get('surface_type',0) not in (1,2,3,4,5,12,14)
                    and settings.get('distribution',0) != 2
                    and not (settings.get('surface_model') == 'terrain'
-                            and int(settings.get('terrain_type',1)) == 2))
+                            and int(settings.get('terrain_type', 2)) == 2))
     if bare_terrain:
         # Bare compound terrain: the terrain already supplies the sunlit/shaded soil fractions,
         # so the Lambertian soil reflects the beam only where the surface is both seen and lit.
@@ -215,7 +216,8 @@ def _requested_shortwave_diffuse_fraction(settings, global_shortwave, sza):
     if 0.0 <= configured <= 1.0:
         return configured
     cos_sza = max(math.cos(math.radians(float(sza))), 1.0e-6)
-    extraterrestrial_horizontal = SOLAR_CONSTANT * cos_sza
+    # Same top-of-atmosphere reference (with the orbital factor) as clearness_index.
+    extraterrestrial_horizontal = SOLAR_CONSTANT * _orbital_factor(settings) * cos_sza
     clearness = min(max(float(global_shortwave) / extraterrestrial_horizontal, 0.0), 1.2)
     if clearness <= 0.22:
         diffuse_fraction = 1.0 - 0.09 * clearness

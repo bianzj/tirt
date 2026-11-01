@@ -12,7 +12,7 @@ import threading
 import zipfile
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 
 def _project_root() -> Path:
@@ -30,12 +30,29 @@ from base.inputio import read_input  # noqa: E402
 from base.version import __version__  # noqa: E402
 from gui.tirteb_server import _check_paths, _time_request, _json_safe  # noqa: E402
 
+MAX_BODY_BYTES = 20 * 1024 * 1024
+MAX_LAI_VALUES = 50
+_RESERVED_RUN_ARGS = {"input_path", "output_path", "report", "model"}
+# Only front-end assets are served; Python sources, caches and docs are not.
+STATIC_SUFFIXES = {".html", ".js", ".mjs", ".css", ".svg", ".png", ".jpg", ".jpeg",
+                   ".gif", ".ico", ".webp", ".woff", ".woff2", ".ttf", ".json", ".map"}
+# One simulation at a time: runs are CPU bound and share temporary files/state.
+_RUN_SLOT = threading.BoundedSemaphore(1)
+BUSY_MESSAGE = "TiRT is already running another simulation; wait for it to finish and try again."
+
 
 def _prepare_overrides(payload: dict, work_dir: Path) -> dict:
     raw_overrides = payload.get("overrides", {})
     if not isinstance(raw_overrides, dict):
         raise ValueError("overrides must be an object")
-    overrides = {str(key): value for key, value in raw_overrides.items()}
+    overrides = {}
+    for key, value in raw_overrides.items():
+        name = str(key).strip().lower()
+        if name in _RESERVED_RUN_ARGS:
+            raise ValueError(f"Parameter {key!r} is not allowed")
+        if name in overrides:
+            raise ValueError(f"Duplicate parameter after normalisation: {key!r}")
+        overrides[name] = value
     geometry_text = payload.get("geometry_text")
     if geometry_text:
         if not isinstance(geometry_text, str):
@@ -113,9 +130,24 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def end_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
         if not self.path.startswith("/api/"):
             self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
         super().end_headers()
+
+    def list_directory(self, path):
+        """Directory listings would expose the GUI folder contents."""
+        self.send_error(404, "Not found")
+        return None
+
+    def _static_allowed(self, url_path: str) -> bool:
+        """Serve only front-end assets below gui/ (no .py, .pyc, __pycache__, dot files)."""
+        parts = [part for part in url_path.split("/") if part]
+        if any(part.startswith(".") or part == "__pycache__" for part in parts):
+            return False
+        if not parts:
+            return True  # "/" -> index.html
+        return Path(parts[-1]).suffix.lower() in STATIC_SUFFIXES
 
     def _trusted_request(self) -> bool:
         """Block DNS rebinding and cross-site requests to the local API."""
@@ -137,9 +169,21 @@ class Handler(SimpleHTTPRequestHandler):
             self._json(200, dict(info, version=__version__, frozen=bool(getattr(sys, 'frozen', False))))
             return
         if urlparse(self.path).path == "/api/health":
-            self._json(200, {"ok": True, "project": str(PROJECT_ROOT), "engine": "tirt", "version": __version__})
+            self._json(200, {"ok": True, "engine": "tirt", "version": __version__})
+            return
+        if urlparse(self.path).path.startswith("/api/"):
+            self._json(404, {"ok": False, "error": "Not found"})
+            return
+        if not self._static_allowed(unquote(urlparse(self.path).path)):
+            self.send_error(404, "Not found")
             return
         super().do_GET()
+
+    def do_HEAD(self):  # noqa: N802
+        if not self._static_allowed(unquote(urlparse(self.path).path)) or self.path.startswith("/api/"):
+            self.send_error(404, "Not found")
+            return
+        super().do_HEAD()
 
     def do_POST(self):  # noqa: N802
         path = urlparse(self.path).path
@@ -153,9 +197,27 @@ class Handler(SimpleHTTPRequestHandler):
         if path not in {"/api/run", "/api/export", "/api/run_time"}:
             self._json(404, {"error": "Not found"})
             return
+        if not _RUN_SLOT.acquire(blocking=False):
+            # Drain the body so the client receives the 429 instead of a reset connection.
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if 0 < length <= MAX_BODY_BYTES:
+                    self.rfile.read(length)
+            except (ValueError, OSError):
+                pass
+            self._json(429, {"ok": False, "busy": True, "error": BUSY_MESSAGE})
+            return
+        try:
+            self._run_request(path)
+        finally:
+            _RUN_SLOT.release()
+
+    def _run_request(self, path: str) -> None:
         work_dir = None
         try:
             length = int(self.headers.get("Content-Length", "0"))
+            if not 0 <= length <= MAX_BODY_BYTES:
+                raise ValueError(f"Request body must be 0..{MAX_BODY_BYTES} bytes")
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
             if not isinstance(payload, dict):
                 raise ValueError("Request body must be an object")
@@ -178,6 +240,8 @@ class Handler(SimpleHTTPRequestHandler):
             lai_values = [float(item) for item in lai_text.replace(",", ";").split(";") if item.strip()]
             if not lai_values:
                 raise ValueError("LAI must contain at least one positive number")
+            if len(lai_values) > MAX_LAI_VALUES:
+                raise ValueError(f"At most {MAX_LAI_VALUES} LAI values per request")
             if any(not 0 <= item <= 20 for item in lai_values):
                 raise ValueError("LAI values must be in 0..20")
             rows = []

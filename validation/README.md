@@ -36,6 +36,10 @@ python validation/validate_current_model.py --allow-model-changes --output valid
 python validation/compare_tirt_tirteb.py --full
 ```
 
+## 多山脊 DEM 对 HiSTREAM
+
+`ridge_20261029/` 用 StreamStudio 的横向沙丘 DEM（201×201，100.5 m × 100.5 m，起伏 6.1 m）做多山脊对照：HiSTREAM eRaytracing 生成参考，TiRT 用 `surface_model=dem` 的逐坡面/坡向面元集合近似。10.5 µm 逐方向 RMSE 为 0.29–0.57 K，形态一致、整体偏低约 0.3–0.6 K。说明和复现命令见 [ridge_20261029/README.md](ridge_20261029/README.md)。
+
 ## 目录结构
 
 ```text
@@ -49,6 +53,7 @@ validation/
     manifest.json           # 场景清单和文件校验值
   results/                  # 每次运行产生的 CSV 和验证回执
   streamsim/                # 既有 HiSTREAM 案例与结果归档
+  ridge_20261029/           # 多山脊 DEM 对 HiSTREAM 的对照
   scope/                    # 既有 SCOPE 对比
   compare_tirt_tirteb.py    # TIRTEB 方向观测与 TiRT 的逐方向一致性检查
 ```

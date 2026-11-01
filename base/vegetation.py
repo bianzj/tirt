@@ -36,6 +36,14 @@ def vegetation_proportions(kind, lai, hspot, vza, vaa, sza, saa,
         result = np.zeros((4, vza.size))
         result[0] = 1.0
         return result
+    # A negative view zenith denotes the opposite side of the principal plane:
+    # mirror it to |vza| with vaa + 180 instead of silently viewing at nadir.
+    negative = vza < 0.0
+    if np.any(negative):
+        vza = np.where(negative, -vza, vza)
+        vaa = np.where(negative, (vaa + 180.0) % 360.0, vaa)
+    if np.any(sza < 0.0):
+        raise ValueError("Solar zenith angle must be nonnegative")
     # The horizon and zero-hotspot values are evaluated as one-sided limits.
     vza = np.clip(vza, 0.0, 89.999)
     sza = np.clip(sza, 0.0, 89.999)

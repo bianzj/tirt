@@ -34,14 +34,20 @@ def run_single(input_path, output_path, vza=0.0, vaa=0.0, wavelength=10.5, **ove
     with (full.parent / "observations.csv").open(encoding="utf-8") as file:
         observed = {row["time"]: row for row in csv.DictReader(file)}
     tag = tirteb_run._wavelength_tag(wavelength)
+    # Short-wave bands (or observation_quantity=reflectance) report reflectance, not a temperature.
+    quantity = tirteb_run._observation_quantity(config, wavelength)
     rows = []
     for step in steps:
         row = {key: step.get(key, "") for key in COLUMNS}
         observation = observed.get(step["time"], {})
         value = observation.get(tag, "")
         row.update(vza=vza, vaa=vaa, sza=observation.get("sza", ""), saa=observation.get("saa", ""),
-                   wavelength_um=wavelength, brightness_temperature_K=value,
-                   brightness_temperature_C=float(value) - 273.15 if value not in ("", None) else "")
+                   wavelength_um=wavelength)
+        if quantity == "temperature":
+            row.update(brightness_temperature_K=value,
+                       brightness_temperature_C=float(value) - 273.15 if value not in ("", None) else "")
+        else:
+            row.update(reflectance=value)
         rows.append(row)
     result.parent.mkdir(parents=True, exist_ok=True)
     with result.open("w", newline="", encoding="utf-8") as file:

@@ -183,7 +183,7 @@ function currentOverrides() {
     leaf_reflectance: value("leaf-reflectance"), leaf_transmittance: value("leaf-transmittance"),
     soil_reflectance: value("soil-reflectance"), street_reflectance: value("street-reflectance"),
     wall_reflectance: value("wall-reflectance"), roof_reflectance: value("roof-reflectance"),
-    cab: value("cab"), cw: value("cw"), cdm: value("cdm"), cs: value("cs"), n: value("leaf-n"),
+    cab: value("cab"), cw: value("cw"), cdm: value("cdm"), cs: value("cs"), n: value("leaf-n"), cca: value("cca"),
     bsm_brightness: value("soil-brightness"), bsm_latitude: value("soil-latitude"), bsm_longitude: value("soil-longitude"),
     vcmax: value("vcmax"), ballberry_m: value("ballberry-m"), leaf_type: value("leaf-type"), stomatal_method: value("stomatal-method"), stomatal_g0: value("stomatal-g0"),
     rdparam: value("rdparam"), tyear: value("tyear"), beta: value("beta"), knpqs: value("knpqs"), qls: value("qls"), kv: value("kv"), stressfactor: value("stressfactor"),

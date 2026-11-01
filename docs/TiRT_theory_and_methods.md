@@ -51,7 +51,7 @@ L_view = sum_i [ epsilon_i,eff(view, sun) * B(lambda, T_i) ]
 
 TiRT 的核心不是只做黑体温度换算，而是先由几何光学/冠层辐射传输计算每个组分在观测方向中的可见比例和日照/阴影比例，再合成为方向辐亮度。
 
-默认输出是“仅发射”的离地辐亮度，即黑天空条件，与 HiSTREAM 验证的设置一致。若给出 `sky_temperature_k`（天空下行辐射的等效亮温），则按各向同性天空和基尔霍夫互易加入反射项：
+方向性入口默认 `sky_temperature_k=250 K`（典型晴空 8–14 µm 等效亮温），按各向同性天空和基尔霍夫互易加入反射项；设为 `none`/`black`/`0` 时回到“仅发射”的黑天空条件，与 HiSTREAM 验证一致：
 
 ```text
 L = sum_i epsilon_i,eff * B(T_i) + (1 - epsilon_eff) * B(T_sky),   epsilon_eff = sum_i epsilon_i,eff
@@ -185,6 +185,19 @@ terrain_height = 10;20;30
 terrain_radius = 5;10;15
 terrain_density = 0.001;0.0005;0.0002
 ```
+
+### 5.3.1 DEM 多山脊 `dem`
+
+`surface_model=dem`（别名 `ridge`）面向多条长条形山脊/沙丘：读取 ESRI ASCII 网格，按像元用 Horn 差分求坡度/坡向，沿太阳方位做 horizon ray march 得到投影阴影；再把坡度和坡向按 `dem_slope_bin`、`dem_aspect_bin` 分箱，对每个“日照/阴影”类调用 `surface_model=slope` 的单坡模型，最后按投影面积加权合成方向辐亮度和 BRF。
+
+```text
+dem_file = data/dem/ridges.asc
+dem_slope_bin = 2
+dem_aspect_bin = 10
+dem_shadow = 1
+```
+
+它复用单坡的冠层/光学/热红外闭合，因此 `bare`、`hom`、`row`、`crown` 都可组合；但它仍是**面元集合近似**：每个分箱使用同一个日照/阴影组分温度，没有逐面元能量平衡，也没有山脊间多次反射/cavity 交换。当前仅用于方向性 TiRT（`run.py`、`thermal_run.py`、`optical_run.py`）；TIRTEB 的共享四温度能量平衡仍使用 `terrain`。与 HiSTREAM 的横向沙丘对照见 [validation/ridge_20261029](../validation/ridge_20261029/README.md)。
 
 ### 5.4 城市 `urban`
 

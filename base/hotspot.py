@@ -114,7 +114,7 @@ def hotspot_analytical(lai, hspot, vza, sza, vsa, CIi = 1, CIv = 1, G = 0.5):
             w_upper = (1 - np.exp(- H * delta / d)) * d / (H * delta)
     else:
         ind0 = np.where(delta < 0.0001)
-        ind1 = np.where(delta > 0.0001)
+        ind1 = np.where(delta >= 0.0001)
         if np.size(ind0) > 0:
             w_upper[ind0] = 1
         if np.size(ind1) > 0:
@@ -135,7 +135,7 @@ def hotspot_analytical(lai, hspot, vza, sza, vsa, CIi = 1, CIv = 1, G = 0.5):
             w_bottom = (1 - np.exp(- H * delta / d)) * d / (H * delta)
     else:
         ind0 = np.where(delta < 0.0001)
-        ind1 = np.where(delta > 0.0001)
+        ind1 = np.where(delta >= 0.0001)
         if np.size(ind0) > 0:
             w_bottom[ind0] = 1
         if np.size(ind1) > 0:
@@ -226,7 +226,7 @@ def hotspot_numerical(lai, hspot, vza, sza, vsa, CI = 1, G = 0.5):
             fhot = lai * CI * np.sqrt(ki * kv)
             fint = (1.0 - np.exp(-alpha)) * 0.05
             sumint = 0
-            for i in range(1,20):
+            for i in range(1,21):
                 if i < 20:
                     x2 = - np.log(1.0 - i * fint) / alpha
                 else:
@@ -244,7 +244,7 @@ def hotspot_numerical(lai, hspot, vza, sza, vsa, CI = 1, G = 0.5):
         ind1 = np.where(alpha > 0.0001)
         if np.size(ind0) > 0:
             sunlit_fraction[ind0] = 1.0
-        if np.size(ind1) > 1:
+        if np.size(ind1) > 0:
             x1 = 0
             y1 = 0
             f1 = 1.0
@@ -295,7 +295,7 @@ def hotspot_layer_function(x):
     if dso < eps:
         pso = np.exp((ks + ko) * lai * (x) - np.sqrt(ko * ks) * lai * (x))
     else:
-        alf = (dso / hspot) * 2 * (ks + ko)
+        alf = (dso / hspot) * 2.0 / (ks + ko)
         pso = np.exp((ks + ko) * lai * (x) + np.sqrt(ko * ks) * lai / alf * (1 - np.exp(x * alf)))
     return pso
 
@@ -313,7 +313,7 @@ def hotspot_integrated(lai, hspot, vza, sza, raa,  G = 0.5):
     '''
     nz = 20
     xl = np.linspace(0,-1,nz)
-    dx = np.float(1.0/nz)
+    dx = float(1.0/nz)
     gapvs = np.zeros(nz)
     global lai0,G0,hspot0,sza0,vza0,raa0
     lai0 = lai*1.0
@@ -327,7 +327,7 @@ def hotspot_integrated(lai, hspot, vza, sza, raa,  G = 0.5):
         t1 = xl[j]-dx
         t2 = xl[j]
         gapvs[j] = sci.quad(hotspot_layer_function, t1, t2)[0]
-        gapvs[j] = gapvs[j]/np.float(dx)
+        gapvs[j] = gapvs[j]/float(dx)
 
     return gapvs
 

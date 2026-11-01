@@ -25,12 +25,13 @@ if ! conda env list | awk '{print $1}' | grep -qx tirt; then
 fi
 
 conda activate tirt
-echo "TiRT 正在启动: http://127.0.0.1:8765/"
-
-python gui/server.py --host 127.0.0.1 --port 8765 &
-SERVER_PID=$!
-trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
-
-sleep 1
-open "http://127.0.0.1:8765/"
-wait "$SERVER_PID"
+# launcher.py searches for a free port from 8765 and opens the browser once the server is listening.
+echo "TiRT 正在启动，浏览器会在服务就绪后自动打开；按 Ctrl+C 或关闭本窗口退出。"
+set +e
+python gui/launcher.py --host 127.0.0.1 --port 8765
+STATUS=$?
+if [ "$STATUS" -ne 0 ]; then
+    echo "TiRT 启动失败，请查看上方错误信息。"
+    read -r -p "按回车键退出..."
+fi
+exit "$STATUS"

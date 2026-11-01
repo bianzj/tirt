@@ -334,6 +334,9 @@ class TerrainForest(Terrain_Veg):
                 pMount_veg, pMount_soil = pMount_veg * rescale, pMount_soil * rescale
                 pMount_veg_sunlit, pMount_soil_sunlit = pMount_veg_sunlit * rescale, pMount_soil_sunlit * rescale
                 pMount_scat, pMount_scat_sunlit = pMount_scat * rescale, pMount_scat_sunlit * rescale
+                # Soil-scattering sums share the exp(-gap_shift) basis and must be rescaled too.
+                pMount_scat_soil = pMount_scat_soil * rescale
+                pMount_scat_soil_sunlit = pMount_scat_soil_sunlit * rescale
                 if self._collect_optical_geometry:
                     optical_slope*=rescale
                     for part in optical_parts:

@@ -1,12 +1,22 @@
 
+import warnings
+
 import numpy as np
 
 DEFAULT_WAVELENGTH = 10.5
 
 
+def _kelvin(temperatures):
+    """Legacy guess: values below 100 are taken as Celsius. Callers should pass kelvin."""
+    if np.any(temperatures < 100.0):
+        warnings.warn("planck() received temperatures below 100; treating them as Celsius. "
+                      "Pass temperatures in kelvin.", stacklevel=3)
+    return np.where(temperatures < 100.0, temperatures + 273.15, temperatures)
+
+
 def planck(wavelength, Ts=None):
     """Return spectral radiance for either ``planck(wavelength, temperature)``
-    or the legacy angle-model form ``planck(temperature)``."""
+    or the legacy angle-model form ``planck(temperature)``. Temperatures in K."""
     c1 = 11910.439340652
     c2 = 14388.291040407
     if Ts is None:
@@ -15,23 +25,27 @@ def planck(wavelength, Ts=None):
     temperatures = np.asarray(Ts, dtype=float)
     wavelengths = np.asarray(wavelength, dtype=float)
     if temperatures.ndim == 0:
-        temperature = float(temperatures)
-        if temperature < 100.0:
-            temperature += 273.15
+        temperature = float(_kelvin(temperatures))
         return c1 / (np.power(wavelengths, 5) * (np.exp(c2 / temperature / wavelengths) - 1.0)) * 10000.0
-    temperatures = temperatures.copy()
-    temperatures[temperatures < 100.0] += 273.15
+    temperatures = _kelvin(temperatures)
     return c1 / (np.power(wavelengths, 5) * (np.exp(c2 / temperatures / wavelengths) - 1.0)) * 10000.0
 
 
 def inv_planck(wavelength, rad=None):
-    """Invert Planck radiance, accepting the legacy one-argument form."""
+    """Invert Planck radiance, accepting the legacy one-argument form.
+
+    Non-positive radiance has no brightness temperature and returns NaN.
+    """
     if rad is None:
         rad = wavelength
         wavelength = DEFAULT_WAVELENGTH
     c1 = 11910.439340652 * 10000.0
     c2 = 14388.291040407
-    return c2 / (np.asarray(wavelength, dtype=float) * np.log(c1 / (np.asarray(rad, dtype=float) * np.power(np.asarray(wavelength, dtype=float), 5)) + 1.0))
+    wavelengths = np.asarray(wavelength, dtype=float)
+    radiance = np.asarray(rad, dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        result = c2 / (wavelengths * np.log(c1 / (radiance * np.power(wavelengths, 5)) + 1.0))
+    return np.where(radiance > 0.0, result, np.nan)[()]
 
 
 def leaf_inclination_distribution_function(ala):

@@ -13,6 +13,28 @@ def _overlap(tantv, tants, up):
     return num / den if abs(den) > 1.0e-12 else 0.0
 
 
+def validate_urban_shapes(shapes):
+    """Building classes (length, width, height, density, laa, waa) must be physical.
+
+    A zero-height building is skipped as an obstacle but its roof was still
+    counted, giving a negative wall fraction; the roof cover must also stay < 1.
+    """
+    shapes = np.atleast_2d(np.asarray(shapes, dtype=float))
+    if shapes.shape[1] < 4:
+        raise ValueError("Urban building shapes need length, width, height and density")
+    length, width, height, density = shapes[:, 0], shapes[:, 1], shapes[:, 2], shapes[:, 3]
+    if not np.all(np.isfinite(shapes[:, :4])):
+        raise ValueError("Urban building dimensions must be finite")
+    if np.any(length <= 0.0) or np.any(width <= 0.0) or np.any(height <= 0.0):
+        raise ValueError("Urban building length, width and height must be positive")
+    if np.any(density < 0.0):
+        raise ValueError("Urban building density must be nonnegative")
+    cover = float(np.sum(density * length * width))
+    if cover >= 1.0:
+        raise ValueError(f"Urban roof cover density*length*width = {cover:g} must be below 1")
+    return shapes
+
+
 ### version 0.1 有错误，但是能跑
 ### version 0.5 有错误，修正了一部分，也能跑，这个版本投了iGARSS
 ### version 1.0 修正了一大部分，但是不能改变建筑的方位角，或者是说所有的建筑的方位角是固定的，同时来说，这么跑会快一点
@@ -879,8 +901,8 @@ class Urban:
 
 
     def set_strcutural_input(self,shapes):
-        self.shapes = shapes
-        self.n_shape, self.n_dim = np.shape(shapes)
+        self.shapes = validate_urban_shapes(shapes)
+        self.n_shape, self.n_dim = np.shape(self.shapes)
 
     def set_structural_input(self, shapes):
         return self.set_strcutural_input(shapes)

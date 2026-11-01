@@ -30,7 +30,7 @@ _KINDS = {"homogeneous": "hom", "raw": "row", "forest": "crown", "bare_soil": "b
 
 def _slope(settings):
     """(slope, aspect) of a single-slope scene, else None."""
-    if settings.get("surface_model") == "terrain" and int(settings.get("terrain_type", 1)) == 1:
+    if settings.get("surface_model") == "terrain" and int(settings.get("terrain_type", 2)) == 1:
         return float(settings.get("terrain_slope", 0.0)), float(settings.get("terrain_aspect", 0.0))
     return None
 
@@ -62,8 +62,10 @@ def _shade(parts):
     return np.array([0.0, parts[0] + parts[1], 0.0, parts[2] + parts[3]])
 
 
-def _plane_fractions(settings, vza, vaa, sza, saa, sunlit=True):
+def _plane_fractions(settings, vza, vaa, sza, saa, sunlit=True, row_azimuth=None):
     kind, lai, hspot, shape, azimuth, base = canopy(settings)
+    if row_azimuth is not None and kind == "row":
+        azimuth = float(row_azimuth)
     if kind == "bare":
         parts = np.array([1.0, 0.0, 0.0, 0.0])
     else:
@@ -74,11 +76,12 @@ def _plane_fractions(settings, vza, vaa, sza, saa, sunlit=True):
 
 def view_fractions(settings, vza, vaa, sza, saa, sunlit=True):
     """Standard four components [soil sun, soil shade, leaf sun, leaf shade] along a view (surface frame)."""
-    if settings.get("surface_model") == "terrain" and int(settings.get("terrain_type", 1)) == 2:
+    if settings.get("surface_model") == "terrain" and int(settings.get("terrain_type", 2)) == 2:
         from .terrain_rt import compound_terrain_proportions
         return compound_terrain_proportions(
             settings, sza, saa, vza, vaa,
-            lambda s, sa, v, va, lit: _plane_fractions(settings, v, va, s, sa, lit), sunlit)
+            lambda s, sa, v, va, lit, row_azimuth=None: _plane_fractions(settings, v, va, s, sa, lit, row_azimuth),
+            sunlit)
     return _plane_fractions(settings, vza, vaa, sza, saa, sunlit)
 
 
@@ -145,7 +148,7 @@ def _empty_shortwave():
     return result
 
 
-SHORTWAVE_BIN_NM = 50
+SHORTWAVE_BIN_NM = 10
 
 
 def _spectral_groups(bin_nm=SHORTWAVE_BIN_NM):

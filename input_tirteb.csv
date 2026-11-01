@@ -9,13 +9,13 @@ case,optical_coefficients_file,data/defined/optipar_new.csv,leaf and BSM optical
 case,case_name,hom_terrain,case name
 ,,,
 [surface],,,
-surface,surface_model,terrain,plane=flat surface; terrain=sloped surface; urban=buildings and streets
+surface,surface_model,terrain,plane=flat surface; slope=single slope (terrain_slope/aspect); terrain=compound terrain (cones, same as TiRT); urban=buildings and streets
 surface,vegetation_model,hom,bare=bare soil; hom=homogeneous canopy; raw=row/ridge canopy; crown=individual crown/forest canopy
 ,,,
 [terrain],,,
-terrain,terrain_type,2,1=single slope using slope/aspect; 2=compound slope using radius/height/density
-terrain,terrain_slope,30,single-slope inclination in degrees; used when terrain_type=1
-terrain,terrain_aspect,0,single-slope aspect in degrees clockwise from north; used when terrain_type=1
+terrain,terrain_type,2,legacy alias: 2 (default) = compound terrain; 1 = single slope (prefer surface_model=slope)
+terrain,terrain_slope,30,single-slope inclination in degrees; used when surface_model=slope
+terrain,terrain_aspect,0,single-slope aspect in degrees clockwise from north; used when surface_model=slope
 terrain,terrain_radius,10,equivalent compound-slope cone base radius in m; used when terrain_type=2
 terrain,terrain_height,20,equivalent compound-slope height in m; used when terrain_type=2
 terrain,terrain_density,0.001,compound-slope cones per m2; density*pi*radius^2 must stay below 1; used when terrain_type=2
@@ -50,7 +50,8 @@ atmosphere,min_wind_speed,0.05,lower bound applied to the measured wind speed at
 ,,,
 [vegetation_structure],,,
 vegetation_structure,lai,2,leaf area index
-vegetation_structure,height,3,vegetation height m
+vegetation_structure,height,3,homogeneous canopy height m; crowns use crown_height + 2 x crown_rad_b and rows use row_height for the aerodynamic canopy top (override with aerodynamic_height)
+vegetation_structure,aerodynamic_height,,optional canopy-top height m for roughness/displacement; empty=derive from height, crown_height+2*crown_rad_b or row_height
 vegetation_structure,hspot,0.2,hotspot parameter (dimensionless) = leaf size / canopy height; for crowns use leaf size / crown height
 vegetation_structure,leaf_width,0.2,leaf width in m
 ,,,
@@ -91,6 +92,7 @@ urban_spectrum,urban_absorption_street,0.955,shortwave optical absorption; defau
 ,,,
 [prospect],,,
 prospect,cab,58,chlorophyll content
+prospect,cca,10,carotenoid content ug cm-2 (SCOPE default)
 prospect,cw,0.013,leaf water content
 prospect,cdm,0.0036,dry matter content
 prospect,cs,0,other leaf material content
@@ -126,7 +128,7 @@ soil_thermal,soil_cs,1180,soil specific heat capacity J kg-1 K-1
 soil_thermal,soil_rhos,1100,soil density
 soil_thermal,soil_lambda,1.55,soil thermal conductivity
 soil_thermal,soil_rbs,10,soil boundary resistance
-soil_thermal,soil_moisture,0.25,volumetric soil water content m3 m-3 clamped to 0.05-0.55; values above 1 are read as percent
+soil_thermal,soil_moisture,0.25,volumetric soil water content m3 m-3 clamped to 0.05-min(0.55,satwater); values above 1 are read as percent
 soil_thermal,satwater,0.45,saturated volumetric soil water content m3 m-3; values above 1 are read as percent
 soil_thermal,soil_tir_water_effect,0,0=ignore soil water effect on TIR emissivity; 1=linear dry-to-wet correction
 soil_thermal,soil_tir_emissivity_wet,0.99,wet-soil TIR emissivity
@@ -165,7 +167,8 @@ run,output_intermediate,yes,yes=write intermediate.csv; no=do not write intermed
 ,,,
 [observations],,,
 observations,observation_time_mode,time,all=every time; time=exact day-of-year times; hour=same clock hours every day
-observations,observation_times,214.5139,absolute day-of-year times for mode time
+observations,observation_times,214.5139,absolute day-of-year times for mode time; matched within half a minute; invalid items are errors
+observations,sky_temperature_k,auto,auto (default) = from measured longwave each step (L_down/sigma)^0.25; a number = fixed sky brightness temperature K; none = black sky; adds (1-emissivity) x B(T_sky) to observed radiance
 observations,observation_hours,12,mode hour: local clock hours 0-24 (decimals allowed) selected every day; e.g. 12;13.5
 observations,direction_source,file,direct=use vza/vaa lists; file=read directions_file
 observations,directions_file,data/directions/observation_directions.txt,view direction file

@@ -12,8 +12,8 @@ from .tirteb_radiation import flux_weights
 
 def horizontal_area_factor(settings):
     """Reference area per unit horizontal area: 1/cos(slope) for a single slope."""
-    if (settings.get('surface_model') in ('terrain', 'slope')
-            and int(settings.get('terrain_type', 1)) == 1):
+    terrain_type = 1 if settings.get('surface_model') == 'slope' else int(settings.get('terrain_type', 2))
+    if settings.get('surface_model') in ('terrain', 'slope') and terrain_type == 1:
         slope = float(settings.get('terrain_slope', settings.get('slope', 0.0)))
         return 1.0 / max(math.cos(math.radians(slope)), 1e-6)
     return 1.0

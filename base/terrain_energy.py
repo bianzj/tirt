@@ -90,7 +90,8 @@ def _geometry(kind, slope, aspect, height, radius, density, sza, saa):
 
 def layout(settings, global_sza, global_saa):
     """Cached immutable-by-convention geometry; arrays are never modified by callers."""
-    return _geometry(int(settings.get('terrain_type', 1)),
+    terrain_type = 1 if settings.get('surface_model') == 'slope' else int(settings.get('terrain_type', 2))
+    return _geometry(terrain_type,
                      float(settings.get('terrain_slope', settings.get('slope', 0.))),
                      float(settings.get('terrain_aspect', settings.get('aspect', 0.))),
                      max(float(settings.get('terrain_height', 20.)), 0.),

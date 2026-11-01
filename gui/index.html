@@ -53,7 +53,7 @@
         <details class="form-section accordion">
           <summary class="section-title"><span class="section-number">01</span><span>Scene structure</span><span class="accordion-mark">⌄</span></summary>
           <label>Surface mode<select id="surface-model">
-            <option value="plane">Plane</option><option value="slope">Slope</option><option value="terrain">Terrain</option><option value="urban">Urban</option>
+            <option value="plane">Plane</option><option value="slope">Slope</option><option value="terrain">Terrain</option><option value="dem">DEM / ridges</option><option value="urban">Urban</option>
           </select></label>
           <label>Vegetation type<select id="vegetation-model">
             <option value="bare">Bare soil</option><option value="hom" selected>Turbid veg</option><option value="row">Crop rows</option><option value="crown">Crown forest</option>
@@ -72,6 +72,16 @@
             </div>
             <div class="field-grid">
               <label>Terrain density<input id="terrain-density" type="number" min="0" step="0.0001" value="0.001"></label>
+            </div>
+          </div>
+          <div id="dem-structure-fields" class="conditional-fields is-hidden">
+            <div class="field-grid">
+              <label>DEM file (.asc)<input id="dem-file" type="text" placeholder="data/dem/ridges.asc"></label>
+              <label>Slope bin (°)<input id="dem-slope-bin" type="number" min="0.25" step="0.25" value="2"></label>
+            </div>
+            <div class="field-grid">
+              <label>Aspect bin (°)<input id="dem-aspect-bin" type="number" min="0.25" step="0.25" value="10"></label>
+              <label>Cast shadow<select id="dem-shadow"><option value="1" selected>On</option><option value="0">Off</option></select></label>
             </div>
           </div>
           <div id="urban-structure-fields" class="conditional-fields is-hidden">
@@ -121,6 +131,10 @@
           <div class="field-grid">
             <label>Solar zenith<input id="sza" type="number" min="0" max="90" step="0.1" value="30" required></label>
             <label>Solar azimuth<input id="saa" type="number" min="0" max="360" step="0.1" value="0" required></label>
+          </div>
+          <div class="field-grid">
+            <label>SW diffuse fraction<input id="shortwave-diffuse-fraction" type="number" min="0" max="1" step="0.01" value="0.2" title="0.2 = 80% direct + 20% diffuse (default); 0-1 allowed"></label>
+            <label>Sky temperature (K)<input id="sky-temperature-k" type="text" value="250" title="Equivalent 8-14 um sky brightness temperature; none = black sky (emission only)"></label>
           </div>
           <div class="field-grid">
             <label>Principal-plane step (°)<input id="principal-vza-step" type="number" min="0.1" step="0.1" value="10"></label>

@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 
@@ -32,7 +33,11 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo TiRT 正在启动: http://127.0.0.1:8765/
-start "TiRT" http://127.0.0.1:8765/
-python gui\server.py --host 127.0.0.1 --port 8765
-pause
+rem launcher.py searches for a free port from 8765 and opens the browser once the server is listening.
+echo TiRT 正在启动，浏览器会在服务就绪后自动打开；关闭本窗口即可退出。
+python gui\launcher.py --host 127.0.0.1 --port 8765
+if errorlevel 1 (
+    echo TiRT 启动失败，请查看上方错误信息。
+    pause
+    exit /b 1
+)
